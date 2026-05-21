@@ -1,0 +1,293 @@
+# ============================================================
+# إعدادات Crawler لمشروع دار أطلس
+# ============================================================
+# عدّل القيم هنا بدلاً من تعديل الكود
+# ============================================================
+
+# === معلومات الموقع المستهدف ===
+site:
+  start_url: "https:///"
+  domain: ""
+  # نطاقات إضافية تُعتبر "داخلية" (إن وُجدت)
+  additional_internal_domains: []
+  # مثال: ["shop.", "blog."]
+
+# === إعدادات الزحف العامة ===
+crawl:
+  # الحد الأقصى لعدد الصفحات (0 = بلا حد)
+  max_pages: 5000
+
+  # الحد الأقصى للعمق من الصفحة الرئيسية
+  max_depth: 15
+
+  # التأخير بين كل طلب (بالثواني) - مهم لعدم إرهاق السيرفر
+  delay_seconds: 0.5
+
+  # المهلة الزمنية لكل طلب (بالثواني)
+  timeout_seconds: 15
+
+  # عدد مرات إعادة المحاولة عند الفشل
+  retry_attempts: 3
+
+  # التأخير بين إعادات المحاولة (بالثواني)
+  retry_delay_seconds: 2
+
+  # احترام robots.txt
+  respect_robots: true
+
+  # ماذا نفعل إذا تعذّر تحميل robots.txt؟ allow | deny
+  # في أوضاع المنافسة/المقارنة يتم ضبطها إلى deny تلقائياً.
+  robots_failure_policy: "allow"
+
+  # التحقق من شهادات HTTPS؛ عطّله فقط للتشخيص عند مواقع داخلية بشهادات self-signed
+  verify_ssl: true
+
+  # === Async Crawling (v3.0) ===
+  # عدد الطلبات المتزامنة - يحدد سرعة الزحف
+  # 5 = آمن، 10 = متوسط، 20 = سريع (قد يُحجَب)
+  concurrent_requests: 5
+
+  # User-Agent للزحف
+  user_agent: "SCTBot/1.0 (+SEO Audit; contact@example.com)"
+
+  # الحد الأقصى لحجم الصفحة (بالميغابايت) - تجاهل الصفحات الأكبر
+  max_page_size_mb: 10
+
+  # هل نتبع redirects تلقائياً؟ (recommended: true)
+  follow_redirects: true
+
+  # الحد الأقصى لعدد redirect chain hops
+  max_redirect_hops: 5
+
+# === JavaScript Rendering ===
+javascript:
+  # تفعيل JS rendering (مهم لمواقع زد)
+  # يجعل الزحف أبطأ ~5-10x لكنه يلتقط المحتوى الديناميكي
+  enabled: false
+
+  # طريقة الانتظار: networkidle | domcontentloaded | load
+  wait_until: "networkidle"
+
+  # المهلة لانتظار JS (بالثواني)
+  timeout: 10
+
+  # اسم المتصفح: chromium | firefox | webkit
+  browser: "chromium"
+
+  # هل نرى المتصفح؟ (false = headless)
+  headless: true
+
+# === إعدادات الاستخراج ===
+extraction:
+  extract_meta: true
+  extract_headings: true
+  extract_links: true
+  extract_images: true
+  extract_schema: true
+  extract_hreflang: true
+  extract_og: true
+  extract_canonical: true
+  extract_headers: true
+  extract_content: true
+
+  # هل نستخرج روابط الموارد (CSS, JS, etc.)؟
+  extract_resources: false
+
+  # كشف HTTP resources داخل صفحات HTTPS
+  extract_mixed_content: true
+
+  # الحد الأدنى لطول النص الذي يُعتبر "محتوى" (بالحروف)
+  min_content_length: 50
+
+# === المرشحات (Filters) ===
+filters:
+  # أنماط URLs لاستبعادها من الزحف
+  exclude_patterns:
+    - "/cart"
+    - "/checkout"
+    - "/account"
+    - "/login"
+    - "/register"
+    - "/logout"
+    - "?add-to-cart="
+    - "?remove-item="
+    - "/wp-admin/"
+    - "/wp-json/"
+    - ".pdf"
+    - ".doc"
+    - ".docx"
+    - ".xls"
+    - ".xlsx"
+    - ".zip"
+    - ".rar"
+    - "#"
+    - "mailto:"
+    - "tel:"
+    - "javascript:"
+
+  # أنماط URLs لزحفها فقط (إذا كانت فارغة، يُزحف كل شيء)
+  include_patterns: []
+
+  # أنواع MIME المسموح بزحفها
+  allowed_content_types:
+    - "text/html"
+    - "application/xhtml+xml"
+
+  # هل نتبع الروابط nofollow؟
+  respect_nofollow: false
+
+  # هل نتبع الروابط الخارجية للتحقق من الـ status فقط؟
+  check_external_links: true
+
+# === التحليلات ===
+analysis:
+  # الحد الأدنى لعدد الكلمات (أقل منه = thin content)
+  thin_content_threshold: 300
+
+  # الحد الأقصى لطول Title بالحروف
+  title_max_length: 60
+  title_min_length: 30
+
+  # الحد الأقصى لطول Meta Description بالحروف
+  description_max_length: 160
+  description_min_length: 70
+
+  # الحد الأقصى لحجم الصورة الموصى به (KB)
+  image_max_size_kb: 200
+
+  # عمق الصفحة الحرج (أكثر منه = صفحة عميقة جداً)
+  max_recommended_depth: 4
+
+  # URL hygiene checks
+  url_max_length: 115
+  url_max_query_params: 5
+
+# === الإخراج ===
+output:
+  # المسار الذي تُحفظ فيه الملفات
+  output_dir: "./output"
+
+  # الصيغ المطلوبة
+  formats:
+    - csv
+    - excel
+    - json
+
+  # الترميز للملفات (utf-8-sig يحل مشاكل العربية في Excel)
+  encoding: "utf-8-sig"
+
+  # هل نضيف timestamp لاسم المجلد؟
+  timestamped_folder: true
+
+# === حفظ الحالة (Resume Support) ===
+state:
+  # المسار لحفظ تقدم الزحف
+  state_dir: "./state"
+
+  # كم صفحة بين كل حفظ تلقائي
+  save_interval: 50
+
+  # هل نستأنف من آخر جلسة محفوظة؟
+  resume_if_exists: true
+
+  # === v3.0: SQLite Storage ===
+  # استخدام SQLite بدلاً من الذاكرة (موصى به للمواقع الكبيرة)
+  # المزايا: استهلاك ذاكرة أقل، queries سريعة، آمان أكبر
+  use_database: true
+
+  # === v3.0: API Cache TTL ===
+  # عدد أيام صلاحية الـ cache للـ APIs (PageSpeed, GSC)
+  # 7 أيام افتراضي - يوفّر quota الـ API
+  cache_ttl_days: 7
+
+# === v3.0: External Links Check ===
+external_check:
+  # تفعيل فحص الروابط الخارجية
+  enabled: true
+
+  # المهلة لكل رابط (بالثواني)
+  timeout: 10
+
+  # عدد الطلبات المتزامنة
+  concurrent: 20
+
+  # عدد محاولات إعادة المحاولة
+  retry_attempts: 2
+
+  # التحقق من شهادات HTTPS للروابط الخارجية
+  verify_ssl: true
+
+# === التكاملات (تُفعَّل عند توفّر APIs) ===
+integrations:
+  gsc:
+    enabled: false
+    credentials_file: "credentials/gsc_credentials.json"
+    site_url: "https:///"
+    # عدد الأشهر الماضية للجلب
+    months_back: 16
+
+  pagespeed:
+    enabled: false
+    api_key: ""  # سيُقرأ من .env إذا كان فارغاً
+    # عدد الـ URLs لفحصها (0 = كلها)
+    max_urls: 0
+    # التأخير بين كل طلب PageSpeed
+    delay_seconds: 1
+    # === v3.0: عمر الـ cache لنتائج PageSpeed (بالأيام) ===
+    # يوفّر quota الـ API (الحد المجاني 25K/يوم)
+    cache_ttl_days: 7
+    # الاستراتيجيات: mobile, desktop, both
+    strategies:
+      - mobile
+      - desktop
+
+  awt:
+    enabled: false
+    # المسار لمجلد CSVs المُصدَّرة من Ahrefs Webmaster Tools
+    csv_folder: "./external_data/awt"
+
+  bing_webmaster:
+    enabled: false
+    csv_folder: "./external_data/bing"
+
+# === السجلات (Logging) ===
+logging:
+  # المستوى: DEBUG | INFO | WARNING | ERROR | CRITICAL
+  level: "DEBUG"
+
+  # المسار لمجلد السجلات
+  log_dir: "./logs"
+
+  # هل نطبع السجلات على Console أيضاً؟
+  console_output: true
+
+  # هل نكتب ملف log؟ إيقافه يمنع إنشاء logs/ لمجرد --help أو الاستيراد.
+  file_output: true
+
+  # الحد الأقصى لحجم ملف السجل (بالميغابايت)
+  max_log_size_mb: 50
+
+# === المراقبة وقياس الأداء (Observability) ===
+observability:
+  # يفعّل counters/timings/gauges وكتابة metrics.json داخل مجلد المخرجات.
+  enabled: true
+
+  # يسجل بداية/نهاية الدوال والمراحل المراقبة عند مستوى DEBUG.
+  # ارفع logging.level إلى DEBUG لرؤية كل التفاصيل في ملف اللوغ.
+  log_function_calls: true
+
+  # يسجل أحداث كل URL/رابط خارجي. مفيد للتقييم العميق وقد يكون كثيراً في المواقع الكبيرة.
+  log_url_events: true
+
+  # يسجل توقيت كل extractor مثل meta/headings/schema/links/images.
+  log_extraction_details: true
+
+  # أي استدعاء يتجاوز هذا الحد يظهر كتحذير في اللوغ.
+  slow_call_ms: 500
+
+# === وضع المقارنة v3.0: قائمة المواقع للمقارنة ===
+# يُستخدم فقط مع: python main.py --mode compare
+sites_to_compare:
+  - url: "https:///"
+    label: "Dar Atlas"
+    is_primary: true

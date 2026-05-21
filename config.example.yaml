@@ -1,0 +1,133 @@
+# SCT public example configuration.
+# Copy to config.yaml and adjust for your own website.
+
+site:
+  start_url: "https://example.com/"
+  domain: "example.com"
+  additional_internal_domains: []
+
+crawl:
+  max_pages: 500
+  max_depth: 8
+  delay_seconds: 0.5
+  timeout_seconds: 15
+  retry_attempts: 3
+  retry_delay_seconds: 2
+  respect_robots: true
+  robots_failure_policy: "allow"
+  verify_ssl: true
+  concurrent_requests: 5
+  user_agent: "SCTBot/1.0 (+https://github.com/your-org/simple-crawler-tool)"
+  max_page_size_mb: 10
+  follow_redirects: true
+  max_redirect_hops: 5
+
+javascript:
+  enabled: false
+  wait_until: "networkidle"
+  timeout: 10
+  browser: "chromium"
+  headless: true
+
+extraction:
+  extract_meta: true
+  extract_headings: true
+  extract_links: true
+  extract_images: true
+  extract_schema: true
+  extract_hreflang: true
+  extract_og: true
+  extract_canonical: true
+  extract_headers: true
+  extract_content: true
+  extract_resources: false
+  extract_mixed_content: true
+  min_content_length: 50
+
+filters:
+  exclude_patterns:
+    - "/cart"
+    - "/checkout"
+    - "/account"
+    - "/login"
+    - "/logout"
+    - "mailto:"
+    - "tel:"
+    - "javascript:"
+  include_patterns: []
+  allowed_content_types:
+    - "text/html"
+    - "application/xhtml+xml"
+  respect_nofollow: false
+  check_external_links: true
+
+analysis:
+  thin_content_threshold: 300
+  title_max_length: 60
+  title_min_length: 30
+  description_max_length: 160
+  description_min_length: 70
+  image_max_size_kb: 200
+  max_recommended_depth: 4
+  url_max_length: 115
+  url_max_query_params: 5
+
+output:
+  output_dir: "./output"
+  formats:
+    - csv
+    - json
+  encoding: "utf-8-sig"
+  timestamped_folder: true
+
+state:
+  state_dir: "./state"
+  save_interval: 50
+  resume_if_exists: true
+  use_database: true
+  cache_ttl_days: 7
+
+external_check:
+  enabled: true
+  timeout: 10
+  concurrent: 20
+  retry_attempts: 2
+  verify_ssl: true
+
+integrations:
+  gsc:
+    enabled: false
+    credentials_file: "credentials/gsc_credentials.json"
+    site_url: "https://example.com/"
+    months_back: 16
+  pagespeed:
+    enabled: false
+    api_key: ""
+    max_urls: 0
+    delay_seconds: 1
+    cache_ttl_days: 7
+    strategies:
+      - mobile
+      - desktop
+  awt:
+    enabled: false
+    csv_folder: "./external_data/awt"
+
+logging:
+  level: "INFO"
+  log_dir: "./logs"
+  console_output: true
+  file_output: true
+  max_log_size_mb: 50
+
+observability:
+  enabled: true
+  log_function_calls: false
+  log_url_events: false
+  log_extraction_details: false
+  slow_call_ms: 500
+
+sites_to_compare:
+  - url: "https://example.com/"
+    label: "Example"
+    is_primary: true
