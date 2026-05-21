@@ -15,6 +15,13 @@ from typing import Any
 from crawler.core import PageData
 
 
+def _get(item: Any, key: str, default: Any = None) -> Any:
+    """Read a field from either a PageData object or a dict row (DB-backed)."""
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
 def detect_broken_links(
     pages: list[PageData], all_links: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -24,55 +31,49 @@ def detect_broken_links(
     Returns:
         dict: تقرير شامل
     """
-    # === تجميع pages حسب URL لإمكانية lookup سريع ===
-    page_by_url: dict[str, PageData] = {}
-    for page in pages:
-        page_by_url[page.url] = page
-        if page.final_url and page.final_url != page.url:
-            page_by_url[page.final_url] = page
-
     # === صفحات 4xx ===
     pages_4xx = [
         {
-            "url": page.url,
-            "status_code": page.status_code,
-            "depth": page.depth,
-            "title": page.title or "",
+            "url": _get(page, "url", ""),
+            "status_code": _get(page, "status_code", 0),
+            "depth": _get(page, "depth", 0),
+            "title": _get(page, "title", "") or "",
         }
         for page in pages
-        if 400 <= page.status_code < 500
+        if 400 <= int(_get(page, "status_code", 0) or 0) < 500
     ]
 
     # === صفحات 5xx ===
     pages_5xx = [
         {
-            "url": page.url,
-            "status_code": page.status_code,
-            "depth": page.depth,
-            "title": page.title or "",
+            "url": _get(page, "url", ""),
+            "status_code": _get(page, "status_code", 0),
+            "depth": _get(page, "depth", 0),
+            "title": _get(page, "title", "") or "",
         }
         for page in pages
-        if 500 <= page.status_code < 600
+        if 500 <= int(_get(page, "status_code", 0) or 0) < 600
     ]
 
     # === صفحات 404 لها inlinks (الأخطر!) ===
     pages_404_with_inlinks = []
     for page in pages:
-        if page.status_code != 404:
+        if int(_get(page, "status_code", 0) or 0) != 404:
             continue
 
+        page_url = _get(page, "url", "")
         # احسب inlinks لهذه الصفحة
         inlinks = [
             link
             for link in all_links
-            if link.get("to_url_normalized") == page.url
-            or link.get("to_url") == page.url
+            if link.get("to_url_normalized") == page_url
+            or link.get("to_url") == page_url
         ]
 
         if inlinks:
             pages_404_with_inlinks.append(
                 {
-                    "url": page.url,
+                    "url": page_url,
                     "inlinks_count": len(inlinks),
                     "linking_from": list(set(link["from_url"] for link in inlinks[:10])),
                 }

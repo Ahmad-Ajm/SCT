@@ -142,9 +142,11 @@ class SitemapParser:
             if self._strip_namespace(sitemap_elem.tag) != "sitemap":
                 continue
 
-            loc_elem = sitemap_elem.find("sm:loc", self.NAMESPACES) or sitemap_elem.find("loc")
-            if loc_elem is not None and loc_elem.text:
-                self._parse_recursive(loc_elem.text.strip(), depth - 1)
+            # ملاحظة: لا نستخدم `find(...) or find(...)` لأن عنصر XML بلا أبناء
+            # يُقيَّم كـ falsy، فيتخطّى sub-sitemaps صالحة في الفهارس ذات namespace.
+            loc = self._find_child_text(sitemap_elem, "loc")
+            if loc:
+                self._parse_recursive(loc, depth - 1)
                 sitemap_count += 1
 
         log.info(f"تم العثور على {sitemap_count} sub-sitemap")

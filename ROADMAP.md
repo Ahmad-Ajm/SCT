@@ -24,6 +24,12 @@ This roadmap lists the proposed improvements for turning SCT into a reliable ope
 | P3 | Web UI | Low | A small local dashboard would improve usability, but should come after the core crawler and reports are stable. |
 | P3 | AI-assisted recommendations | Low | Summarize issues and suggest fixes. Nice to have, but should not replace deterministic checks. |
 
+## Known Issues — Deferred (Will Not Fix Soon)
+
+| Issue | Severity | Decision |
+| --- | --- | --- |
+| `max_pages` overshoot in the async crawler | Low (cosmetic) | The per-worker limit check is lock-free and `pages_crawled` is incremented after processing, so a crawl can exceed `max_pages` by up to `(workers - 1)` pages. A correct fix needs a shared budget lock that risks introducing deadlock/hang. **Intentionally deferred for the foreseeable future.** |
+
 ## Current Top 5 Implementation Targets
 
 1. Open-source readiness.

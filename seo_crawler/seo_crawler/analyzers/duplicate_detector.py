@@ -10,6 +10,13 @@ from typing import Any
 from crawler.core import PageData
 
 
+def _get(item: Any, key: str, default: Any = None) -> Any:
+    """Read a field from either a PageData object or a dict row (DB-backed)."""
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
 def detect_duplicates(pages: list[PageData]) -> dict[str, Any]:
     """
     اكتشاف التكرارات في الصفحات.
@@ -32,22 +39,29 @@ def detect_duplicates(pages: list[PageData]) -> dict[str, Any]:
 
     for page in pages:
         # تخطّي الصفحات الفاشلة
-        if page.crawl_error or page.status_code != 200:
+        if _get(page, "crawl_error") or _get(page, "status_code", 0) != 200:
             continue
 
         # تخطّي الصفحات NoIndex
-        if not page.is_indexable:
+        if not _get(page, "is_indexable", False):
             continue
 
-        if page.title:
-            title_groups[page.title.strip().lower()].append(page.url)
-        if page.meta_description:
-            desc_groups[page.meta_description.strip().lower()].append(page.url)
-        if page.h1_text:
-            # نأخذ أول H1 فقط
-            h1_groups[page.h1_text[0].strip().lower()].append(page.url)
-        if page.content_hash:
-            content_groups[page.content_hash].append(page.url)
+        url = _get(page, "url", "")
+        title = _get(page, "title", "")
+        meta_description = _get(page, "meta_description", "")
+        h1_text = _get(page, "h1_text", []) or []
+        content_hash = _get(page, "content_hash", "")
+
+        if title:
+            title_groups[title.strip().lower()].append(url)
+        if meta_description:
+            desc_groups[meta_description.strip().lower()].append(url)
+        if h1_text:
+            # نأخذ أول H1 فقط (h1_text قد يكون list أو string)
+            first_h1 = h1_text[0] if isinstance(h1_text, list) else h1_text
+            h1_groups[str(first_h1).strip().lower()].append(url)
+        if content_hash:
+            content_groups[content_hash].append(url)
 
     # === استخراج التكرارات (>1 URL لنفس القيمة) ===
     duplicate_titles = [

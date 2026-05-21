@@ -10,6 +10,13 @@ from typing import Any
 from crawler.core import PageData
 
 
+def _get(item: Any, key: str, default: Any = None) -> Any:
+    """Read a field from either a PageData object or a dict row (DB-backed)."""
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
 def analyze_redirects(
     pages: list[PageData], all_redirects: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -89,13 +96,13 @@ def analyze_redirects(
     # === Redirects من الصفحات (Pages) ===
     page_redirects = [
         {
-            "url": page.url,
-            "final_url": page.final_url,
-            "status_code": page.status_code,
-            "redirect_chain": page.redirect_chain,
+            "url": _get(page, "url", ""),
+            "final_url": _get(page, "final_url", ""),
+            "status_code": _get(page, "status_code", 0),
+            "redirect_chain": _get(page, "redirect_chain", []),
         }
         for page in pages
-        if page.is_redirect
+        if _get(page, "is_redirect", False)
     ]
 
     return {

@@ -9,6 +9,13 @@ from typing import Any
 from crawler.core import PageData
 
 
+def _get(item: Any, key: str, default: Any = None) -> Any:
+    """Read a field from either a PageData object or a dict row (DB-backed)."""
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
 def detect_thin_content(
     pages: list[PageData],
     word_threshold: int = 300,
@@ -33,32 +40,36 @@ def detect_thin_content(
 
     for page in pages:
         # تخطّي الصفحات الفاشلة
-        if page.crawl_error or page.status_code != 200:
+        if _get(page, "crawl_error") or _get(page, "status_code", 0) != 200:
             continue
 
         # تخطّي non-HTML
-        if not page.content_type or "html" not in page.content_type.lower():
+        content_type = _get(page, "content_type", "") or ""
+        if "html" not in content_type.lower():
             continue
 
+        word_count = int(_get(page, "word_count", 0) or 0)
+        text_to_html_ratio = float(_get(page, "text_to_html_ratio", 0) or 0)
+
         page_data = {
-            "url": page.url,
-            "title": page.title,
-            "word_count": page.word_count,
-            "character_count": page.character_count,
-            "text_to_html_ratio": page.text_to_html_ratio,
-            "is_indexable": page.is_indexable,
-            "depth": page.depth,
+            "url": _get(page, "url", ""),
+            "title": _get(page, "title", ""),
+            "word_count": word_count,
+            "character_count": _get(page, "character_count", 0),
+            "text_to_html_ratio": text_to_html_ratio,
+            "is_indexable": _get(page, "is_indexable", False),
+            "depth": _get(page, "depth", 0),
         }
 
         # محتوى رقيق حرج
-        if page.word_count < critical_threshold and page.word_count > 0:
+        if 0 < word_count < critical_threshold:
             critical_thin.append(page_data)
         # محتوى رقيق عادي
-        elif page.word_count < word_threshold:
+        elif word_count < word_threshold:
             thin_pages.append(page_data)
 
         # نسبة text-to-html منخفضة
-        if 0 < page.text_to_html_ratio < text_ratio_threshold:
+        if 0 < text_to_html_ratio < text_ratio_threshold:
             low_text_ratio.append(page_data)
 
     return {

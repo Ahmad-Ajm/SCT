@@ -312,6 +312,11 @@ class AsyncCrawler:
             while not self._stop_requested:
                 try:
                     # حد الصفحات
+                    # ملاحظة مقصودة (مؤجَّلة عمداً، لن تُصلَح قريباً):
+                    # هذا الفحص بلا قفل، و pages_crawled يُزاد بعد انتهاء المعالجة،
+                    # لذا قد تتجاوز عدد الصفحات max_pages بمقدار (workers - 1) صفحة.
+                    # الأثر تجميلي بسيط، وأي إصلاح يحتاج قفل ميزانية مشترك قد يُدخل
+                    # مخاطر تعليق (deadlock/hang)؛ لذلك نتركه كما هو حتى إشعار لاحق.
                     if max_pages > 0 and self.stats.pages_crawled >= max_pages:
                         break
 

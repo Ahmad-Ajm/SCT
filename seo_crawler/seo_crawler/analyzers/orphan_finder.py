@@ -16,6 +16,13 @@ from crawler.core import PageData
 from utils.helpers import normalize_url
 
 
+def _get(item: Any, key: str, default: Any = None) -> Any:
+    """Read a field from either a PageData object or a dict row (DB-backed)."""
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
 def find_orphan_pages(
     pages: list[PageData], all_links: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -58,29 +65,30 @@ def find_orphan_pages(
 
     for page in pages:
         # تخطّي الصفحات الفاشلة والـ redirects
-        if page.crawl_error or page.status_code != 200:
+        if _get(page, "crawl_error") or _get(page, "status_code", 0) != 200:
             continue
 
-        normalized_url = normalize_url(page.url)
+        url = _get(page, "url", "")
+        normalized_url = normalize_url(url)
         count = inlink_counts.get(normalized_url, 0)
 
         if count == 0:
             orphan_pages.append(
                 {
-                    "url": page.url,
-                    "title": page.title,
-                    "depth": page.depth,
-                    "is_indexable": page.is_indexable,
+                    "url": url,
+                    "title": _get(page, "title", ""),
+                    "depth": _get(page, "depth", 0),
+                    "is_indexable": _get(page, "is_indexable", False),
                     "inlinks_count": 0,
                 }
             )
         elif count <= 2:
             low_link_pages.append(
                 {
-                    "url": page.url,
-                    "title": page.title,
-                    "depth": page.depth,
-                    "is_indexable": page.is_indexable,
+                    "url": url,
+                    "title": _get(page, "title", ""),
+                    "depth": _get(page, "depth", 0),
+                    "is_indexable": _get(page, "is_indexable", False),
                     "inlinks_count": count,
                 }
             )

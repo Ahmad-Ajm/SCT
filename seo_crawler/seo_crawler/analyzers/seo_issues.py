@@ -17,6 +17,28 @@ from typing import Any
 from crawler.core import PageData
 
 
+def _get(item: Any, key: str, default: Any = None) -> Any:
+    """Read a field from either a PageData object or a dict row (DB-backed)."""
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _status(page: Any) -> int:
+    """Status code as an int (DB rows may store it as str/None)."""
+    try:
+        return int(_get(page, "status_code", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _int(page: Any, key: str) -> int:
+    try:
+        return int(_get(page, key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 class IssueSeverity(str, Enum):
     """مستويات أولوية المشاكل."""
 
@@ -225,10 +247,13 @@ def collect_seo_issues(
     # 3. صفحات بـ NoIndex وأهمية عالية (depth منخفض)
     noindex_critical = [
         page for page in pages
-        if not page.is_indexable
-        and "noindex" in (page.meta_robots + " " + page.x_robots_tag).lower()
-        and page.depth <= 2
-        and page.status_code == 200
+        if not _get(page, "is_indexable", False)
+        and "noindex" in (
+            str(_get(page, "meta_robots", "") or "") + " "
+            + str(_get(page, "x_robots_tag", "") or "")
+        ).lower()
+        and _int(page, "depth") <= 2
+        and _status(page) == 200
     ]
     if noindex_critical:
         issues.append(
@@ -238,7 +263,7 @@ def collect_seo_issues(
                 issue_type="NoIndex on Important Pages",
                 description=f"{len(noindex_critical)} صفحة مهمة (depth ≤ 2) عليها NoIndex",
                 affected_count=len(noindex_critical),
-                affected_urls=[p.url for p in noindex_critical],
+                affected_urls=[_get(p, "url", "") for p in noindex_critical],
                 recommendation="راجع أن NoIndex مقصود لهذه الصفحات",
             )
         )
@@ -260,15 +285,15 @@ def collect_seo_issues(
     # === Mixed Content (جديد) ===
     pages_with_mixed = [
         p for p in pages
-        if getattr(p, "has_mixed_content", False) and p.status_code == 200
+        if _get(p, "has_mixed_content", False) and _status(p) == 200
     ]
     pages_with_active_mixed = [
         p for p in pages
-        if getattr(p, "mixed_content_active_count", 0) > 0
+        if _int(p, "mixed_content_active_count") > 0
     ]
     pages_with_form_mixed = [
         p for p in pages
-        if getattr(p, "mixed_content_form_count", 0) > 0
+        if _int(p, "mixed_content_form_count") > 0
     ]
 
     # Form mixed = critical (يكشف بيانات حساسة)
@@ -280,7 +305,7 @@ def collect_seo_issues(
                 issue_type="Insecure Form Submission (Mixed Content)",
                 description=f"{len(pages_with_form_mixed)} صفحة فيها form يُرسل عبر HTTP",
                 affected_count=len(pages_with_form_mixed),
-                affected_urls=[p.url for p in pages_with_form_mixed],
+                affected_urls=[_get(p, "url", "") for p in pages_with_form_mixed],
                 recommendation="بيانات النماذج تُرسَل غير مشفّرة! غيّر action إلى HTTPS فوراً",
             )
         )
@@ -294,7 +319,7 @@ def collect_seo_issues(
                 issue_type="Active Mixed Content",
                 description=f"{len(pages_with_active_mixed)} صفحة فيها scripts/styles HTTP",
                 affected_count=len(pages_with_active_mixed),
-                affected_urls=[p.url for p in pages_with_active_mixed],
+                affected_urls=[_get(p, "url", "") for p in pages_with_active_mixed],
                 recommendation="المتصفحات تحجب هذه الموارد. حدّث الـ URLs إلى HTTPS",
             )
         )
@@ -308,7 +333,7 @@ def collect_seo_issues(
                 issue_type="Passive Mixed Content",
                 description=f"{len(pages_with_mixed)} صفحة فيها صور/فيديو HTTP",
                 affected_count=len(pages_with_mixed),
-                affected_urls=[p.url for p in pages_with_mixed],
+                affected_urls=[_get(p, "url", "") for p in pages_with_mixed],
                 recommendation="حدّث روابط الصور والفيديو إلى HTTPS",
             )
         )
@@ -316,7 +341,7 @@ def collect_seo_issues(
     # 5. Title فارغ على صفحات قابلة للفهرسة
     empty_titles = [
         page for page in pages
-        if page.status_code == 200 and not page.title and page.is_indexable
+        if _status(page) == 200 and not _get(page, "title", "") and _get(page, "is_indexable", False)
     ]
     if empty_titles:
         issues.append(
@@ -326,7 +351,7 @@ def collect_seo_issues(
                 issue_type="Missing Title",
                 description=f"{len(empty_titles)} صفحة بدون Title",
                 affected_count=len(empty_titles),
-                affected_urls=[p.url for p in empty_titles],
+                affected_urls=[_get(p, "url", "") for p in empty_titles],
                 recommendation="أضف Title فريد لكل صفحة (30-60 حرف)",
             )
         )
@@ -356,7 +381,7 @@ def collect_seo_issues(
     # 7. Meta Description مفقود
     no_desc = [
         page for page in pages
-        if page.status_code == 200 and not page.meta_description and page.is_indexable
+        if _status(page) == 200 and not _get(page, "meta_description", "") and _get(page, "is_indexable", False)
     ]
     if no_desc:
         issues.append(
@@ -366,7 +391,7 @@ def collect_seo_issues(
                 issue_type="Missing Meta Description",
                 description=f"{len(no_desc)} صفحة بدون Meta Description",
                 affected_count=len(no_desc),
-                affected_urls=[p.url for p in no_desc],
+                affected_urls=[_get(p, "url", "") for p in no_desc],
                 recommendation=f"أضف وصف فريد ({desc_min}-{desc_max} حرف) لكل صفحة",
             )
         )
@@ -374,7 +399,7 @@ def collect_seo_issues(
     # 8. H1 مفقود
     no_h1 = [
         page for page in pages
-        if page.status_code == 200 and page.h1_count == 0 and page.is_indexable
+        if _status(page) == 200 and _int(page, "h1_count") == 0 and _get(page, "is_indexable", False)
     ]
     if no_h1:
         issues.append(
@@ -384,7 +409,7 @@ def collect_seo_issues(
                 issue_type="Missing H1",
                 description=f"{len(no_h1)} صفحة بدون H1",
                 affected_count=len(no_h1),
-                affected_urls=[p.url for p in no_h1],
+                affected_urls=[_get(p, "url", "") for p in no_h1],
                 recommendation="أضف H1 واحد فريد لكل صفحة",
             )
         )
@@ -392,7 +417,7 @@ def collect_seo_issues(
     # 9. H1 متعدد
     multiple_h1 = [
         page for page in pages
-        if page.status_code == 200 and page.h1_count > 1
+        if _status(page) == 200 and _int(page, "h1_count") > 1
     ]
     if multiple_h1:
         issues.append(
@@ -402,7 +427,7 @@ def collect_seo_issues(
                 issue_type="Multiple H1",
                 description=f"{len(multiple_h1)} صفحة فيها أكثر من H1",
                 affected_count=len(multiple_h1),
-                affected_urls=[p.url for p in multiple_h1],
+                affected_urls=[_get(p, "url", "") for p in multiple_h1],
                 recommendation="استخدم H1 واحد فقط لكل صفحة",
             )
         )
@@ -456,7 +481,7 @@ def collect_seo_issues(
     # 13. Title طويل جداً
     long_titles = [
         page for page in pages
-        if page.status_code == 200 and page.title_length > title_max
+        if _status(page) == 200 and _int(page, "title_length") > title_max
     ]
     if long_titles:
         issues.append(
@@ -466,7 +491,7 @@ def collect_seo_issues(
                 issue_type="Title Too Long",
                 description=f"{len(long_titles)} صفحة Title أطول من {title_max} حرف",
                 affected_count=len(long_titles),
-                affected_urls=[p.url for p in long_titles],
+                affected_urls=[_get(p, "url", "") for p in long_titles],
                 recommendation=f"اجعل Title أقصر من {title_max} حرف",
             )
         )
@@ -474,7 +499,7 @@ def collect_seo_issues(
     # 14. Title قصير جداً
     short_titles = [
         page for page in pages
-        if page.status_code == 200 and 0 < page.title_length < title_min
+        if _status(page) == 200 and 0 < _int(page, "title_length") < title_min
     ]
     if short_titles:
         issues.append(
@@ -484,7 +509,7 @@ def collect_seo_issues(
                 issue_type="Title Too Short",
                 description=f"{len(short_titles)} صفحة Title أقصر من {title_min} حرف",
                 affected_count=len(short_titles),
-                affected_urls=[p.url for p in short_titles],
+                affected_urls=[_get(p, "url", "") for p in short_titles],
                 recommendation=f"اجعل Title بين {title_min}-{title_max} حرف",
             )
         )
@@ -492,7 +517,7 @@ def collect_seo_issues(
     # 15. Description طويل
     long_desc = [
         page for page in pages
-        if page.status_code == 200 and page.meta_description_length > desc_max
+        if _status(page) == 200 and _int(page, "meta_description_length") > desc_max
     ]
     if long_desc:
         issues.append(
@@ -502,7 +527,7 @@ def collect_seo_issues(
                 issue_type="Description Too Long",
                 description=f"{len(long_desc)} صفحة وصف أطول من {desc_max} حرف",
                 affected_count=len(long_desc),
-                affected_urls=[p.url for p in long_desc],
+                affected_urls=[_get(p, "url", "") for p in long_desc],
                 recommendation=f"اجعل Description أقصر من {desc_max} حرف",
             )
         )
@@ -510,7 +535,7 @@ def collect_seo_issues(
     # 16. Description قصير
     short_desc = [
         page for page in pages
-        if page.status_code == 200 and 0 < page.meta_description_length < desc_min
+        if _status(page) == 200 and 0 < _int(page, "meta_description_length") < desc_min
     ]
     if short_desc:
         issues.append(
@@ -520,7 +545,7 @@ def collect_seo_issues(
                 issue_type="Description Too Short",
                 description=f"{len(short_desc)} صفحة وصف أقصر من {desc_min} حرف",
                 affected_count=len(short_desc),
-                affected_urls=[p.url for p in short_desc],
+                affected_urls=[_get(p, "url", "") for p in short_desc],
                 recommendation=f"وسّع الـ Description ({desc_min}-{desc_max} حرف)",
             )
         )
@@ -616,7 +641,7 @@ def collect_seo_issues(
     # 23. صفحات عميقة جداً
     deep_pages = [
         page for page in pages
-        if page.status_code == 200 and page.depth > 4
+        if _status(page) == 200 and _int(page, "depth") > 4
     ]
     if deep_pages:
         issues.append(
@@ -626,7 +651,7 @@ def collect_seo_issues(
                 issue_type="Deep Pages",
                 description=f"{len(deep_pages)} صفحة على عمق >4 من الرئيسية",
                 affected_count=len(deep_pages),
-                affected_urls=[p.url for p in deep_pages[:30]],
+                affected_urls=[_get(p, "url", "") for p in deep_pages[:30]],
                 recommendation="حسّن البنية لتقليل العمق",
             )
         )

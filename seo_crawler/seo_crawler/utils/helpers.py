@@ -276,15 +276,15 @@ def format_duration(seconds: float) -> str:
     if seconds < 60:
         return f"{seconds:.1f}s"
 
-    minutes = int(seconds // 60)
-    secs = seconds % 60
+    # نقرّب للثانية أولاً ثم نحوّل، حتى لا نحصل على "60s" في حقل الثواني
+    total_secs = int(round(seconds))
+    minutes, secs = divmod(total_secs, 60)
 
     if minutes < 60:
-        return f"{minutes}m {secs:.0f}s"
+        return f"{minutes}m {secs}s"
 
-    hours = minutes // 60
-    minutes = minutes % 60
-    return f"{hours}h {minutes}m {secs:.0f}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m {secs}s"
 
 
 def truncate_text(text: str, max_length: int = 100, suffix: str = "...") -> str:

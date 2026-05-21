@@ -146,7 +146,10 @@ CREATE TABLE IF NOT EXISTS pages (
     -- Mixed content (جديد)
     has_mixed_content INTEGER DEFAULT 0,
     mixed_content_urls TEXT,
-    
+    mixed_content_active_count INTEGER DEFAULT 0,
+    mixed_content_passive_count INTEGER DEFAULT 0,
+    mixed_content_form_count INTEGER DEFAULT 0,
+
     -- Errors
     crawl_error TEXT
 );
@@ -330,6 +333,13 @@ class CrawlDatabase:
         >>> db.close()
     """
 
+    # الأعمدة المخزَّنة كـ JSON عبر كل الجداول (لفك ترميزها عند القراءة فقط)
+    _JSON_COLUMNS: frozenset[str] = frozenset({
+        "h1_text", "h2_text", "h3_text", "headings_order", "hreflang_tags",
+        "schema_types", "schema_data", "redirect_chain", "js_console_errors",
+        "mixed_content_urls", "all_headers", "raw_data",
+    })
+
     def __init__(self, db_path: str, wal_mode: bool = True):
         """
         Args:
@@ -346,13 +356,30 @@ class CrawlDatabase:
         # إنشاء الـ schema
         self._initialize()
 
+    # أعمدة قد تكون مفقودة في قواعد بيانات قديمة (col -> تعريف SQL)
+    _PAGE_MIGRATIONS: dict[str, str] = {
+        "mixed_content_active_count": "INTEGER DEFAULT 0",
+        "mixed_content_passive_count": "INTEGER DEFAULT 0",
+        "mixed_content_form_count": "INTEGER DEFAULT 0",
+    }
+
     def _initialize(self) -> None:
         """إنشاء الجداول والـ indexes."""
         with span("db.initialize", path=str(self.db_path)):
             with self._get_connection() as conn:
                 conn.executescript(SCHEMA_SQL)
                 conn.commit()
+                self._migrate(conn)
+                conn.commit()
                 log.info(f"تم تهيئة قاعدة البيانات: {self.db_path}")
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """إضافة أي أعمدة جديدة مفقودة في قواعد بيانات أُنشئت بإصدار أقدم."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(pages)")}
+        for column, definition in self._PAGE_MIGRATIONS.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE pages ADD COLUMN {column} {definition}")
+                log.info(f"ترقية المخطط: أُضيف العمود pages.{column}")
 
     def _get_connection(self) -> sqlite3.Connection:
         """الحصول على connection للـ thread الحالي."""
@@ -894,12 +921,16 @@ class CrawlDatabase:
             return [row[1] for row in cursor]
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
-        """تحويل sqlite3.Row إلى dict مع decode للـ JSON."""
+        """تحويل sqlite3.Row إلى dict مع decode للـ JSON.
+
+        نقصر فك الترميز على الأعمدة المعروفة أنها JSON فقط، حتى لا نُحوّل
+        عن طريق الخطأ عنواناً/وصفاً يبدأ بـ ``[`` أو ``{`` إلى list/dict.
+        """
         result = dict(row)
 
-        # محاولة decode JSON fields
-        for key, value in result.items():
-            if isinstance(value, str) and value.startswith(("[", "{")):
+        for key in self._JSON_COLUMNS:
+            value = result.get(key)
+            if isinstance(value, str) and value[:1] in ("[", "{"):
                 try:
                     result[key] = json.loads(value)
                 except json.JSONDecodeError:

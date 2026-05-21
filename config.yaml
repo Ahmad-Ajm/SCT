@@ -1,16 +1,16 @@
 # ============================================================
-# إعدادات Crawler لمشروع دار أطلس
+# إعدادات SCT الافتراضية
 # ============================================================
 # عدّل القيم هنا بدلاً من تعديل الكود
 # ============================================================
 
 # === معلومات الموقع المستهدف ===
 site:
-  start_url: "https:///"
-  domain: ""
+  start_url: "https://example.com/"
+  domain: "example.com"
   # نطاقات إضافية تُعتبر "داخلية" (إن وُجدت)
   additional_internal_domains: []
-  # مثال: ["shop.", "blog."]
+  # مثال: ["shop.example.com", "blog.example.com"]
 
 # === إعدادات الزحف العامة ===
 crawl:
@@ -222,7 +222,7 @@ integrations:
   gsc:
     enabled: false
     credentials_file: "credentials/gsc_credentials.json"
-    site_url: "https:///"
+    site_url: "https://example.com/"
     # عدد الأشهر الماضية للجلب
     months_back: 16
 
@@ -288,6 +288,6 @@ observability:
 # === وضع المقارنة v3.0: قائمة المواقع للمقارنة ===
 # يُستخدم فقط مع: python main.py --mode compare
 sites_to_compare:
-  - url: "https:///"
-    label: "Dar Atlas"
+  - url: "https://example.com/"
+    label: "Example"
     is_primary: true
