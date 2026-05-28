@@ -126,6 +126,9 @@ class AsyncCrawler:
         # === Async settings ===
         self.concurrent_requests = self.crawl_config.get("concurrent_requests", 5)
         self.per_host_limit = max(1, self.concurrent_requests // 2)
+        # تحكّم تكيّفي بالسرعة (IMP-10) — مطفأ افتراضياً
+        from crawler.adaptive_throttle import AdaptiveThrottle
+        self.adaptive = AdaptiveThrottle.from_config(self.crawl_config)
         self.verify_ssl = self.crawl_config.get("verify_ssl", True)
         self.robots_failure_policy = self.crawl_config.get("robots_failure_policy", "allow")
         # استراتيجية البذور: homepage | sitemap | hybrid (الافتراضي)
@@ -654,8 +657,9 @@ class AsyncCrawler:
 
                     self._emit_progress()
 
-                    if delay > 0:
-                        await asyncio.sleep(delay)
+                    effective_delay = delay + self.adaptive.delay()
+                    if effective_delay > 0:
+                        await asyncio.sleep(effective_delay)
 
                 except asyncio.CancelledError:
                     # الـ finally سيستدعي task_done() ويُنقص العدّاد مرة واحدة
@@ -927,6 +931,7 @@ class AsyncCrawler:
                 self.stats.status_codes[response_status] = (
                     self.stats.status_codes.get(response_status, 0) + 1
                 )
+                self.adaptive.record(response_status, elapsed_ms)
                 return {"success": True, "error": None, "status_code": response_status}
 
             # تحليل HTML الخام
@@ -954,6 +959,7 @@ class AsyncCrawler:
             self.stats.status_codes[response_status] = (
                 self.stats.status_codes.get(response_status, 0) + 1
             )
+            self.adaptive.record(response_status, elapsed_ms)
             self.stats.total_bytes += size_bytes
             increment("crawler.bytes", size_bytes)
             gauge("crawler.queue_size", self.queue.qsize())

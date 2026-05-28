@@ -305,4 +305,143 @@ class PageSpeedClient:
         result["opportunities"] = opportunities[:10]
         result["opportunities_total_count"] = len(opportunities)
 
+        # === الجداول المنظّمة العميقة (IMP-17أ) ===
+        # تدقيقات فاشلة مُختصرة (تبقى في JSON/التقرير — صغيرة)، والجداول الكبيرة (audits/
+        # network/treemap) تُستعمل لتصدير CSV فقط وتُستثنى من JSON لتفادي التضخّم.
+        result["failed_audits"] = extract_failed_audits(data, url, strategy)
+        result["lighthouse_tables"] = extract_lighthouse_tables(data, url, strategy)
+
         return result
+
+
+# === استخراج جداول Lighthouse المنظّمة من الاستجابة الخام (IMP-17أ) ===
+# دوال نقية قابلة للاختبار مباشرةً من ملف الخام، بلا أي نداء شبكة.
+
+def _lh_audits(data: dict[str, Any]) -> dict[str, Any]:
+    lr = data.get("lighthouseResult") or {}
+    au = lr.get("audits") or {}
+    return au if isinstance(au, dict) else {}
+
+
+def extract_audit_rows(
+    data: dict[str, Any], url: str, strategy: str
+) -> list[dict[str, Any]]:
+    """جدول كل تدقيقات Lighthouse (`lighthouseResult.audits`)."""
+    rows: list[dict[str, Any]] = []
+    for audit_id, a in _lh_audits(data).items():
+        if not isinstance(a, dict):
+            continue
+        details = a.get("details") if isinstance(a.get("details"), dict) else {}
+        rows.append({
+            "url": url,
+            "strategy": strategy,
+            "audit_id": audit_id,
+            "title": a.get("title", ""),
+            "score": a.get("score"),
+            "scoreDisplayMode": a.get("scoreDisplayMode", ""),
+            "displayValue": a.get("displayValue", ""),
+            "numericValue": a.get("numericValue"),
+            "numericUnit": a.get("numericUnit", ""),
+            "details_type": (details or {}).get("type", ""),
+        })
+    return rows
+
+
+def extract_failed_audits(
+    data: dict[str, Any], url: str, strategy: str
+) -> list[dict[str, Any]]:
+    """التدقيقات الفاشلة فقط — لتظهر كمشاكل حقيقية.
+
+    الترشيح الآمن: `scoreDisplayMode ∈ {binary, numeric}` و`score` رقم فعلي و`score < 1`.
+    (لا نستعمل `score < 1` وحدها لأنّ score قد يكون None في manual/notApplicable/informative
+    فيرمي مقارنةً خاطئة ويُظهر إنذارات كاذبة.)
+    """
+    rows: list[dict[str, Any]] = []
+    for audit_id, a in _lh_audits(data).items():
+        if not isinstance(a, dict):
+            continue
+        mode = a.get("scoreDisplayMode")
+        score = a.get("score")
+        if mode in ("binary", "numeric") and isinstance(score, (int, float)) \
+                and not isinstance(score, bool) and score < 1:
+            rows.append({
+                "url": url,
+                "strategy": strategy,
+                "audit_id": audit_id,
+                "title": a.get("title", ""),
+                "score": score,
+                "scoreDisplayMode": mode,
+                "displayValue": a.get("displayValue", ""),
+            })
+    return rows
+
+
+def extract_network_request_rows(
+    data: dict[str, Any], url: str, strategy: str
+) -> list[dict[str, Any]]:
+    """جدول طلبات الشبكة من `audits['network-requests'].details.items`."""
+    nr = (_lh_audits(data).get("network-requests") or {})
+    details = nr.get("details") if isinstance(nr.get("details"), dict) else {}
+    items = (details or {}).get("items") or []
+    rows: list[dict[str, Any]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        rows.append({
+            "url": url,
+            "strategy": strategy,
+            # داخل العنصر الحقل اسمه url لكنه رابط الطلب — نُسمّيه request_url لتمييزه
+            # عن رابط الصفحة المفحوصة.
+            "request_url": it.get("url", ""),
+            "resourceType": it.get("resourceType", ""),
+            "transferSize": it.get("transferSize"),
+            "resourceSize": it.get("resourceSize"),
+            "statusCode": it.get("statusCode"),
+            "protocol": it.get("protocol", ""),
+            "priority": it.get("priority", ""),
+            "mimeType": it.get("mimeType", ""),
+            "networkRequestTime": it.get("networkRequestTime"),
+            "networkEndTime": it.get("networkEndTime"),
+            "entity": it.get("entity", ""),
+        })
+    return rows
+
+
+def extract_treemap_rows(
+    data: dict[str, Any], url: str, strategy: str
+) -> list[dict[str, Any]]:
+    """جدول خريطة JavaScript من `audits['script-treemap-data'].details.nodes`.
+
+    نأخذ مستوى السكربت الأعلى لكل عقدة. `unusedPercent` يُحسَب (غير موجود جاهزاً).
+    """
+    tm = (_lh_audits(data).get("script-treemap-data") or {})
+    details = tm.get("details") if isinstance(tm.get("details"), dict) else {}
+    nodes = (details or {}).get("nodes") or []
+    rows: list[dict[str, Any]] = []
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        resource_bytes = n.get("resourceBytes") or 0
+        unused_bytes = n.get("unusedBytes") or 0
+        pct = round(unused_bytes / resource_bytes * 100, 1) if resource_bytes else 0.0
+        rows.append({
+            "url": url,
+            "strategy": strategy,
+            "script_url": n.get("name", ""),  # الحقل الأصلي اسمه name
+            "resourceBytes": resource_bytes,
+            "encodedBytes": n.get("encodedBytes"),
+            "unusedBytes": unused_bytes,
+            "unusedPercent": pct,
+        })
+    return rows
+
+
+def extract_lighthouse_tables(
+    data: dict[str, Any], url: str, strategy: str
+) -> dict[str, list[dict[str, Any]]]:
+    """يجمع الجداول الكبيرة الثلاثة (للتصدير CSV)."""
+    return {
+        "audits": extract_audit_rows(data, url, strategy),
+        "network_requests": extract_network_request_rows(data, url, strategy),
+        "js_treemap": extract_treemap_rows(data, url, strategy),
+    }

@@ -3,6 +3,38 @@
 ## Unreleased
 
 ### Added
+- **Deep PageSpeed/Lighthouse tables** (from the raw report we already fetch, no extra API
+  call): `pagespeed_audits.csv` (all ~150 audits), `pagespeed_network_requests.csv` (every
+  request with size/status/protocol/priority/entity), `pagespeed_js_treemap.csv` (per-script
+  bytes + computed unused %), and `pagespeed_failed_audits.csv` (only real failures —
+  `scoreDisplayMode binary/numeric` and `score < 1`, with a `None`-safe filter). The big
+  tables are excluded from the JSON archive (kept in CSV) to keep JSON light.
+- **GSC insights** computed from data already fetched: `keyword_cannibalization.csv`
+  (multiple pages competing for one query) and `internal_link_opportunities.csv` (pages with
+  high search impressions but few internal inlinks, by joining GSC with the internal link
+  score). No extra crawl or client involvement.
+- **GSC URL Inspection** (optional, `integrations.gsc.url_inspection`, off by default): real
+  per-URL index status/verdict/coverage via the URL Inspection API → `gsc_index_status.csv`,
+  capped by `inspect_max_urls` to respect the daily quota.
+- **CrUX History** (optional, `integrations.pagespeed.crux_history`, off by default): Core Web
+  Vitals field-data trend over time (p75 per period) → `crux_history.csv`, using the existing
+  PageSpeed key.
+- **Sitemap generator** (`output.generate_sitemap`, off by default): clean `sitemap.xml` from
+  indexable (200, self-canonical) pages, splitting into a sitemap index above 50,000 URLs.
+- **Crawl comparison over time** (`analyzers.crawl_compare`): compare two audit runs of the
+  same site → fixed / new / persisting issue types + page add/remove + totals delta.
+- **Prioritized hints** on every SEO issue: `impact`, `effort`, `why_it_matters`,
+  `how_to_fix`, and a `priority_score` (impact ÷ effort) — actionable client reporting.
+- **Adaptive throttle** (`crawl.adaptive_throttle`, off by default): automatically slows the
+  crawl on 429/5xx/slow responses and recovers as the site stabilizes.
+- **E-commerce presets** (`site.platform_preset`: zid | salla | shopify | woocommerce): adds
+  recommended exclude patterns (cart/checkout/account) without clearing yours; includes a
+  platform detector.
+- **Accessibility (axe-core) module** (`analyzers.accessibility`, optional): pure summarizer
+  for axe results + a helper to run axe on a rendered Playwright page.
+- **Auto-install of optional requirements** (`utils.auto_install`): when the tool needs an
+  optional library it installs it automatically (notifying, no prompt), restricted to a known
+  allowlist of the tool's optional deps; disable with `SCT_NO_AUTO_INSTALL=1`.
 - Output files browser in the job page: a labelled, grouped list of **every** produced file
   (Reports / Excel / Archive / CSV data / XML) with human‑readable bilingual names and sizes.
   Each file downloads individually, **“Download all (ZIP)”** grabs everything in one click,

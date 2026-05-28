@@ -760,5 +760,218 @@ class RegressionTests(unittest.TestCase):
             self.assertFalse(robots.load())  # يفشل بأمان بدل تحميل الكل
 
 
+    def test_pagespeed_lighthouse_table_extraction(self):
+        # IMP-17أ: استخراج جداول Lighthouse المنظّمة من الخام
+        from integrations.pagespeed_api import (
+            extract_lighthouse_tables, extract_failed_audits)
+        data = {"lighthouseResult": {"audits": {
+            "image-alt": {"title": "Image alt", "score": 0, "scoreDisplayMode": "binary",
+                          "displayValue": "", "details": {"type": "table"}},
+            "speed-index": {"title": "Speed Index", "score": 0.4, "scoreDisplayMode": "numeric",
+                            "numericValue": 11876.6, "numericUnit": "millisecond",
+                            "details": {"type": "numeric"}},
+            "focus-traps": {"title": "Focus traps", "score": None, "scoreDisplayMode": "manual"},
+            "network-requests": {"details": {"type": "table", "items": [
+                {"url": "https://x.com/a.js", "resourceType": "Script", "transferSize": 100,
+                 "resourceSize": 300, "statusCode": 200, "protocol": "h2", "priority": "High",
+                 "mimeType": "text/javascript", "networkRequestTime": 1.0,
+                 "networkEndTime": 5.0, "entity": "x.com"}]}},
+            "script-treemap-data": {"details": {"type": "treemap-data", "nodes": [
+                {"name": "https://x.com/a.js", "resourceBytes": 1000, "encodedBytes": 400,
+                 "unusedBytes": 250},
+                {"name": "https://x.com/zero.js", "resourceBytes": 0, "encodedBytes": 0,
+                 "unusedBytes": 0}]}},
+        }}}
+        t = extract_lighthouse_tables(data, "https://x.com/", "mobile")
+        self.assertEqual(len(t["audits"]), 5)  # كل المفاتيح تدقيقات (شاملة network/treemap)
+        self.assertEqual(len(t["network_requests"]), 1)
+        self.assertEqual(t["network_requests"][0]["request_url"], "https://x.com/a.js")
+        tm = {r["script_url"]: r["unusedPercent"] for r in t["js_treemap"]}
+        self.assertEqual(tm["https://x.com/a.js"], 25.0)
+        self.assertEqual(tm["https://x.com/zero.js"], 0.0)  # حارس القسمة على صفر
+        # التدقيقات الفاشلة: image-alt(0) و speed-index(0.4) فقط؛ focus-traps(manual/None) مُستبعَد
+        fa = {r["audit_id"] for r in extract_failed_audits(data, "https://x.com/", "mobile")}
+        self.assertEqual(fa, {"image-alt", "speed-index"})
+
+
+    def test_gsc_cannibalization_and_link_opportunities(self):
+        # IMP-1: تكلّس الكلمات + فُرَص الروابط الداخلية من بيانات GSC
+        from analyzers.gsc_insights import (
+            detect_cannibalization, find_internal_link_opportunities)
+        page_queries = [
+            {"page": "https://x.com/a", "query": "كتب", "clicks": 10, "impressions": 500, "position": 5},
+            {"page": "https://x.com/b", "query": "كتب", "clicks": 3, "impressions": 300, "position": 8},
+            {"page": "https://x.com/c", "query": "روايات", "clicks": 20, "impressions": 200, "position": 3},
+        ]
+        cann = detect_cannibalization(page_queries, min_impressions=10, min_pages=2)
+        # "كتب" يتنافس عليه صفحتان؛ "روايات" صفحة واحدة فقط
+        self.assertEqual(cann["count"], 1)
+        self.assertEqual(cann["cannibalization"][0]["query"], "كتب")
+        self.assertEqual(cann["cannibalization"][0]["pages_count"], 2)
+
+        gsc_pages = [
+            {"page": "https://x.com/strong", "clicks": 50, "impressions": 5000, "position": 4},
+            {"page": "https://x.com/weak", "clicks": 5, "impressions": 800, "position": 12},
+            {"page": "https://x.com/lowimp", "clicks": 0, "impressions": 5, "position": 40},
+        ]
+        link_score_pages = [
+            {"url": "https://x.com/strong", "internal_inlinks": 40},
+            {"url": "https://x.com/weak", "internal_inlinks": 1},
+        ]
+        opp = find_internal_link_opportunities(
+            gsc_pages, link_score_pages, min_impressions=100, max_inlinks=2)
+        urls = {o["page"] for o in opp["opportunities"]}
+        self.assertIn("https://x.com/weak", urls)       # ظهور عالٍ + روابط قليلة
+        self.assertNotIn("https://x.com/strong", urls)  # روابط كثيرة
+        self.assertNotIn("https://x.com/lowimp", urls)  # ظهور منخفض
+
+
+    def test_sitemap_generator_includes_only_eligible(self):
+        # IMP-5: مولّد sitemap يُدرِج فقط الصفحات 200 + indexable + canonical ذاتي
+        from exporters.sitemap_generator import SitemapGenerator
+        pages = [
+            {"url": "https://x.com/a", "status_code": 200, "is_indexable": True,
+             "canonical": "https://x.com/a", "last_modified": "2026-05-01T10:00:00"},
+            {"url": "https://x.com/b", "status_code": 200, "is_indexable": True, "canonical": ""},
+            {"url": "https://x.com/404", "status_code": 404, "is_indexable": True},
+            {"url": "https://x.com/noindex", "status_code": 200, "is_indexable": False},
+            {"url": "https://x.com/canon", "status_code": 200, "is_indexable": True,
+             "canonical": "https://x.com/a"},  # canonical لغيرها ⇒ يُستبعَد
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            res = SitemapGenerator(tmp, base_url="https://x.com/").generate(pages)
+            self.assertEqual(res["url_count"], 2)
+            content = Path(res["files"][0]).read_text(encoding="utf-8")
+            self.assertIn("<loc>https://x.com/a</loc>", content)
+            self.assertIn("<loc>https://x.com/b</loc>", content)
+            self.assertNotIn("/404", content)
+            self.assertNotIn("/noindex", content)
+            self.assertNotIn("/canon", content)
+            self.assertIn("<lastmod>2026-05-01</lastmod>", content)
+            self.assertIn('xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"', content)
+
+
+    def test_seo_issue_hints_attached(self):
+        # IMP-8: إثراء المشاكل بالأثر/الجهد/لماذا/كيف وأولوية
+        from analyzers.hints import attach_hints
+        seo = {"all_issues": [
+            {"issue_type": "Broken internal links", "severity": "🔴 Critical"},
+            {"issue_type": "Missing meta description", "severity": "🟡 Medium"},
+        ], "by_severity": {}, "by_category": {}}
+        attach_hints(seo)
+        broken = seo["all_issues"][0]
+        self.assertEqual(broken["impact"], "high")
+        self.assertEqual(broken["effort"], "low")
+        self.assertTrue(broken["why_it_matters"])
+        self.assertTrue(broken["how_to_fix"])
+        self.assertGreater(broken["priority_score"], 0)
+
+    def test_crawl_compare_fixed_new_persisting(self):
+        # IMP-4: مقارنة زمنية بين زحفتين
+        from analyzers.crawl_compare import compare_crawls
+        old = {"pages": [{"url": "https://x.com/a"}, {"url": "https://x.com/b"}],
+               "seo_issues": {"all_issues": [
+                   {"issue_type": "Missing title", "affected_count": 5},
+                   {"issue_type": "Broken links", "affected_count": 3}],
+                   "summary": {"total_issues": 8}}}
+        new = {"pages": [{"url": "https://x.com/a"}, {"url": "https://x.com/c"}],
+               "seo_issues": {"all_issues": [
+                   {"issue_type": "Missing title", "affected_count": 2},
+                   {"issue_type": "Thin content", "affected_count": 4}],
+                   "summary": {"total_issues": 6}}}
+        r = compare_crawls(old, new)
+        fixed = {f["issue_type"] for f in r["fixed_issue_types"]}
+        newp = {f["issue_type"] for f in r["new_issue_types"]}
+        pers = {f["issue_type"]: f for f in r["persisting_issue_types"]}
+        self.assertEqual(fixed, {"Broken links"})
+        self.assertEqual(newp, {"Thin content"})
+        self.assertEqual(pers["Missing title"]["delta"], -3)
+        self.assertTrue(r["summary"]["improved"])
+        self.assertEqual(r["summary"]["pages_added_count"], 1)   # /c
+        self.assertEqual(r["summary"]["pages_removed_count"], 1)  # /b
+
+    def test_adaptive_throttle_backs_off_and_recovers(self):
+        # IMP-10: التأخير يرتفع عند 429/5xx ويتعافى عند النجاح
+        from crawler.adaptive_throttle import AdaptiveThrottle
+        t = AdaptiveThrottle(enabled=True, min_delay=0.0, max_delay=5.0,
+                             step_up=0.5, step_down=0.25)
+        self.assertEqual(t.delay(), 0.0)
+        t.record(503)
+        self.assertEqual(t.delay(), 1.0)  # 5xx ⇒ خطوتان
+        t.record(200)
+        self.assertEqual(t.delay(), 0.75)  # تعافٍ تدريجي
+        # معطّل ⇒ دائماً صفر
+        off = AdaptiveThrottle(enabled=False)
+        off.record(500)
+        self.assertEqual(off.delay(), 0.0)
+
+    def test_platform_preset_detect_and_apply(self):
+        # IMP-11: كشف منصّة التجارة وتطبيق أنماط الاستبعاد
+        from config_presets import detect_platform, apply_preset
+        self.assertEqual(detect_platform('<script src="https://cdn.shopify.com/x.js">'), "shopify")
+        self.assertEqual(detect_platform("", {"X-Shopid": "123"}), "shopify")
+        self.assertEqual(detect_platform("just a normal page"), "unknown")
+        cfg = {"filters": {"exclude_patterns": ["*/keepme*"]}}
+        apply_preset(cfg, "salla")
+        ex = cfg["filters"]["exclude_patterns"]
+        self.assertIn("*/keepme*", ex)       # لم يُمسح ما وضعه المستخدم
+        self.assertIn("*/checkout*", ex)      # أُضيف من القالب
+        self.assertEqual(cfg["site"]["platform_preset_applied"], "Salla")
+
+
+    def test_auto_install_present_and_refuses_unknown(self):
+        # IMP-16: المكتبة الموجودة لا تُثبَّت؛ غير المُدرَجة تُرفَض بأمان بلا تثبيت
+        from utils.auto_install import ensure_package
+        self.assertTrue(ensure_package("json"))  # موجودة في المكتبة القياسية
+        # اسم خارج القائمة البيضاء وغير موجود ⇒ يُرفض دون محاولة تثبيت
+        self.assertFalse(ensure_package("totally_made_up_pkg_xyz", auto=True))
+        # مُدرَج لكن التثبيت معطّل ⇒ لا يُثبّت
+        self.assertFalse(ensure_package("playwright_not_real_import", pip_name="x", auto=False))
+
+    def test_gsc_url_inspection_parser(self):
+        # IMP-2: تسطيح استجابة URL Inspection
+        from integrations.gsc_api import parse_inspection_result
+        resp = {"inspectionResult": {
+            "indexStatusResult": {"verdict": "PASS", "coverageState": "Submitted and indexed",
+                                  "robotsTxtState": "ALLOWED", "googleCanonical": "https://x.com/a"},
+            "mobileUsabilityResult": {"verdict": "PASS"},
+        }}
+        row = parse_inspection_result(resp, "https://x.com/a")
+        self.assertEqual(row["verdict"], "PASS")
+        self.assertEqual(row["coverage_state"], "Submitted and indexed")
+        self.assertEqual(row["mobile_verdict"], "PASS")
+
+    def test_crux_history_parser(self):
+        # IMP-9: تسطيح سلسلة CrUX الزمنية إلى صف لكل فترة
+        from integrations.crux_history import parse_crux_history
+        resp = {"record": {
+            "collectionPeriods": [
+                {"lastDate": {"year": 2026, "month": 4, "day": 1}},
+                {"lastDate": {"year": 2026, "month": 5, "day": 1}}],
+            "metrics": {
+                "largest_contentful_paint": {"percentilesTimeseries": {"p75s": [2500, 2100]}},
+                "cumulative_layout_shift": {"percentilesTimeseries": {"p75s": ["0.10", "0.05"]}},
+            }}}
+        rows = parse_crux_history(resp)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["period_end"], "2026-04-01")
+        self.assertEqual(rows[0]["lcp_p75_ms"], 2500)
+        self.assertEqual(rows[1]["cls_p75"], "0.05")
+
+    def test_accessibility_axe_summary(self):
+        # IMP-7: تلخيص ناتج axe وترتيبه حسب الأثر
+        from analyzers.accessibility import summarize_axe_results
+        axe = {"violations": [
+            {"id": "color-contrast", "impact": "serious", "help": "Contrast",
+             "nodes": [{}, {}]},
+            {"id": "image-alt", "impact": "critical", "help": "Alt", "nodes": [{}]},
+        ]}
+        s = summarize_axe_results(axe, "https://x.com/")
+        self.assertEqual(s["violations_count"], 2)
+        self.assertEqual(s["nodes_total"], 3)
+        self.assertEqual(s["violations"][0]["rule_id"], "image-alt")  # critical أولاً
+        self.assertEqual(s["by_impact"]["serious"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

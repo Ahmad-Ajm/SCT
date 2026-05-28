@@ -224,3 +224,42 @@ class GSCClient:
         except Exception as e:
             log.error(f"فشل جلب Sitemaps: {e}")
             return []
+
+    def inspect_url(self, url: str) -> dict[str, Any]:
+        """حالة الفهرسة الحقيقية لرابط واحد عبر URL Inspection API (IMP-2)."""
+        if not self._authenticated:
+            return {"url": url, "error": "not_authenticated"}
+        try:
+            resp = self.service.urlInspection().index().inspect(
+                body={"inspectionUrl": url, "siteUrl": self.site_url}
+            ).execute()
+            return parse_inspection_result(resp, url)
+        except Exception as e:  # noqa: BLE001
+            return {"url": url, "error": str(e)[:200]}
+
+    def inspect_urls(self, urls: list[str], max_urls: int = 50) -> list[dict[str, Any]]:
+        """فحص فهرسة عيّنة من الروابط (مع سقف لاحترام حصّة API اليومية)."""
+        out: list[dict[str, Any]] = []
+        for url in (urls or [])[: max(0, int(max_urls))]:
+            out.append(self.inspect_url(url))
+        return out
+
+
+def parse_inspection_result(resp: dict[str, Any], url: str) -> dict[str, Any]:
+    """يُسطّح استجابة URL Inspection إلى صف واحد (دالّة نقية قابلة للاختبار)."""
+    idx = ((resp or {}).get("inspectionResult") or {}).get("indexStatusResult") or {}
+    mobile = ((resp or {}).get("inspectionResult") or {}).get("mobileUsabilityResult") or {}
+    rich = ((resp or {}).get("inspectionResult") or {}).get("richResultsResult") or {}
+    return {
+        "url": url,
+        "verdict": idx.get("verdict", ""),                 # PASS / FAIL / NEUTRAL
+        "coverage_state": idx.get("coverageState", ""),    # سبب الفهرسة/عدمها
+        "robots_txt_state": idx.get("robotsTxtState", ""),
+        "indexing_state": idx.get("indexingState", ""),
+        "page_fetch_state": idx.get("pageFetchState", ""),
+        "last_crawl_time": idx.get("lastCrawlTime", ""),
+        "google_canonical": idx.get("googleCanonical", ""),
+        "user_canonical": idx.get("userCanonical", ""),
+        "mobile_verdict": mobile.get("verdict", ""),
+        "rich_results_verdict": rich.get("verdict", ""),
+    }

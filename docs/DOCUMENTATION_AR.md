@@ -150,6 +150,15 @@ main.py (root launcher) ──► seo_crawler/seo_crawler/main.py (التنسي�
   resource_status, custom_extraction, excluded_urls, gsc_pages/gsc_queries,
   ga4_landing_pages/ga4_channels, priority_opportunities, ai_recommendations,
   lighthouse_import, js_diff.
+- مخرجات PageSpeed العميقة (عند تفعيل التكامل): `pagespeed`, `pagespeed_opportunities`,
+  و**الجداول المنظّمة**: `pagespeed_audits` (كل التدقيقات)، `pagespeed_network_requests`
+  (كل الطلبات)، `pagespeed_js_treemap` (بايتات السكربتات + نسبة غير المستخدم)،
+  `pagespeed_failed_audits` (المشاكل الحقيقية فقط).
+- تحليلات GSC: `keyword_cannibalization` (تكلّس الكلمات)، `internal_link_opportunities`
+  (صفحات بظهور عالٍ وروابط داخلية قليلة)، و`gsc_index_status` (عند تفعيل URL Inspection).
+- `crux_history` (عند تفعيل CrUX History): اتجاه Core Web Vitals عبر الزمن.
+- `sitemap.xml` (عند تفعيل `output.generate_sitemap`): من الصفحات القابلة للفهرسة.
+- كل مشكلة في `seo_issues` تحمل الآن: `impact`/`effort`/`why_it_matters`/`how_to_fix`/`priority_score`.
 - `metrics.json`: عدّادات/توقيتات/أحداث + ملخّص أبطأ المراحل.
 
 ## 8) المحلّلات (مختصر)

@@ -5,6 +5,9 @@ site:
   start_url: "https://example.com/"
   domain: "example.com"
   additional_internal_domains: []
+  # قالب منصّة تجارة جاهز (IMP-11): "" أو zid | salla | shopify | woocommerce
+  # يضيف أنماط استبعاد موصى بها (السلّة/الدفع/الحساب) دون مسح ما تضعه أنت.
+  platform_preset: ""
 
 crawl:
   max_pages: 500
@@ -25,6 +28,14 @@ crawl:
   max_page_size_mb: 10
   follow_redirects: true
   max_redirect_hops: 5
+  # تحكّم تكيّفي بالسرعة (IMP-10): يزيد التأخير عند 429/5xx/بطء ويتعافى تلقائياً.
+  adaptive_throttle:
+    enabled: false
+    min_delay: 0.0
+    max_delay: 5.0
+    step_up: 0.5
+    step_down: 0.25
+    slow_ms: 3000
 
 javascript:
   enabled: false
@@ -91,6 +102,7 @@ output:
   timestamped_folder: true
   json_full: false       # true = ضمّن المصفوفات الخام في JSON (قد يكون ضخماً)
   xml_max_rows: 50000    # سقف صفوف XML لكل مجموعة (0 = بلا حد)
+  generate_sitemap: false  # توليد sitemap.xml من الصفحات القابلة للفهرسة (IMP-5)
 
 # خيارات تقرير HTML/PDF (تُستخدم عند إضافة html/pdf إلى formats)
 report:
@@ -120,6 +132,9 @@ integrations:
     credentials_file: "credentials/gsc_credentials.json"
     site_url: "https://example.com/"
     months_back: 16
+    # حالة الفهرسة الحقيقية لكل رابط عبر URL Inspection API (IMP-2) — يحترم الحصّة عبر السقف
+    url_inspection: false
+    inspect_max_urls: 50
   pagespeed:
     enabled: false
     api_key: ""
@@ -129,6 +144,10 @@ integrations:
     strategies:
       - mobile
       - desktop
+    # حفظ تقرير Lighthouse الخام الكامل لكل صفحة (لاستخراج الجداول العميقة — IMP-17أ)
+    save_raw_json: false
+    # اتجاه Core Web Vitals عبر الزمن من CrUX History (IMP-9) — يستعمل نفس api_key
+    crux_history: false
   awt:
     enabled: false
     csv_folder: "./external_data/awt"

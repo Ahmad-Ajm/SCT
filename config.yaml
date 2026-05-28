@@ -11,6 +11,8 @@ site:
   # نطاقات إضافية تُعتبر "داخلية" (إن وُجدت)
   additional_internal_domains: []
   # مثال: ["shop.example.com", "blog.example.com"]
+  # قالب منصّة تجارة جاهز (IMP-11): "" أو zid | salla | shopify | woocommerce
+  platform_preset: ""
 
 # === إعدادات الزحف العامة ===
 crawl:
@@ -68,6 +70,16 @@ crawl:
 
   # الحد الأقصى لعدد redirect chain hops
   max_redirect_hops: 5
+
+  # === تحكّم تكيّفي بالسرعة (IMP-10) ===
+  # يزيد التأخير تلقائياً عند 429/5xx/استجابة بطيئة ويتعافى عند تحسّن الموقع.
+  adaptive_throttle:
+    enabled: false
+    min_delay: 0.0
+    max_delay: 5.0
+    step_up: 0.5
+    step_down: 0.25
+    slow_ms: 3000
 
 # === JavaScript Rendering ===
 javascript:
@@ -244,6 +256,9 @@ output:
   # سقف صفوف XML لكل مجموعة (يمنع ملفات XML بحجم غيغابايت). 0 = بلا حد.
   xml_max_rows: 50000
 
+  # توليد sitemap.xml نظيف من الصفحات القابلة للفهرسة (IMP-5)
+  generate_sitemap: false
+
 # === تقرير HTML/PDF (يُستخدم عند إضافة html/pdf إلى output.formats) ===
 report:
   language: "ar"          # ar | en
@@ -307,6 +322,10 @@ integrations:
     site_url: "https://example.com/"
     # عدد الأشهر الماضية للجلب
     months_back: 16
+    # حالة الفهرسة الحقيقية لكل رابط عبر URL Inspection API (IMP-2)
+    # يحترم الحصّة اليومية عبر السقف؛ لا PII.
+    url_inspection: false
+    inspect_max_urls: 50
 
   pagespeed:
     enabled: false
@@ -324,6 +343,8 @@ integrations:
     # === v3.0: عمر الـ cache لنتائج PageSpeed (بالأيام) ===
     # يوفّر quota الـ API (الحد المجاني 25K/يوم)
     cache_ttl_days: 7
+    # اتجاه Core Web Vitals عبر الزمن من CrUX History (IMP-9) — يستعمل نفس api_key
+    crux_history: false
     # الاستراتيجيات: mobile, desktop, both
     strategies:
       - mobile

@@ -557,6 +557,9 @@ def run_analysis(
                 canonical_data=results["canonical_data"],
                 config=config,
             )
+            # إثراء المشاكل بتلميحات الأثر/الجهد و«لماذا/كيف» (IMP-8)
+            from analyzers.hints import attach_hints
+            attach_hints(results["seo_issues"])
         summary = results["seo_issues"]["summary"]
         log.info(f"  🔴 Critical: {summary['critical_count']}")
         log.info(f"  🟠 High:     {summary['high_count']}")
@@ -844,6 +847,23 @@ def run_integrations(crawler, config, mode: CrawlMode, cache=None):
             if client.authenticate():
                 results["gsc_pages"] = client.get_top_pages()
                 results["gsc_queries"] = client.get_top_queries()
+                # بُعد (page, query) لتحليل تكلّس الكلمات (IMP-1) — بلا نداء API إضافي
+                # خارج حصّة GSC الاعتيادية.
+                try:
+                    results["gsc_page_queries"] = client.get_pages_with_queries()
+                except Exception as e:  # noqa: BLE001
+                    log.warning(f"  GSC page+query fetch skipped: {e}")
+                # حالة الفهرسة الحقيقية لكل رابط (IMP-2) — اختياري، يحترم الحصّة عبر سقف
+                if gsc_config.get("url_inspection"):
+                    inspect_max = int(gsc_config.get("inspect_max_urls", 50))
+                    insp_urls = [
+                        (p.url if hasattr(p, "url") else p.get("url"))
+                        for p in crawler.get_pages()
+                    ]
+                    insp_urls = [u for u in insp_urls if u][:inspect_max]
+                    log.info(f"  → URL Inspection على {len(insp_urls)} رابط (سقف {inspect_max})")
+                    results["gsc_index_status"] = client.inspect_urls(
+                        insp_urls, max_urls=inspect_max)
     else:
         log.info("→ GSC disabled")
 
@@ -888,6 +908,14 @@ def run_integrations(crawler, config, mode: CrawlMode, cache=None):
                     f"{cache_stats['misses']} misses "
                     f"({cache_stats['hit_rate']}% hit rate)"
                 )
+                # اتجاه Core Web Vitals عبر الزمن على مستوى الأصل (IMP-9) — اختياري
+                if ps_config.get("crux_history"):
+                    from integrations.crux_history import CrUXHistoryClient
+                    origin = config.get("site", {}).get("start_url", "")
+                    log.info(f"  → CrUX History للأصل {origin}")
+                    rows = CrUXHistoryClient(api_key).query(origin=origin)
+                    if rows:
+                        results["crux_history"] = rows
         else:
             log.warning("  PageSpeed API key missing")
     else:
@@ -1094,6 +1122,9 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
             if (integrations or {}).get("ga4_channels"):
                 csv_files["ga4_channels"] = csv_exporter._export(
                     "ga4_channels.csv", integrations["ga4_channels"])
+            if (integrations or {}).get("gsc_index_status"):
+                csv_files["gsc_index_status"] = csv_exporter._export(
+                    "gsc_index_status.csv", integrations["gsc_index_status"])
             opps = (analysis.get("opportunities", {}) or {}).get("opportunities")
             if opps:
                 csv_files["priority_opportunities"] = csv_exporter._export(
@@ -1110,6 +1141,16 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
                 csv_files["near_duplicates"] = csv_exporter._export(
                     "near_duplicates.csv", nd_pairs)
 
+            # تحليلات GSC (IMP-1): تكلّس الكلمات + فُرَص الروابط الداخلية
+            cann_rows = _flatten_cannibalization(analysis.get("cannibalization", {}))
+            if cann_rows:
+                csv_files["keyword_cannibalization"] = csv_exporter._export(
+                    "keyword_cannibalization.csv", cann_rows)
+            ilo = (analysis.get("internal_link_opportunities", {}) or {}).get("opportunities") or []
+            if ilo:
+                csv_files["internal_link_opportunities"] = csv_exporter._export(
+                    "internal_link_opportunities.csv", ilo)
+
             # PageSpeed Insights (عند تفعيل التكامل) — نُسطّح المقاييس الأساسية
             ps_data = (integrations or {}).get("pagespeed") or []
             ps_rows = _flatten_pagespeed(ps_data)
@@ -1119,6 +1160,12 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
             if ps_opps:
                 csv_files["pagespeed_opportunities"] = csv_exporter._export(
                     "pagespeed_opportunities.csv", ps_opps)
+            # الجداول المنظّمة العميقة (audits / network / treemap / failed) — IMP-17أ
+            _export_pagespeed_tables(ps_data, csv_exporter, csv_files)
+            # اتجاه Core Web Vitals عبر الزمن (IMP-9)
+            if (integrations or {}).get("crux_history"):
+                csv_files["crux_history"] = csv_exporter._export(
+                    "crux_history.csv", integrations["crux_history"])
 
             # توصيات الذكاء الاصطناعي (عند تفعيل التكامل)
             ai = analysis.get("ai_analysis", {}) or {}
@@ -1130,6 +1177,9 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
     if "excel" in formats:
         log.info("→ Excel...")
         with span("export.excel", output_dir=str(output_dir)):
+            # تثبيت تلقائي لـ openpyxl عند الحاجة (IMP-16)
+            from utils.auto_install import ensure_package
+            ensure_package("openpyxl")
             try:
                 from exporters.excel_exporter import ExcelExporter
             except ModuleNotFoundError as e:
@@ -1191,7 +1241,7 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
                 redirect_data=analysis.get("redirect_data", {}),
                 pagination_data=analysis.get("pagination_data", {}),
                 external_check=external_check,
-                integrations=integrations,
+                integrations=_integrations_for_json(integrations),
                 excluded_urls=excluded,
                 excluded_summary=excluded_counts,
                 security_data=analysis.get("security_data", {}),
@@ -1200,6 +1250,8 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
                 custom_extraction=getattr(crawler, "get_custom_extraction", lambda: [])(),
                 js_diff=getattr(crawler, "get_js_diff", lambda: [])(),
                 opportunities=analysis.get("opportunities", {}),
+                cannibalization=analysis.get("cannibalization", {}),
+                internal_link_opportunities=analysis.get("internal_link_opportunities", {}),
                 ai_analysis=analysis.get("ai_analysis", {}),
                 gsc_summary=_gsc_summary(integrations),
                 ga4_summary=_ga4_summary(integrations),
@@ -1281,6 +1333,17 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
         for key in ("html", "pdf", "html_client", "pdf_client", "html_expert", "pdf_expert"):
             if report.get(key):
                 exported_files[key] = report[key]
+
+    # === توليد Sitemap من الصفحات القابلة للفهرسة (IMP-5) — اختياري ===
+    if config["output"].get("generate_sitemap"):
+        try:
+            from exporters.sitemap_generator import SitemapGenerator
+            base = config.get("site", {}).get("start_url", "")
+            sm = SitemapGenerator(str(output_dir), base_url=base).generate(pages)
+            for i, fpath in enumerate(sm.get("files", [])):
+                exported_files["sitemap" if i == 0 else f"sitemap_{i}"] = fpath
+        except Exception as e:  # noqa: BLE001
+            log.error(f"Sitemap generation failed: {e}")
 
     gauge("export.files", len(exported_files))
     return exported_files
@@ -1394,6 +1457,77 @@ def _flatten_pagespeed_opportunities(results: list[dict[str, Any]]) -> list[dict
     return rows
 
 
+def _flatten_pagespeed_table(results: list[dict[str, Any]], table: str) -> list[dict[str, Any]]:
+    """يجمع صفوف جدول Lighthouse منظّم (audits/network_requests/js_treemap) عبر كل النتائج."""
+    rows: list[dict[str, Any]] = []
+    for r in results or []:
+        if isinstance(r, dict):
+            rows.extend((r.get("lighthouse_tables") or {}).get(table) or [])
+    return rows
+
+
+def _flatten_pagespeed_failed_audits(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """يجمع التدقيقات الفاشلة (مشاكل حقيقية) عبر كل النتائج."""
+    rows: list[dict[str, Any]] = []
+    for r in results or []:
+        if isinstance(r, dict):
+            rows.extend(r.get("failed_audits") or [])
+    return rows
+
+
+def _export_pagespeed_tables(ps_data, exporter, files: dict, log_each: bool = False) -> None:
+    """يصدّر الجداول المنظّمة الأربعة لـ PageSpeed كملفات CSV (IMP-17أ)."""
+    table_files = [
+        ("pagespeed_audits", "audits"),
+        ("pagespeed_network_requests", "network_requests"),
+        ("pagespeed_js_treemap", "js_treemap"),
+    ]
+    for key, table in table_files:
+        rows = _flatten_pagespeed_table(ps_data, table)
+        if rows:
+            files[key] = exporter._export(f"{key}.csv", rows)
+            if log_each:
+                log.info(f"  ✓ {key}.csv ({len(rows)} صفوف)")
+    failed = _flatten_pagespeed_failed_audits(ps_data)
+    if failed:
+        files["pagespeed_failed_audits"] = exporter._export(
+            "pagespeed_failed_audits.csv", failed)
+        if log_each:
+            log.info(f"  ✓ pagespeed_failed_audits.csv ({len(failed)} صفوف)")
+
+
+def _flatten_cannibalization(cann: dict[str, Any]) -> list[dict[str, Any]]:
+    """يحوّل مجموعات تكلّس الكلمات إلى صف لكل (استعلام، صفحة متنافِسة)."""
+    rows: list[dict[str, Any]] = []
+    for g in (cann or {}).get("cannibalization", []) or []:
+        for p in g.get("competing_pages", []) or []:
+            rows.append({
+                "query": g.get("query"),
+                "competing_pages_count": g.get("pages_count"),
+                "query_total_impressions": g.get("total_impressions"),
+                "page": p.get("page"),
+                "clicks": p.get("clicks"),
+                "impressions": p.get("impressions"),
+                "position": p.get("position"),
+            })
+    return rows
+
+
+def _integrations_for_json(integrations: dict[str, Any]) -> dict[str, Any]:
+    """نسخة من التكاملات بلا الجداول الكبيرة (lighthouse_tables) لإبقاء JSON خفيفاً.
+
+    الجداول الكاملة في CSV؛ نُبقي failed_audits (صغير ومفيد للوحة/التقرير)."""
+    if not isinstance(integrations, dict) or not integrations.get("pagespeed"):
+        return integrations
+    lean = dict(integrations)
+    lean["pagespeed"] = [
+        ({k: v for k, v in r.items() if k != "lighthouse_tables"}
+         if isinstance(r, dict) else r)
+        for r in integrations["pagespeed"]
+    ]
+    return lean
+
+
 def _flatten_hreflang_issues(hv: dict[str, Any]) -> list[dict[str, Any]]:
     """تحويل نتائج التحقق من hreflang إلى صفوف CSV موحّدة (عمود issue + التفاصيل)."""
     categories = (
@@ -1465,7 +1599,8 @@ async def _run_integrations_only(config, mode, output_dir, cache, db=None) -> No
     csv_exp = CSVExporter(str(csv_dir),
                           encoding=config["output"].get("encoding", "utf-8-sig"))
     exported: dict[str, str] = {}
-    for key in ("gsc_pages", "gsc_queries", "ga4_landing_pages", "ga4_channels"):
+    for key in ("gsc_pages", "gsc_queries", "ga4_landing_pages", "ga4_channels",
+                "gsc_index_status", "crux_history"):
         rows = (integrations or {}).get(key) or []
         if rows:
             exported[key] = csv_exp._export(f"{key}.csv", rows)
@@ -1480,6 +1615,8 @@ async def _run_integrations_only(config, mode, output_dir, cache, db=None) -> No
         exported["pagespeed_opportunities"] = csv_exp._export(
             "pagespeed_opportunities.csv", ps_opps)
         log.info(f"  ✓ pagespeed_opportunities.csv ({len(ps_opps)} صفوف)")
+    # الجداول المنظّمة العميقة (audits / network / treemap / failed) — IMP-17أ
+    _export_pagespeed_tables(ps_data, csv_exp, exported, log_each=True)
 
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     site_slug = slugify_label(config.get("site", {}).get("domain", "") or "site")
@@ -1489,7 +1626,7 @@ async def _run_integrations_only(config, mode, output_dir, cache, db=None) -> No
         site_config=config["site"],
         gsc_summary=_gsc_summary(integrations),
         ga4_summary=_ga4_summary(integrations),
-        integrations=integrations,
+        integrations=_integrations_for_json(integrations),
     )
     log.info(f"  ✓ {json_file}")
 
@@ -1649,6 +1786,14 @@ async def main_async(args, config: dict[str, Any]):
         configure_target_site(config, args.url)
         log.info(f"🌐 Target URL: {args.url}")
 
+    # === قالب منصّة التجارة (IMP-11) — يُطبَّق عند تحديده صراحةً ===
+    preset_name = (config.get("site", {}) or {}).get("platform_preset", "")
+    if preset_name and preset_name != "auto":
+        from config_presets import apply_preset, PRESETS
+        if preset_name in PRESETS:
+            apply_preset(config, preset_name)
+            log.info(f"🛍️  Applied platform preset: {PRESETS[preset_name]['label']}")
+
     with span("workflow.main", mode=mode.name, url=config["site"].get("start_url", "")):
         if mode.name == "compare":
             await run_compare_workflow(args, config, mode)
@@ -1729,6 +1874,27 @@ async def main_async(args, config: dict[str, Any]):
 
             # === Phase 3: Integrations ===
             integrations = run_integrations(crawler, config, mode, cache=cache)
+
+            # === تحليلات GSC: تكلّس الكلمات + فُرَص الروابط الداخلية (IMP-1) ===
+            try:
+                from analyzers.gsc_insights import (
+                    detect_cannibalization, find_internal_link_opportunities)
+                pq = (integrations or {}).get("gsc_page_queries") or []
+                if pq:
+                    analysis["cannibalization"] = detect_cannibalization(pq)
+                    log.info(
+                        f"→ Cannibalization: "
+                        f"{analysis['cannibalization']['count']} استعلام متنافَس عليه")
+                gsc_pages = (integrations or {}).get("gsc_pages") or []
+                if gsc_pages:
+                    ls_pages = (analysis.get("link_score") or {}).get("pages") or []
+                    analysis["internal_link_opportunities"] = \
+                        find_internal_link_opportunities(gsc_pages, ls_pages)
+                    log.info(
+                        f"→ Internal-link opportunities: "
+                        f"{analysis['internal_link_opportunities']['count']} صفحة")
+            except Exception as e:  # noqa: BLE001
+                log.error(f"GSC insights failed: {e}")
 
             # === التقرير الموحّد: دمج تقني + GSC + GA4 وحساب الأولويات ===
             try:
