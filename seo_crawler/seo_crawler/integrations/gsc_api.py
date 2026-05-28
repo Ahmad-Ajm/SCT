@@ -172,7 +172,7 @@ class GSCClient:
                     "startDate": start_date.isoformat(),
                     "endDate": end_date.isoformat(),
                     "dimensions": dimensions,
-                    "rowLimit": min(row_limit, limit - len(results)),
+                    "rowLimit": max(1, min(row_limit, limit - len(results))),
                     "startRow": start_row,
                 }
 

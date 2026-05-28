@@ -96,12 +96,14 @@ def extract_content(soup: BeautifulSoup, html_size_bytes: int = 0) -> dict[str, 
 
     # === Content hash (تكرار تام) + SimHash (تشابه تقريبي) ===
     content_hash = compute_text_hash(text)
-    # بصمة SimHash من «شينغلات» الكلمات (3-grams) لكشف التشابه التقريبي بين الصفحات
-    if len(words) >= 3:
+    # بصمة SimHash من «شينغلات» الكلمات (3-grams) لكشف التشابه التقريبي بين الصفحات.
+    # بصمة المحتوى القصير جداً (< 10 كلمات) غير مستقرّة وتُنتج تطابقات وهمية في كشف
+    # التشابه التقريبي، لذا نتركها فارغة لتُتجاهل لاحقاً.
+    if len(words) >= 10:
         shingles = [" ".join(words[i:i + 3]) for i in range(len(words) - 2)]
+        content_simhash = str(compute_simhash(shingles))
     else:
-        shingles = words
-    content_simhash = str(compute_simhash(shingles))
+        content_simhash = ""
 
     # === Reading time (تقدير: 200 كلمة/دقيقة) ===
     reading_time = max(1, round(word_count / 200))

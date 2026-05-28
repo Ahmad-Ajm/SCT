@@ -77,7 +77,9 @@ def detect_broken_links(
                 {
                     "url": page_url,
                     "inlinks_count": len(inlinks),
-                    "linking_from": list(set(link["from_url"] for link in inlinks[:10])),
+                    "linking_from": list(
+                        {link.get("from_url", "") for link in inlinks[:10]} - {""}
+                    ),
                 }
             )
 

@@ -19,7 +19,6 @@ integrations/pagespeed_api.py
 
 import time
 from typing import Any, Optional
-from urllib.parse import urlencode
 
 import requests
 
@@ -103,55 +102,73 @@ class PageSpeedClient:
 
         self._cache_misses += 1
 
-        # بناء الطلب
-        params = {
-            "url": url,
-            "strategy": strategy,
-            "key": self.api_key,
-        }
+        # بناء معاملات الطلب كقائمة أزواج — تُمرَّر عبر params= فلا يُبنى رابط
+        # يحوي المفتاح السرّي في النص (يمنع تسرّب المفتاح إلى السجلّات).
+        req_params: list[tuple[str, str]] = [
+            ("url", url),
+            ("strategy", strategy),
+            ("key", self.api_key),
+        ]
+        req_params.extend(("category", cat) for cat in categories)
 
-        # إضافة categories كـ params متعددة
-        category_params = [("category", cat) for cat in categories]
-        full_url = f"{self.BASE_URL}?{urlencode(params)}&{urlencode(category_params)}"
-
-        try:
-            response = requests.get(full_url, timeout=self.timeout)
-
-            if response.status_code != 200:
-                error_msg = response.json().get("error", {}).get("message", "Unknown")
-                log.warning(f"PageSpeed فشل لـ {url}: {error_msg}")
-                return {
-                    "url": url,
-                    "strategy": strategy,
-                    "error": f"HTTP {response.status_code}: {error_msg}",
-                }
-
-            data = response.json()
-
-            # حفظ تقرير Lighthouse الكامل (الخام) إن طُلب — للتحليل العميق
-            if self.raw_dir:
-                self._save_raw(data, url, strategy)
-
-            # تأخير لاحترام rate limits
-            time.sleep(self.delay_seconds)
-
-            # استخراج المقاييس
-            result = self._extract_metrics(data, url, strategy)
-
-            # === حفظ في الـ cache ===
-            if self.cache and "error" not in result:
-                self.cache.set(
-                    "pagespeed", url, cache_params, result,
-                    ttl_seconds=self.cache_ttl_seconds,
+        # إعادة محاولة بسيطة مع تراجع تصاعدي للأخطاء العابرة (مهلة/5xx/429).
+        max_attempts = 3
+        last_error = "Unknown"
+        for attempt in range(max_attempts):
+            try:
+                response = requests.get(
+                    self.BASE_URL, params=req_params, timeout=self.timeout
                 )
 
-            return result
+                if response.status_code != 200:
+                    # جسم الخطأ قد لا يكون JSON صالحاً — نحميه.
+                    try:
+                        error_msg = (
+                            response.json().get("error", {}).get("message", "Unknown")
+                        )
+                    except ValueError:
+                        error_msg = (response.text or "Unknown")[:200]
+                    last_error = f"HTTP {response.status_code}: {error_msg}"
+                    # أخطاء عابرة: أعد المحاولة؛ غير ذلك توقّف فوراً.
+                    if response.status_code in (429, 500, 502, 503, 504) \
+                            and attempt < max_attempts - 1:
+                        time.sleep(self.delay_seconds * (2 ** attempt))
+                        continue
+                    log.warning(f"PageSpeed فشل لـ {url}: {error_msg}")
+                    return {"url": url, "strategy": strategy, "error": last_error}
 
-        except requests.exceptions.Timeout:
-            return {"url": url, "strategy": strategy, "error": "Timeout"}
-        except Exception as e:
-            log.error(f"خطأ في PageSpeed لـ {url}: {e}")
-            return {"url": url, "strategy": strategy, "error": str(e)[:200]}
+                data = response.json()
+
+                # حفظ تقرير Lighthouse الكامل (الخام) إن طُلب — للتحليل العميق
+                if self.raw_dir:
+                    self._save_raw(data, url, strategy)
+
+                # تأخير لاحترام rate limits
+                time.sleep(self.delay_seconds)
+
+                # استخراج المقاييس
+                result = self._extract_metrics(data, url, strategy)
+
+                # === حفظ في الـ cache ===
+                if self.cache and "error" not in result:
+                    self.cache.set(
+                        "pagespeed", url, cache_params, result,
+                        ttl_seconds=self.cache_ttl_seconds,
+                    )
+
+                return result
+
+            except requests.exceptions.Timeout:
+                last_error = "Timeout"
+                if attempt < max_attempts - 1:
+                    time.sleep(self.delay_seconds * (2 ** attempt))
+                    continue
+                return {"url": url, "strategy": strategy, "error": "Timeout"}
+            except Exception as e:
+                log.error(f"خطأ في PageSpeed لـ {url}: {e}")
+                return {"url": url, "strategy": strategy, "error": str(e)[:200]}
+
+        return {"url": url, "strategy": strategy, "error": last_error}
 
     def _save_raw(self, data: dict[str, Any], url: str, strategy: str) -> None:
         """يحفظ استجابة PageSpeed/Lighthouse الكاملة في ملف JSON لكل صفحة."""

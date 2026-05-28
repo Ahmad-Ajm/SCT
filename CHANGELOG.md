@@ -102,6 +102,37 @@
 - Regression test suite covering the fixes below.
 
 ### Fixed
+- Full‑application audit pass (correctness, security, performance) — applied across all parts:
+  - **Duplicate detector**: title/meta‑description now coerced via `str(...)` before
+    `.strip().lower()` so non‑string values from the DB (e.g. numeric titles) can’t crash
+    the analysis.
+  - **Internal‑link score (PageRank)**: repeated nav/footer links between the same two pages
+    are now de‑duplicated to a single `(from, to)` edge before the power iteration, so the
+    score is no longer artificially inflated by links that appear on every page (the
+    docstring promised this dedup but it wasn’t implemented).
+  - **Near‑duplicate (LSH)**: auto‑corrects the band count so the candidate guarantee
+    actually holds (`bands > max_distance`, and `bits % bands == 0`) instead of silently
+    missing similar pairs; asserts the invariant.
+  - **SimHash**: skipped (emit empty fingerprint) for very short text (< 10 words), whose
+    fingerprint is unstable and produced false near‑duplicate matches.
+  - **PageSpeed API**: the API key is now passed via `params=` (never formatted into a URL
+    string that could be logged), error bodies that aren’t valid JSON no longer raise, and
+    transient failures (429/5xx/timeout) get a short exponential‑backoff retry.
+  - **robots.txt**: downloaded with a streaming 2 MB size cap so a huge/compressed response
+    can’t exhaust memory.
+  - **Google OAuth** (`google_auth`): token filenames are scope‑aware and a saved token that
+    doesn’t cover the requested scopes triggers re‑consent; the interactive browser flow is
+    gated by `SCT_NONINTERACTIVE` (set for the background crawl process) so it can never hang
+    a non‑interactive run waiting for consent.
+  - **Resource status**: `status_code` coerced from string before the `>= 400` check, so
+    broken resources stored as text are still counted.
+  - **GSC pagination**: `rowLimit` clamped to `max(1, …)` to avoid a zero/negative limit on
+    the final page.
+  - **Web UI**: `/api/google/upload` rejects payloads > 64 KB (client‑secret files are tiny);
+    `/api/test/ga4` checks `client_secret.json` exists (parity with the GSC test); the
+    “Download all (ZIP)” build runs in a thread executor so large archives don’t block the
+    event loop; XML export has a hard per‑file safety cap inside `XMLExporter`; and
+    `build_report_from_json` skips files larger than 500 MB instead of loading them into RAM.
 - Large‑crawl output blowup & post‑run hang (found on an unlimited 11,937‑page crawl that
   produced a **1.7 GB `complete_audit.json`** and **1.15 GB `links.xml`**):
   - `complete_audit.json` no longer embeds the huge raw arrays (links/images/headings — here

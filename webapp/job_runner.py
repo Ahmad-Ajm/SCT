@@ -214,6 +214,9 @@ class JobRunner:
         env = dict(os.environ)
         env["SCT_PROGRESS_FILE"] = str(progress_file)
         env["PYTHONIOENCODING"] = "utf-8"
+        # عملية الزحف خلفية وغير تفاعلية: امنع أي محاولة لفتح متصفح موافقة OAuth
+        # (كانت قد تعلّق العملية للأبد). التفويض يتم مسبقاً عبر الواجهة.
+        env["SCT_NONINTERACTIVE"] = "1"
         # أسرار التكاملات تُمرَّر عبر البيئة فقط (ليست في ملف الإعداد على القرص)
         env.update(self._secret_env)
 

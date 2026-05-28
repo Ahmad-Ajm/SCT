@@ -14,6 +14,7 @@ integrations/google_auth.py
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,21 @@ from typing import Any, Optional
 from utils.logger import get_logger
 
 log = get_logger(__name__)
+
+
+def _scope_tag(scopes: list[str]) -> str:
+    """وسم قصير ثابت يميّز مجموعة الصلاحيات — كي لا يُعاد استخدام token بصلاحيات مختلفة."""
+    joined = "\n".join(sorted(s.strip() for s in scopes if s))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:8]
+
+
+def _covers_scopes(creds: Any, scopes: list[str]) -> bool:
+    """يتحقّق أنّ الـ token الحالي يغطّي كل الصلاحيات المطلوبة."""
+    have = set(getattr(creds, "scopes", None) or [])
+    if not have:
+        # بعض أنواع الاعتماد لا تُصرّح بالصلاحيات؛ لا نُجبر على إعادة الموافقة حينها.
+        return True
+    return set(scopes).issubset(have)
 
 
 def detect_credentials_type(credentials_file: str) -> str:
@@ -42,12 +58,19 @@ def load_google_credentials(
     credentials_file: str,
     scopes: list[str],
     token_path: Optional[str] = None,
+    allow_interactive: Optional[bool] = None,
 ) -> Optional[Any]:
     """يعيد اعتماداً صالحاً (Service Account أو OAuth) أو None عند الفشل.
 
     للـ OAuth: يستعمل token محفوظاً إن وُجد، وإلا يفتح موافقة المتصفح مرّة واحدة
     (يُفضّل تنفيذها مسبقاً عبر authorize_google.py كي لا تتعطّل عمليات الواجهة).
+
+    allow_interactive: هل يُسمح بفتح متصفح الموافقة؟ افتراضياً يُستنتج من البيئة:
+    إن كان SCT_NONINTERACTIVE مضبوطاً (كما في عملية الزحف الخلفية) فلا نفتح المتصفح
+    أبداً — نُرجع None برسالة واضحة بدل تعليق العملية للأبد.
     """
+    if allow_interactive is None:
+        allow_interactive = not os.environ.get("SCT_NONINTERACTIVE")
     p = Path(credentials_file)
     if not p.exists():
         log.error(f"ملف الاعتماد غير موجود: {credentials_file}")
@@ -77,18 +100,32 @@ def load_google_credentials(
             )
             return None
 
-        tp = Path(token_path) if token_path else p.parent / f"{p.stem}_token.json"
+        # اسم الـ token يتضمّن وسم الصلاحيات: كي لا يُعاد استخدام token بصلاحيات
+        # مختلفة (مثلاً token GSC للقراءة فقط لا يصلح لطلب يحتاج صلاحيات أوسع).
+        if token_path:
+            tp = Path(token_path)
+        else:
+            tp = p.parent / f"{p.stem}_token_{_scope_tag(scopes)}.json"
         creds: Optional[Any] = None
         if tp.exists():
             try:
                 creds = Credentials.from_authorized_user_file(str(tp), scopes)
             except (OSError, ValueError):
                 creds = None
+        # token موجود لكنه لا يغطّي الصلاحيات المطلوبة ⇒ نتجاهله ونُعيد الموافقة.
+        if creds and not _covers_scopes(creds, scopes):
+            creds = None
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
+                if not allow_interactive:
+                    log.error(
+                        "يلزم تفويض OAuth تفاعلي عبر المتصفح، لكن البيئة غير تفاعلية "
+                        "(SCT_NONINTERACTIVE). نفّذ التفويض من الواجهة أو authorize_google.py أولاً."
+                    )
+                    return None
                 flow = InstalledAppFlow.from_client_secrets_file(str(p), scopes)
                 creds = flow.run_local_server(port=0)
             try:

@@ -30,8 +30,14 @@ def analyze_resources(resources: list[dict[str, Any]]) -> dict[str, Any]:
         if r.get("is_mixed_content"):
             mixed += 1
             mixed_list.append(r)
+        # status_code قد يأتي نصاً من قاعدة البيانات — نُحوّله بأمان قبل المقارنة
+        # كي لا تفوتنا موارد معطوبة مخزّنة كنصّ.
         status = r.get("status_code")
-        if isinstance(status, int) and status >= 400:
+        try:
+            status_int = int(status) if status not in (None, "") else None
+        except (TypeError, ValueError):
+            status_int = None
+        if status_int is not None and status_int >= 400:
             broken_list.append(r)
 
     return {

@@ -1422,6 +1422,14 @@ class _MinimalCrawler:
     def get_schema(self): return []
     def get_headers(self): return []
     def get_redirects(self): return []
+    def get_resources(self): return []
+    def get_stats(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            total_pages=len(self._pages),
+            crawled=len(self._pages),
+            failed=0,
+            duration_seconds=0.0,
+        )
 
 
 async def _run_integrations_only(config, mode, output_dir, cache, db=None) -> None:

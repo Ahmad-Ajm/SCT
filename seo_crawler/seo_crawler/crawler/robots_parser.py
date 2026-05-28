@@ -64,20 +64,40 @@ class RobotsParser:
         try:
             import requests
 
+            # نُحمّل robots.txt تدفقياً مع سقف حجم (ملف robots.txt المشروع صغير؛
+            # السقف يمنع استنزاف الذاكرة من ردّ ضخم أو قنبلة ضغط).
+            max_bytes = 2 * 1024 * 1024  # 2MB
             response = requests.get(
                 self.robots_url,
                 headers={"User-Agent": self.user_agent},
                 timeout=self.timeout,
                 verify=self.verify_ssl,
+                stream=True,
             )
-            if response.status_code >= 400:
-                raise RuntimeError(f"robots.txt returned HTTP {response.status_code}")
+            try:
+                if response.status_code >= 400:
+                    raise RuntimeError(
+                        f"robots.txt returned HTTP {response.status_code}"
+                    )
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise RuntimeError("robots.txt يتجاوز الحدّ الأقصى (2MB)")
+                    chunks.append(chunk)
+            finally:
+                response.close()
+            encoding = response.encoding or "utf-8"
+            robots_text = b"".join(chunks).decode(encoding, errors="replace")
 
-            self.parser.parse(response.text.splitlines())
+            self.parser.parse(robots_text.splitlines())
             self._loaded = True
 
             # استخراج Sitemaps
-            self._extract_sitemaps(response.text)
+            self._extract_sitemaps(robots_text)
 
             # استخراج Crawl-Delay
             self._extract_crawl_delay()

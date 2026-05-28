@@ -53,9 +53,9 @@ def detect_duplicates(pages: list[PageData]) -> dict[str, Any]:
         content_hash = _get(page, "content_hash", "")
 
         if title:
-            title_groups[title.strip().lower()].append(url)
+            title_groups[str(title).strip().lower()].append(url)
         if meta_description:
-            desc_groups[meta_description.strip().lower()].append(url)
+            desc_groups[str(meta_description).strip().lower()].append(url)
         if h1_text:
             # نأخذ أول H1 فقط (h1_text قد يكون list أو string)
             first_h1 = h1_text[0] if isinstance(h1_text, list) else h1_text

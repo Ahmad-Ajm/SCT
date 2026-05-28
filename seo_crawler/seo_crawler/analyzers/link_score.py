@@ -38,16 +38,22 @@ def compute_link_score(
     if not nodes:
         return {"pages": [], "count": 0, "summary": {}}
 
-    out_edges: dict[str, list[str]] = {n: [] for n in nodes}
-    in_deg: dict[str, int] = {n: 0 for n in nodes}
+    # إزالة تكرار الحواف الداخلية: روابط التنقّل/التذييل تتكرر عبر كل صفحة،
+    # وحسابها مرّات متعدّدة يضخّم PageRank بشكل مصطنع. نحتفظ بحافة واحدة لكل (من، إلى).
+    edge_set: set[tuple[str, str]] = set()
     for link in links:
         if not link.get("is_internal"):
             continue
         frm = normalize_url(link.get("from_url", ""))
         to = normalize_url(link.get("to_url_normalized") or link.get("to_url", ""))
         if frm in nodes and to in nodes and frm != to:
-            out_edges[frm].append(to)
-            in_deg[to] += 1
+            edge_set.add((frm, to))
+
+    out_edges: dict[str, list[str]] = {n: [] for n in nodes}
+    in_deg: dict[str, int] = {n: 0 for n in nodes}
+    for frm, to in edge_set:
+        out_edges[frm].append(to)
+        in_deg[to] += 1
 
     n = len(nodes)
     pr = {node: 1.0 / n for node in nodes}

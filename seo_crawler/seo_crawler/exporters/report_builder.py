@@ -96,12 +96,24 @@ def build_report_from_json(
     make_pdf: bool = True,
     name_stem: str | None = None,
     progress_callback: Callable[..., None] | None = None,
+    max_mb: int = 500,
 ) -> dict[str, str]:
     """تحميل ملف التدقيق JSON وبناء التقرير منه."""
     path = Path(json_path)
     if not path.exists():
         log.error(f"ملف التدقيق غير موجود: {json_path}")
         return {"html": "", "pdf": ""}
+    # حارس حجم: ملف JSON ضخم (غيغابايت) قد يستنزف الذاكرة عند json.load.
+    try:
+        size_mb = path.stat().st_size / (1024 * 1024)
+        if max_mb and size_mb > max_mb:
+            log.error(
+                f"ملف التدقيق {size_mb:.0f}MB يتجاوز الحدّ {max_mb}MB — تخطّي بناء التقرير. "
+                f"فعّل output.json_full=false لتصغير المخرجات."
+            )
+            return {"html": "", "pdf": ""}
+    except OSError:
+        pass
     if progress_callback:
         progress_callback("building_report_data", report_stage="loading_json", report_percent=10)
     with open(path, "r", encoding="utf-8") as f:

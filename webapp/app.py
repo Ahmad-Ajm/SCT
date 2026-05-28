@@ -547,7 +547,8 @@ async def download_all(job_id: str, only: str = ""):
 
     tmp = tempfile.NamedTemporaryFile(prefix=f"sct_{job_id}_", suffix=".zip", delete=False)
     tmp.close()
-    try:
+
+    def _build_zip() -> None:
         with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
             for p in sorted(out.rglob("*")):
                 if not p.is_file():
@@ -556,6 +557,10 @@ async def download_all(job_id: str, only: str = ""):
                 if wanted is not None and rel not in wanted:
                     continue
                 zf.write(p, arcname=rel)
+
+    try:
+        # الضغط متزامن وقد يكون كبيراً — ننفّذه في خيط منفصل كي لا نجمّد حلقة الأحداث.
+        await asyncio.get_event_loop().run_in_executor(None, _build_zip)
     except OSError:
         try:
             os.unlink(tmp.name)
@@ -608,7 +613,13 @@ async def google_status():
 @app.post("/api/google/upload")
 async def google_upload(file: UploadFile = File(...)):
     """رفع ملف OAuth client secret (Desktop) من المتصفّح."""
+    # ملف client secret صغير جداً (بضع كيلوبايت). نحدّ الحجم لمنع استنزاف الذاكرة.
     raw = await file.read()
+    if len(raw) > 64 * 1024:
+        return JSONResponse(
+            {"error": "الملف أكبر من المتوقّع لملف client secret (الحدّ 64KB)."},
+            status_code=400,
+        )
     try:
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeError, ValueError):
@@ -748,6 +759,8 @@ async def test_ga4(property_id: str = Form("")):
         return JSONResponse({"ok": False, "error": "أدخل GA4 property_id."})
     gd = _google_dir()
     cs = gd / "client_secret.json"
+    if not cs.exists():
+        return JSONResponse({"ok": False, "error": "لم يُربط Google بعد (ارفع client_secret ثم «وافق»)."})
 
     def _run():
         from integrations.ga4_api import GA4Client

@@ -38,6 +38,15 @@ from utils.helpers import (
 class FakeResponse:
     status_code = 200
     text = "User-agent: *\nDisallow: /blocked\nSitemap: https://example.com/sitemap.xml\n"
+    encoding = "utf-8"
+
+    def iter_content(self, chunk_size=8192):
+        data = self.text.encode("utf-8")
+        for i in range(0, len(data), chunk_size):
+            yield data[i:i + chunk_size]
+
+    def close(self):
+        return None
 
 
 @dataclass
@@ -678,6 +687,77 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(s["issue_counts"]["critical"], 1)
         self.assertEqual(s["top_issue_types"][0]["issue_type"], "Missing title")
         self.assertEqual(s["top_opportunities"][0]["url"], "https://x.com/a")
+
+    def test_link_score_dedups_repeated_internal_edges(self):
+        # روابط التنقّل/التذييل تتكرّر عبر كل صفحة؛ يجب احتساب الحافة مرة واحدة
+        # كي لا يتضخّم PageRank بشكل مصطنع. هنا A→B مكرّرة 50 مرة، A→C مرة واحدة.
+        from analyzers.link_score import compute_link_score
+        pages = [{"url": "https://x.com/a"}, {"url": "https://x.com/b"},
+                 {"url": "https://x.com/c"}]
+        links = [{"from_url": "https://x.com/a", "to_url": "https://x.com/b",
+                  "is_internal": True} for _ in range(50)]
+        links.append({"from_url": "https://x.com/a", "to_url": "https://x.com/c",
+                      "is_internal": True})
+        r = compute_link_score(pages, links)
+        scores = {p["url"]: p["link_score"] for p in r["pages"]}
+        # بعد إزالة التكرار: A توزّع حصّتها بالتساوي على B و C ⇒ تساوي تقريبي
+        self.assertAlmostEqual(scores["https://x.com/b"], scores["https://x.com/c"], places=1)
+
+    def test_near_duplicate_autocorrects_invalid_bands(self):
+        # ضمان LSH يصحّ فقط عندما bands > max_distance؛ يجب التصحيح تلقائياً
+        # بدل فقدان أزواج متشابهة. هنا bands=2 و max_distance=8 (2 ≤ 8 غير صالح).
+        from utils.helpers import compute_simhash, hamming_distance
+        from analyzers.near_duplicate import detect_near_duplicates
+        a = "the quick brown fox jumps over the lazy dog and runs fast daily".split()
+        b = a + ["today"]
+        ha, hb = compute_simhash(a), compute_simhash(b)
+        # نتأكّد أوّلاً أنّ الزوج فعلاً ضمن المسافة المختارة قبل اختبار اكتشافه
+        self.assertLessEqual(hamming_distance(ha, hb), 8)
+        pages = [{"url": "u1", "content_simhash": str(ha)},
+                 {"url": "u2", "content_simhash": str(hb)}]
+        r = detect_near_duplicates(pages, max_distance=8, bands=2)
+        urls = {(p["url_a"], p["url_b"]) for p in r["pairs"]}
+        self.assertTrue(any({"u1", "u2"} == {a_, b_} for (a_, b_) in urls))
+
+    def test_duplicate_detector_coerces_non_string_fields(self):
+        # عناوين/أوصاف قد تصل كأرقام من قاعدة البيانات؛ يجب ألا ينهار التحليل
+        from analyzers.duplicate_detector import detect_duplicates
+        pages = [
+            {"url": "https://x.com/1", "status_code": 200, "is_indexable": True,
+             "title": 2024, "meta_description": 100},
+            {"url": "https://x.com/2", "status_code": 200, "is_indexable": True,
+             "title": 2024, "meta_description": 100},
+        ]
+        r = detect_duplicates(pages)
+        self.assertEqual(r["duplicate_titles_count"], 1)
+
+    def test_content_extractor_skips_simhash_for_short_text(self):
+        # نصّ قصير جداً (<10 كلمات) بصمته غير مستقرّة ⇒ نتركها فارغة
+        from bs4 import BeautifulSoup
+        from extractors.content_extractor import extract_content
+        short = extract_content(BeautifulSoup("<p>only three words</p>", "lxml"))
+        self.assertEqual(short["content_simhash"], "")
+        long_html = "<p>" + " ".join(f"word{i}" for i in range(40)) + "</p>"
+        long_doc = extract_content(BeautifulSoup(long_html, "lxml"))
+        self.assertTrue(long_doc["content_simhash"])
+
+    def test_robots_parser_caps_oversized_response(self):
+        # سقف الحجم يمنع استنزاف الذاكرة من robots.txt ضخم
+        class HugeResponse:
+            status_code = 200
+            encoding = "utf-8"
+
+            def iter_content(self, chunk_size=8192):
+                # ~3MB يتجاوز سقف 2MB
+                for _ in range(400):
+                    yield b"x" * 8192
+
+            def close(self):
+                return None
+
+        with patch("requests.get", return_value=HugeResponse()):
+            robots = RobotsParser("https://example.com/", "TestBot")
+            self.assertFalse(robots.load())  # يفشل بأمان بدل تحميل الكل
 
 
 if __name__ == "__main__":

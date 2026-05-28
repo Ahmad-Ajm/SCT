@@ -35,10 +35,17 @@ def analyze_images(all_images: list[dict[str, Any]]) -> dict[str, Any]:
 
     # تجميع alt للكشف عن التكرار
     alt_to_images: dict[str, list[dict]] = {}
+    # إحصائيات الصور الفريدة (حسب src) — تُجمَّع في نفس المرور لتفادي تكرار التكرار
+    # على آلاف الصور (شعار يتكرر في 500 صفحة يجب ألا يُحسب 500 مرة).
+    unique_by_src: dict[str, dict] = {}
+    ext_counter: Counter = Counter()
 
     for img in all_images:
         page_url = img.get("page_url", "")
         src = img.get("src", "")
+        if src and src not in unique_by_src:
+            unique_by_src[src] = img
+        ext_counter[img.get("file_extension", "unknown")] += 1
         alt = img.get("alt", "")
         has_alt = img.get("has_alt", False)
         alt_is_empty = img.get("alt_is_empty", False)
@@ -89,12 +96,6 @@ def analyze_images(all_images: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
     # === إحصائيات الصور الفريدة (حسب src) — لتجنّب تضخيم الأرقام ===
-    # (شعار يتكرر في 500 صفحة يجب ألا يُحسب 500 مرة)
-    unique_by_src: dict[str, dict] = {}
-    for img in all_images:
-        src = img.get("src", "")
-        if src and src not in unique_by_src:
-            unique_by_src[src] = img
     unique_imgs = list(unique_by_src.values())
     unique_total = len(unique_imgs)
     unique_no_alt = sum(1 for img in unique_imgs if not img.get("has_alt"))
@@ -142,7 +143,5 @@ def analyze_images(all_images: list[dict[str, Any]]) -> dict[str, Any]:
             len(no_dimensions) / total_images * 100 if total_images > 0 else 0, 2
         ),
         # توزيع الامتدادات
-        "extensions_distribution": dict(
-            Counter(img.get("file_extension", "unknown") for img in all_images)
-        ),
+        "extensions_distribution": dict(ext_counter),
     }

@@ -21,9 +21,14 @@ log = get_logger(__name__)
 class XMLExporter:
     """مصدّر XML خفيف لبيانات SCT الأساسية."""
 
-    def __init__(self, output_dir: str):
+    # سقف أمان صلب لكل ملف XML — حتى لو مرّر المتّصل بيانات غير مقصوصة
+    # (مثل seo_issues) لا يتضخّم الملف إلى غيغابايت ويُجمّد الذاكرة. 0 = بلا حد.
+    DEFAULT_MAX_ROWS = 200000
+
+    def __init__(self, output_dir: str, max_rows: int | None = None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.max_rows = self.DEFAULT_MAX_ROWS if max_rows is None else int(max_rows)
 
     def export_all(
         self,
@@ -59,6 +64,12 @@ class XMLExporter:
     ) -> str:
         path = self.output_dir / filename
         normalized_rows = [self._to_dict(row) for row in rows]
+        if self.max_rows and len(normalized_rows) > self.max_rows:
+            log.warning(
+                "XML %s: %d صف يتجاوز سقف الأمان %d — يُقتصَر",
+                filename, len(normalized_rows), self.max_rows,
+            )
+            normalized_rows = normalized_rows[: self.max_rows]
         with span("xml.export_file", filename=filename, rows=len(normalized_rows)):
             root = Element(root_name)
             root.set("count", str(len(normalized_rows)))

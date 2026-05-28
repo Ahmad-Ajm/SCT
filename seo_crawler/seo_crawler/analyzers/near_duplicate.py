@@ -52,6 +52,23 @@ def detect_near_duplicates(
         return {"pairs": [], "pairs_count": 0, "pages_involved": 0,
                 "summary": {"checked": len(items)}}
 
+    # ضمان صحّة LSH: ضمان المرشّحين عبر النطاقات يصحّ فقط عندما bands > max_distance
+    # (حمامة الأبراج: زوجان ضمن مسافة d لا بدّ أن يتطابقا في نطاق واحد على الأقل إذا
+    # كان عدد النطاقات أكبر من d). كما يجب أن يقسم bands عددَ البِتّات بالتساوي.
+    # نصحّح القيم تلقائياً بدل المخاطرة بفقدان أزواج متشابهة.
+    if bands <= max_distance:
+        # أصغر عدد نطاقات صالح: > max_distance ويقسم bits
+        for cand in range(max_distance + 1, bits + 1):
+            if bits % cand == 0:
+                bands = cand
+                break
+    elif bits % bands != 0:
+        for cand in range(bands, bits + 1):
+            if bits % cand == 0:
+                bands = cand
+                break
+    assert bits % bands == 0, f"bits ({bits}) must be divisible by bands ({bands})"
+
     band_size = bits // bands
     band_mask = (1 << band_size) - 1
     # مجموعات حسب قيمة كل نطاق — المرشّحون يتشاركون نطاقاً واحداً على الأقل
