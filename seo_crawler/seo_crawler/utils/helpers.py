@@ -4,9 +4,13 @@ utils/helpers.py
 دوال مساعدة (Utility functions) تُستخدم في كل أنحاء المشروع.
 """
 
+import fnmatch
 import hashlib
+import ipaddress
+import posixpath
 import re
-from typing import Optional
+import socket
+from typing import Any, Optional
 from urllib.parse import urlparse, urlunparse, urljoin, parse_qsl, urlencode
 
 try:
@@ -15,9 +19,41 @@ except ImportError:
     tldextract = None
 
 
+def compute_simhash(tokens: list[str], bits: int = 64) -> int:
+    """بصمة SimHash للكشف عن التشابه التقريبي بين النصوص (مقاومة للتغييرات الصغيرة).
+
+    نصوص متشابهة تُنتج بصمات متقاربة (مسافة Hamming صغيرة)، بخلاف الـ hash العادي.
+    """
+    if not tokens:
+        return 0
+    vector = [0] * bits
+    mask = (1 << bits) - 1
+    for tok in tokens:
+        h = int(hashlib.md5(tok.encode("utf-8")).hexdigest(), 16) & mask
+        for i in range(bits):
+            vector[i] += 1 if (h >> i) & 1 else -1
+    out = 0
+    for i in range(bits):
+        if vector[i] > 0:
+            out |= (1 << i)
+    return out
+
+
+def hamming_distance(a: int, b: int) -> int:
+    """عدد البتات المختلفة بين بصمتين (كلّما قلّ زاد التشابه)."""
+    return bin(a ^ b).count("1")
+
+
 # ============================================================
 # === URL Normalization & Validation ===
 # ============================================================
+
+# معاملات التتبّع الشائعة التي تُزال أثناء التطبيع — ثابت على مستوى الوحدة
+# (كان يُعاد بناؤه في كل استدعاء لـ normalize_url داخل حلقات ساخنة).
+_TRACKING_PARAMS = frozenset({
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "fbclid", "gclid", "msclkid", "ref", "ref_src",
+})
 
 
 def normalize_url(url: str, base_url: Optional[str] = None) -> str:
@@ -27,8 +63,9 @@ def normalize_url(url: str, base_url: Optional[str] = None) -> str:
     التطبيع يشمل:
     - تحويل الـ scheme و host إلى lowercase
     - إزالة fragment (#section)
-    - إزالة trailing slash المتعدد
-    - فرز query parameters
+    - دمج الشرطات المتكررة وحل segments النسبية (./ و ../)
+    - الحفاظ على trailing slash كما هو (لتفادي طلب URL مختلف عن الأصل)
+    - فرز query parameters وإزالة معاملات التتبع الشائعة
     - حل الروابط النسبية إلى مطلقة
 
     Args:
@@ -62,23 +99,17 @@ def normalize_url(url: str, base_url: Optional[str] = None) -> str:
     path = parsed.path or "/"
     # إزالة slashes المتكررة
     path = re.sub(r"/+", "/", path)
+    # حل segments النسبية (./ و ../) مع الحفاظ على trailing slash المقصود
+    if "./" in path or path.endswith((".", "..")):
+        had_trailing = path.endswith("/") and path != "/"
+        path = posixpath.normpath(path)
+        if had_trailing and not path.endswith("/"):
+            path += "/"
 
     # فرز query parameters
     query_pairs = parse_qsl(parsed.query, keep_blank_values=False)
-    # إزالة معاملات التتبع الشائعة
-    tracking_params = {
-        "utm_source",
-        "utm_medium",
-        "utm_campaign",
-        "utm_content",
-        "utm_term",
-        "fbclid",
-        "gclid",
-        "msclkid",
-        "ref",
-        "ref_src",
-    }
-    query_pairs = [(k, v) for k, v in query_pairs if k not in tracking_params]
+    # إزالة معاملات التتبع الشائعة (الثابت معرّف على مستوى الوحدة)
+    query_pairs = [(k, v) for k, v in query_pairs if k not in _TRACKING_PARAMS]
     query = urlencode(sorted(query_pairs))
 
     # بناء الـ URL النهائي (بدون fragment)
@@ -117,9 +148,9 @@ def is_internal_url(
     if ":" in domain:
         domain = domain.split(":")[0]
 
-    # إزالة www.
-    primary_clean = primary_domain.lower().replace("www.", "")
-    domain_clean = domain.replace("www.", "")
+    # إزالة www. كبادئة فقط (لا أي ظهور في وسط النطاق)
+    primary_clean = _strip_www(primary_domain.lower())
+    domain_clean = _strip_www(domain)
 
     # التطابق الكامل أو subdomain
     if domain_clean == primary_clean or domain_clean.endswith("." + primary_clean):
@@ -128,11 +159,71 @@ def is_internal_url(
     # نطاقات إضافية
     if additional_domains:
         for extra in additional_domains:
-            extra_clean = extra.lower().replace("www.", "")
+            extra_clean = _strip_www(extra.lower())
             if domain_clean == extra_clean or domain_clean.endswith("." + extra_clean):
                 return True
 
     return False
+
+
+def _strip_www(host: str) -> str:
+    """إزالة بادئة www. فقط (وليس أي ظهور للنص في وسط المضيف)."""
+    return host[4:] if host.startswith("www.") else host
+
+
+def is_safe_remote_url(url: str, allow_private: bool = False) -> tuple[bool, str]:
+    """
+    فحص أمان جلب URL لحماية من SSRF.
+
+    يرفض المخططات غير http/https والمضيفات التي تُحلّ إلى عناوين
+    داخلية/loopback/link-local (مثل 169.254.169.254 لميتاداتا السحابة).
+
+    Args:
+        url: الرابط المطلوب فحصه
+        allow_private: السماح بالعناوين الخاصة (يُستخدم للمواقع الداخلية الموثوقة)
+
+    Returns:
+        tuple[bool, str]: (آمن؟, السبب عند الرفض)
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False, "URL غير صالح"
+
+    if parsed.scheme not in ("http", "https"):
+        return False, f"مخطط غير مسموح: {parsed.scheme or 'فارغ'}"
+
+    host = parsed.hostname
+    if not host:
+        return False, "لا يوجد مضيف"
+
+    if allow_private:
+        return True, ""
+
+    # حلّ كل عناوين المضيف وافحصها
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError, OSError):
+        # تعذّر الحل — نسمح به (سيفشل الجلب لاحقاً بأمان) لتفادي حجب نطاقات صحيحة
+        return True, ""
+
+    for info in infos:
+        ip_str = info[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return False, f"عنوان داخلي/محجوز: {ip_str}"
+
+    return True, ""
 
 
 def get_domain(url: str) -> str:
@@ -201,7 +292,14 @@ def pixel_width_estimate(text: str, font_size: int = 13) -> int:
 
     total = 0.0
     for char in text:
-        total += char_widths.get(char, 0.6) * font_size
+        if char in char_widths:
+            factor = char_widths[char]
+        elif "؀" <= char <= "ۿ":
+            # نطاق الحروف العربية: تقدير متوسط موحّد
+            factor = 0.55
+        else:
+            factor = 0.6
+        total += factor * font_size
 
     return int(total)
 
@@ -301,8 +399,37 @@ def truncate_text(text: str, max_length: int = 100, suffix: str = "...") -> str:
 # ============================================================
 
 
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def neutralize_formula(value: Any) -> Any:
+    """
+    تحييد حقن الصيغ (CSV/Excel Formula Injection).
+
+    أي قيمة نصية تبدأ بـ = + - @ أو tab/CR قد تُنفَّذ كصيغة عند فتح الملف
+    في Excel/Sheets. نضيف فاصلة عليا بادئة لتعطيلها.
+    """
+    if isinstance(value, str) and value[:1] in _FORMULA_TRIGGERS:
+        return "'" + value
+    return value
+
+
+_GLOB_CHARS = ("*", "?", "[")
+
+
 def matches_any_pattern(url: str, patterns: list[str]) -> bool:
-    """التحقق هل الـ URL يطابق أي نمط من القائمة."""
+    """
+    التحقق هل الـ URL يطابق أي نمط من القائمة.
+
+    - الأنماط التي تحتوي على أحرف glob (``*``، ``?``، ``[``) تُطابَق بـ glob كامل.
+    - الأنماط العادية تُطابَق كاحتواء نصّي (substring) — متوافق مع الإعدادات القديمة.
+    """
     if not patterns:
         return False
-    return any(pattern in url for pattern in patterns)
+    for pattern in patterns:
+        if any(ch in pattern for ch in _GLOB_CHARS):
+            if fnmatch.fnmatch(url, pattern) or fnmatch.fnmatch(url, f"*{pattern}*"):
+                return True
+        elif pattern in url:
+            return True
+    return False

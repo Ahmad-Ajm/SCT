@@ -10,6 +10,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from utils.helpers import neutralize_formula as _neutralize_formula
 from utils.logger import get_logger
 from utils.monitoring import increment, span
 
@@ -78,7 +79,10 @@ class CSVExporter:
 
             # === Links - فصل internal/external ===
             internal_links = [l for l in links if l.get("is_internal")]
-            external_links = [l for l in links if not l.get("is_internal")]
+            external_links = [
+                l for l in links
+                if not l.get("is_internal") and not l.get("is_special_link")
+            ]
             exported["inlinks"] = self._export("inlinks.csv", internal_links)
             exported["outlinks_external"] = self._export("outlinks_external.csv", external_links)
             exported["all_links"] = self._export("all_links.csv", links)
@@ -168,12 +172,19 @@ class CSVExporter:
             )
 
             # === Image Issues ===
-            exported["images_no_alt"] = self._export(
-                "images_no_alt.csv", images_analysis.get("no_alt", [])
-            )
+            # نُصدّر القائمة الكاملة من الصور الخام (المحلّل يقصّ لـ 100 للتقرير/JSON
+            # فقط؛ ملف CSV يجب أن يكون كاملاً للعمل عليه).
+            def _img_row(im: dict[str, Any]) -> dict[str, Any]:
+                return {"page_url": im.get("page_url", ""), "src": im.get("src", ""),
+                        "alt": im.get("alt", ""), "extension": im.get("file_extension", "")}
+
+            no_alt_full = ([_img_row(im) for im in images if not im.get("has_alt")]
+                           if images else images_analysis.get("no_alt", []))
+            no_dim_full = ([_img_row(im) for im in images if not im.get("has_explicit_dimensions")]
+                           if images else images_analysis.get("no_dimensions", []))
+            exported["images_no_alt"] = self._export("images_no_alt.csv", no_alt_full)
             exported["images_no_dimensions"] = self._export(
-                "images_no_dimensions.csv", images_analysis.get("no_dimensions", [])
-            )
+                "images_no_dimensions.csv", no_dim_full)
 
             exported["url_issues"] = self._export(
                 "url_issues.csv", self._flatten_issue_groups(url_issues)
@@ -227,8 +238,8 @@ class CSVExporter:
 
     def _csv_value(self, value: Any) -> Any:
         if isinstance(value, (list, dict)):
-            return json.dumps(value, ensure_ascii=False, default=str)
-        return value
+            value = json.dumps(value, ensure_ascii=False, default=str)
+        return _neutralize_formula(value)
 
     def _flatten_issue_groups(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []

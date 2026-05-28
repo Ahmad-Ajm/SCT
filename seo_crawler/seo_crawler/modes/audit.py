@@ -6,9 +6,9 @@ modes/audit.py
 الهدف: تحليل موقعك لاكتشاف كل المشاكل وإصلاحها.
 
 الإعدادات:
-- زحف كامل (5000+ صفحة)
+- زحف كامل (حسب max_pages في الإعدادات)
 - كل الـ extractors
-- كل الـ analyzers (29+ مشكلة)
+- كل الـ analyzers (23 نوع مشكلة عبر collect_seo_issues)
 - فحص الروابط الخارجية
 - تكاملات GSC + PageSpeed
 """
@@ -65,7 +65,7 @@ class AuditMode(CrawlMode):
         return [
             "duplicates", "orphans", "redirects", "thin_content",
             "broken_links", "images", "url_issues", "canonicals", "seo_issues",
-            "schema_validator", "sitemap_diff", "hreflang_validator",
+            "schema_validator", "sitemap_diff", "hreflang_validator", "security",
         ]
 
     def get_excel_sheets(self) -> list[str]:

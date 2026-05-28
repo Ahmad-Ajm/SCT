@@ -208,3 +208,112 @@ class JSRenderer:
             log.warning(f"{url}: {result.error}")
 
         return result
+
+
+def _check_playwright_async() -> bool:
+    """التحقق من توفّر Playwright (async API)."""
+    try:
+        import playwright.async_api  # noqa: F401
+        return True
+    except ImportError:
+        log.warning(
+            "Playwright غير مثبت. للتفعيل: pip install playwright && playwright install chromium"
+        )
+        return False
+
+
+class JSRendererAsync:
+    """
+    مُصيّر JavaScript غير متزامن (Playwright async) — للزاحف async.
+
+    يُشغّل متصفحاً مشتركاً واحداً ويعيد استخدامه عبر صفحات متعددة.
+    آمن عند غياب Playwright (is_available=False فيُتخطّى التصيير).
+    """
+
+    def __init__(
+        self,
+        browser: str = "chromium",
+        headless: bool = True,
+        wait_until: str = "networkidle",
+        timeout: int = 15,
+        user_agent: str = "SEOCrawlerBot/1.0",
+        block_resource_types: Optional[list[str]] = None,
+    ):
+        self.browser_name = browser
+        self.headless = headless
+        self.wait_until = wait_until
+        self.timeout_ms = int(timeout) * 1000
+        self.user_agent = user_agent
+        self.block_resource_types = set(block_resource_types or [])
+        self._pw = None
+        self._browser = None
+        self._context = None
+
+    def is_available(self) -> bool:
+        return _check_playwright_async()
+
+    async def start(self) -> bool:
+        if not self.is_available():
+            return False
+        try:
+            from playwright.async_api import async_playwright
+            self._pw = await async_playwright().start()
+            launcher = getattr(self._pw, self.browser_name, self._pw.chromium)
+            self._browser = await launcher.launch(headless=self.headless)
+            self._context = await self._browser.new_context(user_agent=self.user_agent)
+            log.info("✅ بدأ مُصيّر JS (async): %s", self.browser_name)
+            return True
+        except Exception as e:
+            log.error("فشل بدء مُصيّر JS: %s", e)
+            await self.stop()
+            return False
+
+    async def render(self, url: str) -> "RenderedPage":
+        result = RenderedPage(url=url)
+        if not self._context:
+            result.error = "renderer not started"
+            return result
+        page = None
+        try:
+            page = await self._context.new_page()
+            console_errors: list[str] = []
+            requests_count = {"n": 0}
+            page.on("console", lambda m: console_errors.append(m.text)
+                    if m.type == "error" else None)
+            page.on("request", lambda _r: requests_count.__setitem__("n", requests_count["n"] + 1))
+
+            if self.block_resource_types:
+                async def _route(route):
+                    if route.request.resource_type in self.block_resource_types:
+                        await route.abort()
+                    else:
+                        await route.continue_()
+                await page.route("**/*", _route)
+
+            resp = await page.goto(url, wait_until=self.wait_until, timeout=self.timeout_ms)
+            html = await page.content()
+            result.html = html
+            result.final_url = page.url
+            result.status_code = resp.status if resp else 0
+            result.console_errors = console_errors
+            result.network_requests = requests_count["n"]
+            result.is_success = True
+        except Exception as e:
+            result.error = f"Render failed: {type(e).__name__}: {str(e)[:200]}"
+            log.debug("%s: %s", url, result.error)
+        finally:
+            if page is not None:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+        return result
+
+    async def stop(self) -> None:
+        for obj, closer in ((self._context, "close"), (self._browser, "close"), (self._pw, "stop")):
+            if obj is not None:
+                try:
+                    await getattr(obj, closer)()
+                except Exception:
+                    pass
+        self._context = self._browser = self._pw = None

@@ -2,7 +2,7 @@
 
 SCT is an open-source technical SEO crawler built with Python. It helps audit websites for crawlability, indexability, on-page SEO issues, links, images, structured data, canonicals, hreflang, mixed content, redirects, and exportable reports.
 
-The project started as a lightweight alternative for technical SEO checks, then evolved into a multi-mode crawler with async crawling, SQLite storage, CSV/JSON/Excel exports, observability metrics, and a roadmap toward GUI and PDF reporting.
+The project started as a lightweight alternative for technical SEO checks, then evolved into a multi-mode crawler with async crawling, SQLite storage, CSV/JSON/Excel exports, observability metrics, an integrated local Web UI, and HTML/PDF client reports.
 
 Arabic documentation is available in [README_ar.md](README_ar.md).
 
@@ -25,7 +25,19 @@ Arabic documentation is available in [README_ar.md](README_ar.md).
 - Hreflang validation.
 - Sitemap vs crawl comparison.
 - Mixed content detection.
-- CSV, JSON, and optional Excel exports.
+- Security headers analyzer (HSTS/CSP/X-Frame-Options/etc.).
+- Resource inventory (CSS/JS/images/fonts/media/iframes) with mixed-content flags.
+- Custom extraction (CSS/attr/text/regex rules).
+- Optional async JavaScript rendering with raw-vs-rendered diff (Playwright).
+- Optional Lighthouse/PageSpeed JSON import (no keys).
+- Optional GSC + GA4 connectors with a unified report (Technical + Search + Behavior) and a
+  cross-referenced "Priority Opportunities" section.
+- Results explorer (filter/sort/search) and full settings editable from the UI.
+- CSV, JSON, optional Excel, and HTML/PDF report exports.
+- Integrated local Web UI (FastAPI + HTMX + SSE) with live crawl monitoring.
+- Customizable HTML/PDF client reports (Arabic/RTL via Playwright).
+- Reliable async resume and crash-safe re-runs (no duplicate rows).
+- SSRF protection, gzip-bomb caps, and CSV/Excel formula-injection neutralization.
 - Detailed logs and `metrics.json` observability output.
 - GitHub Actions CI.
 
@@ -37,11 +49,22 @@ python main.py --help
 python main.py --mode audit --url https://example.com/
 ```
 
-For optional JavaScript rendering:
+For optional JavaScript rendering and PDF reports:
 
 ```bash
 playwright install chromium
 ```
+
+### Web UI
+
+```bash
+python -m pip install fastapi "uvicorn[standard]" jinja2 python-multipart
+python webapp/run.py            # then open http://127.0.0.1:8000
+```
+
+The UI lets you configure settings, set the target URL, choose a mode, start/stop
+crawls with live progress (SSE), and download HTML/PDF/Excel/JSON reports. Each job's
+artifacts are stored under `webapp_jobs/<job_id>/`.
 
 ## Usage
 
@@ -101,6 +124,7 @@ Typical outputs include:
 - `complete_audit.json`
 - CSV files for pages, links, images, headings, schema, redirects, SEO issues, URL issues, and canonical issues.
 - Optional `master_audit.xlsx` if `openpyxl` is installed.
+- `report.html` and `report.pdf` when `html`/`pdf` are in `output.formats` (PDF needs Playwright).
 - `metrics.json` with timings, counters, gauges, and recent events.
 
 ## Open Source Readiness
@@ -115,9 +139,12 @@ This repository includes:
 - Public example config.
 - Roadmap.
 
-## GUI and PDF Reporting Roadmap
+## Web UI, PDF & Unified Reporting
 
-See [docs/GUI_PDF_REPORTING_PLAN.md](docs/GUI_PDF_REPORTING_PLAN.md) for the planned GUI, PDF reporting, scheduling, PDF customization, and JavaScript rendering strategy.
+The integrated Web UI, customizable HTML/PDF reports, and the unified report (Technical SEO
++ GSC + GA4 + cross-referenced priority opportunities) are implemented. For optional
+integration setup (Lighthouse / GSC / GA4 / ZAP) see
+[docs/EXTERNAL_TOOLS_GUIDE.md](docs/EXTERNAL_TOOLS_GUIDE.md).
 
 ## Tests
 

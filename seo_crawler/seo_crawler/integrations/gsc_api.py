@@ -18,6 +18,7 @@ integrations/gsc_api.py
 سيُفعَّل بعد توفّر credentials.json
 """
 
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -74,35 +75,18 @@ class GSCClient:
             return False
 
         try:
-            from google.oauth2.credentials import Credentials
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            from google.auth.transport.requests import Request
             from googleapiclient.discovery import build
 
-            # محاولة استرجاع token محفوظ
+            from integrations.google_auth import load_google_credentials
+
+            # يدعم تلقائياً حساب الخدمة أو OAuth (راجع google_auth.py)
             token_path = self.credentials_path.parent / "gsc_token.json"
-            creds: Optional[Credentials] = None
+            creds = load_google_credentials(
+                str(self.credentials_path), self.SCOPES, str(token_path)
+            )
+            if not creds:
+                return False
 
-            if token_path.exists():
-                creds = Credentials.from_authorized_user_file(
-                    str(token_path), self.SCOPES
-                )
-
-            # تجديد أو إنشاء جديد
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        str(self.credentials_path), self.SCOPES
-                    )
-                    creds = flow.run_local_server(port=0)
-
-                # حفظ token للاستخدام لاحقاً
-                with open(token_path, "w") as f:
-                    f.write(creds.to_json())
-
-            # بناء service
             self.service = build("searchconsole", "v1", credentials=creds)
             self._authenticated = True
             log.info("تمت المصادقة مع Google Search Console بنجاح")
@@ -110,7 +94,8 @@ class GSCClient:
 
         except ImportError:
             log.error(
-                "مكتبات Google غير مثبتة. ثبّت: pip install google-api-python-client google-auth-oauthlib"
+                "مكتبات Google غير مثبتة. ثبّت: "
+                "pip install google-api-python-client google-auth-oauthlib"
             )
             return False
         except Exception as e:

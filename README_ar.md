@@ -23,7 +23,11 @@ SCT هي أداة مفتوحة المصدر مبنية ببايثون لفحص S
 - فحص hreflang.
 - مقارنة sitemap مع نتائج الزحف.
 - كشف mixed content.
-- تصدير CSV وJSON وExcel اختيارياً.
+- تصدير CSV وJSON وExcel اختيارياً، وتقارير HTML/PDF.
+- واجهة مرئية محلية متكاملة (FastAPI + HTMX + SSE) مع متابعة مباشرة للزحف.
+- تقارير HTML/PDF قابلة للتخصيص للعميل (عربي/RTL عبر Playwright).
+- استئناف async موثوق وإعادة تشغيل آمنة بلا تكرار صفوف.
+- حماية SSRF، سقف لقنابل gzip، وتحييد حقن الصيغ في CSV/Excel.
 - سجلات تفصيلية وملف `metrics.json`.
 - GitHub Actions CI.
 
@@ -35,11 +39,22 @@ python main.py --help
 python main.py --mode audit --url https://example.com/
 ```
 
-ولتفعيل JavaScript rendering اختيارياً:
+ولتفعيل JavaScript rendering وتقارير PDF:
 
 ```bash
 playwright install chromium
 ```
+
+### الواجهة المرئية
+
+```bash
+python -m pip install fastapi "uvicorn[standard]" jinja2 python-multipart
+python webapp/run.py            # ثم افتح http://127.0.0.1:8000
+```
+
+الواجهة تتيح تخصيص الإعدادات، إدخال الرابط، اختيار الوضع، تشغيل/إيقاف الزحف ومتابعته
+مباشرة (SSE)، وتنزيل تقارير HTML/PDF/Excel/JSON. مخرجات كل مهمة تُحفظ تحت
+`webapp_jobs/<job_id>/`.
 
 ## الاستخدام
 
@@ -99,11 +114,14 @@ Simple_Crawler_Tool_SCT/
 - `complete_audit.json`
 - ملفات CSV للصفحات، الروابط، الصور، العناوين، schema، redirects، SEO issues، URL issues، canonical issues.
 - ملف Excel اختياري `master_audit.xlsx` إذا كانت `openpyxl` مثبتة.
+- ملفّا `report.html` و`report.pdf` عند إضافة `html`/`pdf` إلى `output.formats` (الـ PDF يحتاج Playwright).
 - ملف `metrics.json` يحتوي timings وcounters وgauges وrecent events.
 
-## خطة الواجهة والتقارير
+## الواجهة والتقارير
 
-راجع [docs/GUI_PDF_REPORTING_PLAN.md](docs/GUI_PDF_REPORTING_PLAN.md) لخطة بناء واجهة رسومية، تصدير PDF، جدولة التقارير، تخصيص PDF، وتقييم صعوبة JavaScript rendering.
+الواجهة المرئية، وتقارير HTML/PDF القابلة للتخصيص، والتقرير الموحّد (تقني + GSC + GA4 +
+أولويات متقاطعة) كلها مُنفَّذة فعلياً. لإعداد التكاملات الاختيارية (Lighthouse / GSC / GA4 / ZAP)
+راجع [docs/EXTERNAL_TOOLS_GUIDE_AR.md](docs/EXTERNAL_TOOLS_GUIDE_AR.md).
 
 ## الاختبارات
 

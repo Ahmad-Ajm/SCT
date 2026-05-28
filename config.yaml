@@ -39,8 +39,18 @@ crawl:
   # في أوضاع المنافسة/المقارنة يتم ضبطها إلى deny تلقائياً.
   robots_failure_policy: "allow"
 
+  # استراتيجية اكتشاف الروابط:
+  #   homepage = من الصفحة الرئيسية واتباع الروابط فقط
+  #   sitemap  = من sitemap أولاً (تغطية واسعة للمنتجات)
+  #   hybrid   = الرئيسية + الروابط أولاً ثم sitemap كداعم (موصى به)
+  seed_strategy: "hybrid"
+
   # التحقق من شهادات HTTPS؛ عطّله فقط للتشخيص عند مواقع داخلية بشهادات self-signed
   verify_ssl: true
+
+  # السماح بزحف عناوين داخلية/loopback (مثل localhost). اتركه false لحماية SSRF،
+  # وفعّله فقط عند تدقيق مواقع داخلية موثوقة.
+  allow_private_hosts: false
 
   # === Async Crawling (v3.0) ===
   # عدد الطلبات المتزامنة - يحدد سرعة الزحف
@@ -61,9 +71,24 @@ crawl:
 
 # === JavaScript Rendering ===
 javascript:
-  # تفعيل JS rendering (مهم لمواقع زد)
-  # يجعل الزحف أبطأ ~5-10x لكنه يلتقط المحتوى الديناميكي
+  # تفعيل JS rendering (مهم لمواقع زد) — يحتاج: playwright install chromium
+  # يجعل الزحف أبطأ ~5-10x لكنه يلتقط المحتوى/الروابط الديناميكية
   enabled: false
+
+  # وضع التصيير: all (كل الصفحات) | sample (عيّنة حتى max_pages) | on_empty_content
+  mode: "sample"
+
+  # أقصى عدد صفحات تُصيَّر (0 = بلا حد)
+  max_pages: 100
+
+  # عدد عمليات التصيير المتزامنة (المتصفح ثقيل)
+  concurrency: 2
+
+  # في وضع on_empty_content: تُصيَّر الصفحة إذا قلّ نصها الخام عن هذا الحد
+  empty_content_words: 50
+
+  # حظر أنواع موارد لتسريع التصيير (مثل: ["image","font","media"])
+  block_resource_types: []
 
   # طريقة الانتظار: networkidle | domcontentloaded | load
   wait_until: "networkidle"
@@ -87,14 +112,37 @@ extraction:
   extract_hreflang: true
   extract_og: true
   extract_canonical: true
+  extract_pagination: true   # روابط ترقيم الصفحات rel=next/prev
   extract_headers: true
   extract_content: true
 
   # هل نستخرج روابط الموارد (CSS, JS, etc.)؟
   extract_resources: false
 
+  # فحص حالة HTTP لكل مورد (CSS/JS/صور…) — مكلف، مطفأ افتراضياً.
+  # يتطلّب extract_resources: true ويعيد استخدام فاحص الروابط الخارجية.
+  check_resource_status: false
+
   # كشف HTTP resources داخل صفحات HTTPS
   extract_mixed_content: true
+
+# === الاستخراج المخصّص (الخطة #5) — معطّل افتراضياً ===
+custom_extraction:
+  enabled: false
+  rules:
+    # - name: product_price
+    #   type: css
+    #   selector: ".price"
+    #   extract: text           # text | attr | html
+    # - name: canonical_href
+    #   type: css
+    #   selector: "link[rel='canonical']"
+    #   extract: attr
+    #   attr: href
+    # - name: sku
+    #   type: regex
+    #   pattern: 'SKU:\s*([A-Z0-9-]+)'
+    #   group: 1
 
   # الحد الأدنى لطول النص الذي يُعتبر "محتوى" (بالحروف)
   min_content_length: 50
@@ -144,6 +192,12 @@ analysis:
   # الحد الأدنى لعدد الكلمات (أقل منه = thin content)
   thin_content_threshold: 300
 
+  # الحد الحرج للكلمات (أقل منه = محتوى رقيق حرج)
+  thin_content_critical_threshold: 100
+
+  # الحد الأدنى لنسبة Text-to-HTML (أقل منه = نسبة منخفضة)
+  text_ratio_threshold: 10.0
+
   # الحد الأقصى لطول Title بالحروف
   title_max_length: 60
   title_min_length: 30
@@ -161,13 +215,16 @@ analysis:
   # URL hygiene checks
   url_max_length: 115
   url_max_query_params: 5
+  # هل نعتبر الروابط non-ASCII (مثل العربية) مشكلة؟ false = معلومة فقط (موصى به للمواقع العربية)
+  url_flag_non_ascii: false
 
 # === الإخراج ===
 output:
   # المسار الذي تُحفظ فيه الملفات
   output_dir: "./output"
 
-  # الصيغ المطلوبة
+  # الصيغ المطلوبة. XML مطفأ افتراضياً لأنه يكرّر بيانات CSV نفسها (لا معلومات
+  # إضافية)؛ أضِفه يدوياً عند الحاجة. مجلد csv/ هو موطن البيانات الكاملة.
   formats:
     - csv
     - excel
@@ -178,6 +235,23 @@ output:
 
   # هل نضيف timestamp لاسم المجلد؟
   timestamped_folder: true
+
+  # أرشيف JSON كامل؟ false (موصى به) = لا نُضمّن المصفوفات الخام الضخمة
+  # (روابط/صور/عناوين) في complete_audit.json — متوفّرة كاملةً في CSV/Excel/XML.
+  # true يُضمّنها وقد يبلغ الملف غيغابايتات على المواقع الكبيرة.
+  json_full: false
+
+  # سقف صفوف XML لكل مجموعة (يمنع ملفات XML بحجم غيغابايت). 0 = بلا حد.
+  xml_max_rows: 50000
+
+# === تقرير HTML/PDF (يُستخدم عند إضافة html/pdf إلى output.formats) ===
+report:
+  language: "ar"          # ar | en
+  audience: "expert"      # expert (تفصيلي) | client (مختصر مبسّط) | both (تقريران)
+  client_name: ""         # يظهر في غلاف التقرير
+  logo_url: ""            # شعار اختياري
+  max_rows: 100           # حد صفوف الجداول في التقرير
+  unified: true           # تقرير موحّد: تقني + GSC + GA4 + أولويات متقاطعة
 
 # === حفظ الحالة (Resume Support) ===
 state:
@@ -205,6 +279,14 @@ external_check:
   # تفعيل فحص الروابط الخارجية
   enabled: true
 
+  # تسريع على المواقع الضخمة: عيّنة لكل host (يفحص رابطاً واحداً لكل نطاق خارجي).
+  # افتراضياً مفعّل لأن الغالبية تكرار لنفس المنصّات (شبكات/CDN) — يوفّر >90% من الوقت
+  # بدون فقدان معلومة فعلية. أوقفه إن أردت فحص كل رابط فردياً.
+  sample_per_host: true
+
+  # سقف إجمالي للروابط الخارجية المفحوصة (0 = بلا حد). يُطبَّق بعد العيّنة.
+  max_urls: 0
+
   # المهلة لكل رابط (بالثواني)
   timeout: 10
 
@@ -229,8 +311,14 @@ integrations:
   pagespeed:
     enabled: false
     api_key: ""  # سيُقرأ من .env إذا كان فارغاً
-    # عدد الـ URLs لفحصها (0 = كلها)
-    max_urls: 0
+    # عدد الـ URLs لفحصها. كل URL يستغرق 20-30 ثانية × 2 (mobile+desktop).
+    # على موقع 5000 صفحة بـmax_urls=0 يستغرق ~3 أيام! اضبطها بعناية:
+    #   25 = ~25 دقيقة (موصى به لتقييم تمثيلي)
+    #   100 = ~1.5 ساعة  |  500 = ~8 ساعات  |  0 = بلا حد (لا تستخدمه على موقع كبير)
+    max_urls: 25
+    # حفظ تقرير Lighthouse الكامل (JSON خام) لكل صفحة في output/pagespeed_raw/
+    # للتحليل العميق (كل عمليات التدقيق والتشخيصات). كبير الحجم.
+    save_raw_json: false
     # التأخير بين كل طلب PageSpeed
     delay_seconds: 1
     # === v3.0: عمر الـ cache لنتائج PageSpeed (بالأيام) ===
@@ -246,9 +334,37 @@ integrations:
     # المسار لمجلد CSVs المُصدَّرة من Ahrefs Webmaster Tools
     csv_folder: "./external_data/awt"
 
+  # استيراد نتائج Lighthouse/PageSpeed (ملفات JSON) — بلا مفاتيح/إنترنت
+  # شغّل Lighthouse CLI محلياً وضع ملفات JSON في المجلد ثم فعّل الخيار.
+  lighthouse:
+    enabled: false
+    folder: "./external_data/lighthouse"
+
+  # Google Analytics 4 (سلوك المستخدم) — اختياري، بمفاتيحك أنت
+  # يحتاج: pip install google-analytics-data
+  ga4:
+    enabled: false
+    property_id: ""        # رقم خاصية GA4 (أو من GA4_PROPERTY_ID في .env)
+    credentials_file: ""   # service account JSON (أو GA4_CREDENTIALS_FILE في .env)
+    date_range_days: 90
+
   bing_webmaster:
     enabled: false
     csv_folder: "./external_data/bing"
+
+  # === مستشار الذكاء الاصطناعي (اختياري، مطفأ افتراضياً) ===
+  # يقرأ ملخّص التدقيق ويقترح تحسينات. المفتاح لا يُخزَّن في المستودع؛ ضعه في .env
+  # كـ AI_API_KEY أو هنا محلياً فقط. المزوّدات: openai | deepseek | openrouter |
+  # huggingface | gemini | openai_compatible (لنقطة مخصّصة/محلية).
+  ai:
+    enabled: false
+    provider: "openai"
+    api_key: ""            # أو من AI_API_KEY في .env (يُفضّل)
+    model: ""              # فارغ = الافتراضي لكل مزوّد
+    base_url: ""           # فارغ = الافتراضي؛ مطلوب لـ openai_compatible
+    allow_private: false   # السماح بعنوان داخلي/محلي (نماذج محلية)؛ يرفع حماية SSRF
+    timeout: 60
+    max_opportunities: 15  # كم فرصة عليا تُرسَل للنموذج
 
 # === السجلات (Logging) ===
 logging:
@@ -282,8 +398,11 @@ observability:
   # يسجل توقيت كل extractor مثل meta/headings/schema/links/images.
   log_extraction_details: true
 
-  # أي استدعاء يتجاوز هذا الحد يظهر كتحذير في اللوغ.
+  # أي استدعاء يتجاوز هذا الحد يُعدّ بطيئاً.
   slow_call_ms: 500
+
+  # تجميع النداءات البطيئة في ملخص نهائي بدل تحذير لكل نداء (يقلّل ضجيج اللوغ).
+  slow_call_summary: true
 
 # === وضع المقارنة v3.0: قائمة المواقع للمقارنة ===
 # يُستخدم فقط مع: python main.py --mode compare

@@ -79,6 +79,7 @@ class HTTPClient:
         follow_redirects: bool = True,
         max_redirects: int = 5,
         verify_ssl: bool = True,
+        allow_private_hosts: bool = False,
     ):
         """
         Args:
@@ -99,6 +100,7 @@ class HTTPClient:
         self.follow_redirects = follow_redirects
         self.max_redirects = max_redirects
         self.verify_ssl = verify_ssl
+        self.allow_private_hosts = allow_private_hosts
 
         # إنشاء جلسة دائمة لإعادة استخدام الاتصالات (أسرع)
         self.session = self._create_session()
@@ -114,7 +116,8 @@ class HTTPClient:
                     "image/webp,*/*;q=0.8"
                 ),
                 "Accept-Language": "ar,en;q=0.9",
-                "Accept-Encoding": "gzip, deflate, br",
+                # نتجنّب br (brotli) لضمان فك الترميز محلياً (gzip/deflate فقط)
+                "Accept-Encoding": "gzip, deflate",
                 "Connection": "keep-alive",
             }
         )
@@ -163,11 +166,12 @@ class HTTPClient:
                 visited_urls.add(current_url)
 
                 # طلب بدون auto-follow لنتتبع كل خطوة
+                # stream=True دائماً لقراءة المحتوى تدريجياً مع سقف حجم (إصلاح L2)
                 response = self.session.get(
                     current_url,
                     timeout=self.timeout,
                     allow_redirects=False,
-                    stream=stream,
+                    stream=True,
                     verify=self.verify_ssl,
                 )
 
@@ -176,10 +180,21 @@ class HTTPClient:
                     redirect_chain.append((current_url, response.status_code))
                     next_url = response.headers.get("Location")
                     if not next_url:
+                        # redirect بلا Location: نتركه للمعالجة النهائية (ستغلقه)
                         break
                     # حل redirect نسبي
                     from urllib.parse import urljoin
                     next_url = urljoin(current_url, next_url)
+                    # حماية SSRF على وجهة الـ redirect
+                    from utils.helpers import is_safe_remote_url
+                    safe, ssrf_reason = is_safe_remote_url(next_url, self.allow_private_hosts)
+                    # تحرير اتصال الـ redirect الوسيط قبل الانتقال للقفزة التالية
+                    # (stream=True يُبقي الاتصال مفتوحاً حتى نقرأ المحتوى أو نُغلق)
+                    response.close()
+                    if not safe:
+                        result.error = f"Redirect to unsafe URL: {ssrf_reason}"
+                        log.warning(f"{url}: {result.error}")
+                        return result
                     current_url = next_url
                     continue
 
@@ -194,16 +209,34 @@ class HTTPClient:
             # === معالجة الاستجابة النهائية ===
             elapsed_ms = (time.time() - start_time) * 1000
 
-            # التحقق من حجم الصفحة
+            # التحقق من حجم الصفحة عبر Content-Length إن وُجد
             content_length = response.headers.get("Content-Length")
             if content_length and int(content_length) > self.max_page_size:
                 result.error = f"Page too large: {content_length} bytes"
                 log.warning(f"{url}: {result.error}")
                 result.status_code = response.status_code
+                response.close()
                 return result
 
-            # قراءة المحتوى
-            content = response.content[: self.max_page_size]
+            # قراءة المحتوى تدريجياً مع سقف حجم (حماية من الاستجابات chunked الضخمة)
+            chunks: list[bytes] = []
+            total = 0
+            too_large = False
+            for chunk in response.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > self.max_page_size:
+                    too_large = True
+                    break
+            response.close()
+            if too_large:
+                result.error = f"Page too large (>{self.max_page_size} bytes)"
+                log.warning(f"{url}: {result.error}")
+                result.status_code = response.status_code
+                return result
+            content = b"".join(chunks)
 
             # تحديد الترميز
             encoding = response.encoding or "utf-8"

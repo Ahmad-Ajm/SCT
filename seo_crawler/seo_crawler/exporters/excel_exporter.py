@@ -12,6 +12,7 @@ exporters/excel_exporter.py
 - مع تنسيق احترافي وألوان حسب الأولوية
 """
 
+import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from utils.helpers import neutralize_formula as _neutralize_formula
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -182,10 +184,10 @@ class ExcelExporter:
 
         stats_data = [
             ("إجمالي الصفحات المُزحوفة", len(pages)),
-            ("الصفحات الناجحة (2xx)", sum(1 for p in pages if 200 <= self._get_attr(p, "status_code", 0) < 300)),
-            ("Redirects (3xx)", sum(1 for p in pages if 300 <= self._get_attr(p, "status_code", 0) < 400)),
-            ("Client Errors (4xx)", sum(1 for p in pages if 400 <= self._get_attr(p, "status_code", 0) < 500)),
-            ("Server Errors (5xx)", sum(1 for p in pages if 500 <= self._get_attr(p, "status_code", 0) < 600)),
+            ("الصفحات الناجحة (2xx)", sum(1 for p in pages if 200 <= self._stat_status(p) < 300)),
+            ("Redirects (3xx)", sum(1 for p in pages if 300 <= self._stat_status(p) < 400)),
+            ("Client Errors (4xx)", sum(1 for p in pages if 400 <= self._stat_status(p) < 500)),
+            ("Server Errors (5xx)", sum(1 for p in pages if 500 <= self._stat_status(p) < 600)),
             ("صفحات قابلة للفهرسة", sum(1 for p in pages if self._get_attr(p, "is_indexable", False))),
             ("صفحات غير قابلة للفهرسة", sum(1 for p in pages if not self._get_attr(p, "is_indexable", True))),
             ("إجمالي الروابط الداخلية", sum(1 for l in links if l.get("is_internal"))),
@@ -308,10 +310,7 @@ class ExcelExporter:
         for row_idx, item in enumerate(data[:max_rows], start=2):
             for col_idx, col_name in enumerate(columns, start=1):
                 value = item.get(col_name, "")
-                # تحويل lists/dicts إلى string
-                if isinstance(value, (list, dict)):
-                    value = str(value)[:32700]  # حد Excel للخلية
-                ws.cell(row=row_idx, column=col_idx, value=value)
+                ws.cell(row=row_idx, column=col_idx, value=self._cell_value(value))
 
         # Auto-fit columns (مع حد أقصى)
         for col_idx, col_name in enumerate(columns, start=1):
@@ -338,3 +337,26 @@ class ExcelExporter:
         if isinstance(obj, dict):
             return obj.get(attr, default)
         return getattr(obj, attr, default)
+
+    # حد طول الخلية في Excel (نترك هامشاً تحت 32767)
+    _EXCEL_CELL_LIMIT = 32700
+
+    def _cell_value(self, value: Any) -> Any:
+        """تحضير قيمة آمنة لخلية Excel: تحويل الحاويات، اقتطاع النصوص الطويلة،
+        وتحييد حقن الصيغ (M1/M8)."""
+        if isinstance(value, (list, dict)):
+            value = json.dumps(value, ensure_ascii=False, default=str)
+        elif value is not None and not isinstance(value, (str, int, float, bool)):
+            value = str(value)
+        if isinstance(value, str):
+            if len(value) > self._EXCEL_CELL_LIMIT:
+                value = value[: self._EXCEL_CELL_LIMIT]
+            value = _neutralize_formula(value)
+        return value
+
+    def _stat_status(self, page: Any) -> int:
+        """status_code كعدد صحيح آمن (صفوف DB قد تخزّنه str/None)."""
+        try:
+            return int(self._get_attr(page, "status_code", 0) or 0)
+        except (TypeError, ValueError):
+            return 0

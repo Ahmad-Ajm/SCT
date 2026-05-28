@@ -13,6 +13,7 @@ utils/logger.py
 import logging
 import sys
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 try:
@@ -45,6 +46,8 @@ class ColoredFormatter(logging.Formatter):
 _loggers: dict[str, logging.Logger] = {}
 _file_output_enabled = False
 _default_log_dir = "./logs"
+_max_log_bytes = 50 * 1024 * 1024  # 50 MB افتراضياً (يُضبط من الإعدادات)
+_log_backup_count = 3
 
 
 def get_logger(
@@ -108,11 +111,15 @@ def configure_logging(
     log_dir: str = "./logs",
     console_output: bool = True,
     file_output: bool = True,
+    max_log_size_mb: int = 50,
+    backup_count: int = 3,
 ) -> None:
     """Apply runtime logging config without creating log files at import time."""
-    global _file_output_enabled, _default_log_dir
+    global _file_output_enabled, _default_log_dir, _max_log_bytes, _log_backup_count
     _file_output_enabled = file_output
     _default_log_dir = log_dir
+    _max_log_bytes = max(1, int(max_log_size_mb)) * 1024 * 1024
+    _log_backup_count = max(0, int(backup_count))
 
     log_level = getattr(logging, level.upper(), logging.INFO)
     for logger in _loggers.values():
@@ -152,10 +159,16 @@ def _add_file_handler(logger: logging.Logger, log_dir: str | None = None) -> Non
     timestamp = datetime.now().strftime("%Y-%m-%d")
     log_file = log_path / f"crawler_{timestamp}.log"
 
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    # تدوير الملف عند تجاوز الحجم (يحترم max_log_size_mb من الإعدادات)
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=_max_log_bytes,
+        backupCount=_log_backup_count,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(
         logging.Formatter(
-            "%(asctime)s | %(name)s | %(levelname)-8s | %(message)s",
+            "%(asctime)s | %(name)-22s | %(levelname)-8s | %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )

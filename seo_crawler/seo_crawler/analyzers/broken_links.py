@@ -10,9 +10,11 @@ analyzers/broken_links.py
 - صور 404
 """
 
+from collections import defaultdict
 from typing import Any
 
 from crawler.core import PageData
+from utils.helpers import normalize_url
 
 
 def _get(item: Any, key: str, default: Any = None) -> Any:
@@ -55,6 +57,13 @@ def detect_broken_links(
         if 500 <= int(_get(page, "status_code", 0) or 0) < 600
     ]
 
+    # === فهرسة الروابط حسب الوجهة مرة واحدة (يتفادى O(n²) وعدم تطابق التطبيع) ===
+    links_by_target: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for link in all_links:
+        norm = link.get("to_url_normalized") or normalize_url(link.get("to_url", ""))
+        if norm:
+            links_by_target[norm].append(link)
+
     # === صفحات 404 لها inlinks (الأخطر!) ===
     pages_404_with_inlinks = []
     for page in pages:
@@ -62,14 +71,7 @@ def detect_broken_links(
             continue
 
         page_url = _get(page, "url", "")
-        # احسب inlinks لهذه الصفحة
-        inlinks = [
-            link
-            for link in all_links
-            if link.get("to_url_normalized") == page_url
-            or link.get("to_url") == page_url
-        ]
-
+        inlinks = links_by_target.get(normalize_url(page_url), [])
         if inlinks:
             pages_404_with_inlinks.append(
                 {
@@ -80,7 +82,10 @@ def detect_broken_links(
             )
 
     # === روابط خارجية ===
-    external_links = [link for link in all_links if not link.get("is_internal")]
+    external_links = [
+        link for link in all_links
+        if not link.get("is_internal") and not link.get("is_special_link")
+    ]
     external_unique_urls = set(link.get("to_url", "") for link in external_links)
 
     return {

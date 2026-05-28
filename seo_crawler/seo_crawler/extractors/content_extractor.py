@@ -8,7 +8,7 @@ import re
 from typing import Any
 from bs4 import BeautifulSoup, Comment
 
-from utils.helpers import compute_text_hash
+from utils.helpers import compute_simhash, compute_text_hash
 
 
 # === Tags التي تُحذف من الحساب (محتوى غير مرئي) ===
@@ -94,8 +94,14 @@ def extract_content(soup: BeautifulSoup, html_size_bytes: int = 0) -> dict[str, 
     text_size = len(text.encode("utf-8"))
     text_to_html_ratio = (text_size / html_size_bytes * 100) if html_size_bytes > 0 else 0.0
 
-    # === Content hash (لكشف التكرار) ===
+    # === Content hash (تكرار تام) + SimHash (تشابه تقريبي) ===
     content_hash = compute_text_hash(text)
+    # بصمة SimHash من «شينغلات» الكلمات (3-grams) لكشف التشابه التقريبي بين الصفحات
+    if len(words) >= 3:
+        shingles = [" ".join(words[i:i + 3]) for i in range(len(words) - 2)]
+    else:
+        shingles = words
+    content_simhash = str(compute_simhash(shingles))
 
     # === Reading time (تقدير: 200 كلمة/دقيقة) ===
     reading_time = max(1, round(word_count / 200))
@@ -109,6 +115,7 @@ def extract_content(soup: BeautifulSoup, html_size_bytes: int = 0) -> dict[str, 
         "language": language,
         "declared_language": declared_lang,
         "content_hash": content_hash,
+        "content_simhash": content_simhash,
         "main_text_preview": text[:500],
         "has_arabic": has_arabic,
         "has_english": has_english,

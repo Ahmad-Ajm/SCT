@@ -22,8 +22,8 @@ from typing import Any
 from utils.helpers import normalize_url
 
 
-# تنسيقات صحيحة لـ hreflang
-# اللغة (lowercase) أو language-REGION (REGION uppercase)
+# تنسيقات صحيحة لـ hreflang بعد التطبيع.
+# نقبل الإدخال case-insensitive مثل ar-sa ونطبّعه إلى ar-SA قبل الحكم.
 HREFLANG_PATTERN = re.compile(
     r"^(?:x-default|[a-z]{2,3}(?:-[A-Z]{2})?)$"
 )
@@ -34,6 +34,17 @@ def _attr(obj, name, default=None):
     if isinstance(obj, dict):
         return obj.get(name, default)
     return getattr(obj, name, default)
+
+
+def _normalize_hreflang(value: str) -> str:
+    """تطبيع hreflang بدون خلق false positives بسبب حالة الأحرف."""
+    value = (value or "").strip()
+    if value.lower() == "x-default":
+        return "x-default"
+    if "-" not in value:
+        return value.lower()
+    lang, region = value.split("-", 1)
+    return f"{lang.lower()}-{region.upper()}"
 
 
 def validate_hreflang(pages: list[Any]) -> dict[str, Any]:
@@ -88,14 +99,15 @@ def validate_hreflang(pages: list[Any]) -> dict[str, Any]:
         has_self_reference = False
 
         for tag in tags:
-            hreflang_code = tag.get("hreflang", "")
+            raw_hreflang_code = tag.get("hreflang", "")
+            hreflang_code = _normalize_hreflang(raw_hreflang_code)
             href = tag.get("href", "")
 
             # 1. تنسيق
             if not HREFLANG_PATTERN.match(hreflang_code):
                 invalid_format.append({
                     "page_url": source_url,
-                    "hreflang_value": hreflang_code,
+                    "hreflang_value": raw_hreflang_code,
                     "issue": "Invalid format - يجب: lang أو lang-REGION (e.g., ar, ar-SA)",
                 })
 

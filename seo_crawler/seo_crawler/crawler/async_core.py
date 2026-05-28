@@ -13,6 +13,9 @@ crawler/async_core.py
 """
 
 import asyncio
+import json
+import os
+import sys
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -41,13 +44,17 @@ from extractors.images_extractor import extract_images
 from extractors.links_extractor import extract_links
 from extractors.meta_extractor import extract_meta
 from extractors.mixed_content import detect_mixed_content
+from extractors.custom_extractor import extract_custom
 from extractors.og_extractor import extract_og_twitter
+from extractors.pagination_extractor import extract_pagination
+from extractors.resources_extractor import extract_resources
 from extractors.schema_extractor import extract_schema
 
 from storage.database import CrawlDatabase
 
 from utils.helpers import (
     is_internal_url,
+    is_safe_remote_url,
     matches_any_pattern,
     normalize_url,
 )
@@ -88,6 +95,29 @@ class AsyncCrawler:
         self.extraction_config = config.get("extraction", {})
         self.filter_config = config.get("filters", {})
 
+        # === Custom Extraction (الخطة #5) ===
+        from extractors.custom_extractor import compile_rules
+        ce = config.get("custom_extraction", {}) or {}
+        self.custom_rules = compile_rules(ce.get("rules")) if ce.get("enabled") else []
+        # str(soup) مكلف؛ لا نحتاجه إلا لقواعد regex (CSS تعمل على soup مباشرة)
+        self._custom_needs_html = any(r.get("type") == "regex" for r in self.custom_rules)
+        self.all_custom: list[dict[str, Any]] = []
+
+        # === Resource Inventory (الخطة #3) ===
+        self.all_resources: list[dict[str, Any]] = []
+        self._resources_cap = 300000
+
+        # === JS Rendering async (الخطة #4) ===
+        _js = self.js_config
+        self.js_enabled = bool(_js.get("enabled", False))
+        self.js_mode = str(_js.get("mode", "all")).lower()       # all | sample | on_empty_content
+        self.js_max_pages = int(_js.get("max_pages", 100) or 0)  # 0 = بلا حد
+        self.js_empty_threshold = int(_js.get("empty_content_words", 50) or 50)
+        self.js_renderer = None
+        self.all_js_diff: list[dict[str, Any]] = []
+        self._js_rendered_count = 0
+        self._js_sem = asyncio.Semaphore(max(1, int(_js.get("concurrency", 2) or 2)))
+
         # === Domain info ===
         self.start_url = normalize_url(self.site_config["start_url"])
         self.primary_domain = self.site_config["domain"]
@@ -98,6 +128,10 @@ class AsyncCrawler:
         self.per_host_limit = max(1, self.concurrent_requests // 2)
         self.verify_ssl = self.crawl_config.get("verify_ssl", True)
         self.robots_failure_policy = self.crawl_config.get("robots_failure_policy", "allow")
+        # استراتيجية البذور: homepage | sitemap | hybrid (الافتراضي)
+        self.seed_strategy = str(self.crawl_config.get("seed_strategy", "hybrid")).lower()
+        if self.seed_strategy not in ("homepage", "sitemap", "hybrid"):
+            self.seed_strategy = "hybrid"
 
         # === Crawl state ===
         self.visited: set[str] = set()
@@ -108,13 +142,34 @@ class AsyncCrawler:
         # (check-then-add غير atomic بدون lock)
         self._visited_lock: asyncio.Lock = asyncio.Lock()
 
-        # عدّاد Workers النشطة (للكشف الصحيح عن الانتهاء)
-        self._active_workers: int = 0
-        self._active_workers_lock: asyncio.Lock = asyncio.Lock()
+        # عدّاد Workers المشغولة فعلياً بمعالجة صفحة (للكشف الصحيح عن الانتهاء)
+        self._busy_workers: int = 0
+        self._busy_lock: asyncio.Lock = asyncio.Lock()
+
+        # تتبّع عمق كل URL في الطابور (لاستئناف صحيح + snapshot)
+        self._url_depth: dict[str, int] = {}
+
+        # كل روابط الـ sitemaps التي رُئيت (لـ sitemap_diff الكامل)
+        self.sitemap_urls_seen: list[str] = []
+
+        # روابط مُستبعَدة أثناء الزحف مع السبب (تقرير Excluded URLs)
+        self.excluded: list[dict[str, str]] = []
+        self.excluded_counts: dict[str, int] = {}
+        self._excluded_cap = 10000
+
+        # بذور sitemap مؤجَّلة: لا نُغرق بها الطابور؛ نزحف الصفحة الرئيسية
+        # والروابط المكتشفة (BFS) أولاً، ثم نسحب من البذور دفعات عند نضوب الطابور.
+        self.sitemap_seeds: list[str] = []
+        self._seed_index: int = 0
+        self._seed_lock: asyncio.Lock = asyncio.Lock()
 
         # === Database (optional) ===
         self.db = db
         self.use_db = db is not None
+
+        # كاش للـ getters المعتمدة على DB: بعد انتهاء الزحف تكون القاعدة ثابتة،
+        # فنتفادى إعادة تنفيذ SELECT * وإعادة بناء dicts في كل مرحلة (تحليل/تصدير/تكامل).
+        self._getter_cache: dict[str, list[Any]] = {}
 
         # === In-memory storage (إذا لا يوجد DB) ===
         self.pages: list[PageData] = []
@@ -151,6 +206,29 @@ class AsyncCrawler:
 
         # === Stop signal ===
         self._stop_requested = False
+        self._external_stop = False  # إيقاف بطلب المستخدم/إشارة (يميّز عن الانتهاء الطبيعي)
+        self._reached_max_pages = False  # توقّف بسبب بلوغ max_pages (نتيجة جزئية)
+
+        # === Resume / state ===
+        self.state_config = config.get("state", {})
+        self.resume_if_exists = self.state_config.get("resume_if_exists", True)
+        self.save_interval = max(1, int(self.state_config.get("save_interval", 50)))
+        # snapshot الطابور مكلف (يُعيد كتابة كل الطابور) → فترة أكبر لتقليل I/O
+        self.snapshot_interval = max(self.save_interval, 200)
+        self._persisted_visited: set[str] = set()  # لكتابة الفرق فقط
+        # حجم الدفعة المسحوبة من بذور sitemap عند نضوب الطابور
+        self.sitemap_batch = max(self.concurrent_requests * 4, 20)
+        # السماح بعناوين داخلية (للمواقع الداخلية الموثوقة فقط)
+        self.allow_private_hosts = self.crawl_config.get("allow_private_hosts", False)
+        self._pages_since_snapshot = 0
+
+        # === Progress callback (للواجهة المرئية / المتابعة المباشرة) ===
+        # دالة تُستدعى دورياً بإحصائيات التقدّم؛ تُضبط من الخارج.
+        self.progress_callback = None
+        # عند تشغيل عبر subprocess (الواجهة) نكتب التقدّم لملف عبر متغيّر بيئة
+        self._progress_file = os.environ.get("SCT_PROGRESS_FILE") or None
+        if self._progress_file:
+            self.progress_callback = self._write_progress_file
 
         # === Progress bar ===
         self.progress_bar: Optional[tqdm] = None
@@ -172,10 +250,27 @@ class AsyncCrawler:
             log.info("=" * 60)
 
             self.stats.start_time = time.time()
+            self._install_signal_handlers()
 
             try:
                 # === التحضير ===
                 await self._prepare()
+
+                # === بدء مُصيّر JS (الخطة #4) إن كان مفعّلاً ===
+                if self.js_enabled:
+                    from crawler.js_renderer import JSRendererAsync
+                    renderer = JSRendererAsync(
+                        browser=self.js_config.get("browser", "chromium"),
+                        headless=self.js_config.get("headless", True),
+                        wait_until=self.js_config.get("wait_until", "networkidle"),
+                        timeout=self.js_config.get("timeout", 15),
+                        user_agent=self.crawl_config["user_agent"],
+                        block_resource_types=self.js_config.get("block_resource_types"),
+                    )
+                    if await renderer.start():
+                        self.js_renderer = renderer
+                    else:
+                        log.warning("تعذّر تفعيل تصيير JS — متابعة بـ HTML الخام")
 
                 # === إنشاء aiohttp session ===
                 timeout = aiohttp.ClientTimeout(total=self.crawl_config["timeout_seconds"])
@@ -189,7 +284,9 @@ class AsyncCrawler:
                     "User-Agent": self.crawl_config["user_agent"],
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                     "Accept-Language": "ar,en;q=0.9",
-                    "Accept-Encoding": "gzip, deflate, br",
+                    # لا نُعلن br (brotli) لأن aiohttp لا يفكّه بدون مكتبة إضافية؛
+                    # gzip/deflate يفكّهما aiohttp محلياً.
+                    "Accept-Encoding": "gzip, deflate",
                 }
 
                 async with aiohttp.ClientSession(
@@ -202,8 +299,64 @@ class AsyncCrawler:
 
             finally:
                 self.stats.end_time = time.time()
+                if self.js_renderer is not None:
+                    await self.js_renderer.stop()
+                    self.js_renderer = None
+                self._snapshot_state(force=True)
                 self.sync_http.close()
+                self._remove_signal_handlers()
+                # حالة غير-نهائية: ما زالت هناك مراحل (تحليل/روابط خارجية/تصدير)
+                # تتولّى main.py كتابة الحالة النهائية بعد التصدير.
+                self._emit_progress(status="post_crawl")
                 self._print_summary()
+
+    @staticmethod
+    def _stop_signals():
+        """الإشارات التي نلتقطها للإيقاف النظيف (SIGBREAK مهمّة على ويندوز
+        لأن واجهة التشغيل ترسل CTRL_BREAK_EVENT)."""
+        import signal as _signal
+        sigs = [_signal.SIGINT, _signal.SIGTERM]
+        if hasattr(_signal, "SIGBREAK"):  # ويندوز
+            sigs.append(_signal.SIGBREAK)
+        return sigs
+
+    def _install_signal_handlers(self) -> None:
+        """تثبيت معالجات الإيقاف النظيف (SIGINT/SIGTERM/SIGBREAK)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        import signal as _signal
+
+        self._prev_handlers = {}
+        for sig in self._stop_signals():
+            try:
+                loop.add_signal_handler(sig, self._request_stop)
+            except (NotImplementedError, RuntimeError, ValueError):
+                # ويندوز لا يدعم add_signal_handler للوب — fallback لمعالج عادي
+                try:
+                    self._prev_handlers[sig] = _signal.getsignal(sig)
+                    _signal.signal(sig, lambda *_: self._request_stop())
+                except (ValueError, OSError):
+                    pass
+
+    def _remove_signal_handlers(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+            for sig in self._stop_signals():
+                try:
+                    loop.remove_signal_handler(sig)
+                except (NotImplementedError, RuntimeError, ValueError):
+                    pass
+        except RuntimeError:
+            pass
+
+    def _request_stop(self) -> None:
+        """طلب إيقاف نظيف للزحف (من المستخدم/إشارة)."""
+        if not self._stop_requested:
+            log.warning("\n⚠️  تم استلام إشارة إيقاف — حفظ الحالة والخروج بأمان...")
+        self._external_stop = True
+        self._stop_requested = True
 
     # ========================================================
     # === Preparation ===
@@ -212,12 +365,17 @@ class AsyncCrawler:
     async def _prepare(self) -> None:
         """التحضير قبل الزحف."""
         with span("crawler.async.prepare", url=self.start_url):
-            # تحميل robots.txt (sync)
+            loop = asyncio.get_running_loop()
+
+            # تحميل robots.txt (sync) في executor حتى لا يجمّد حلقة الأحداث
             if self.robots:
                 with span("crawler.robots.load", url=self.start_url):
-                    self.robots.load()
+                    await loop.run_in_executor(None, self.robots.load)
 
-            # تحميل sitemaps (sync)
+            # استئناف الحالة من قاعدة البيانات إن وُجدت
+            await self._restore_state()
+
+            # تحميل sitemaps (sync) في executor
             sitemap_urls = []
             if self.robots and self.robots.is_loaded():
                 sitemap_urls.extend(self.robots.get_sitemaps())
@@ -226,30 +384,130 @@ class AsyncCrawler:
             if default_sitemap not in sitemap_urls:
                 sitemap_urls.append(default_sitemap)
 
-            total_added = 0
+            # الصفحة الرئيسية تُزحف أولاً في وضعَي homepage و hybrid
+            include_homepage = self.seed_strategy in ("homepage", "hybrid", "sitemap")
+            if include_homepage and (
+                self.start_url not in self.queued_urls
+                and self.start_url not in self.visited
+            ):
+                await self._enqueue(self.start_url, 0)
+
+            # في وضع homepage لا نقرأ sitemap كبذور إطلاقاً،
+            # لكننا ما زلنا نحلّله لأجل sitemap_diff فقط.
+            sitemap_flood = 0
+            seen_seed: set[str] = set()
             for sitemap_url in sitemap_urls:
+                # حماية SSRF لروابط sitemap المعلنة
+                safe, reason = is_safe_remote_url(sitemap_url, self.allow_private_hosts)
+                if not safe:
+                    log.warning(f"تخطّي sitemap غير آمن {sitemap_url}: {reason}")
+                    continue
                 with span("crawler.sitemap.parse", url=sitemap_url):
-                    entries = self.sitemap_parser.parse(sitemap_url)
+                    entries = await loop.run_in_executor(
+                        None, self.sitemap_parser.parse, sitemap_url
+                    )
                 gauge("crawler.sitemap.entries_last", len(entries))
                 for entry in entries:
                     normalized = normalize_url(entry.url)
-                    if (
-                        normalized not in self.visited
-                        and normalized not in self.queued_urls
-                        and not self._should_skip_url(normalized)
-                    ):
-                        await self.queue.put((normalized, 0))
-                        self.queued_urls.add(normalized)
-                        total_added += 1
+                    self.sitemap_urls_seen.append(normalized)
+                    if normalized in seen_seed:
+                        continue
+                    seen_seed.add(normalized)
+                    if self.seed_strategy == "sitemap":
+                        # وضع sitemap: نُدخل الكل في الطابور مباشرة (بعد الرئيسية)
+                        if (
+                            normalized not in self.visited
+                            and normalized not in self.queued_urls
+                            and not self._should_skip_url(normalized)
+                        ):
+                            await self._enqueue(normalized, 0)
+                            sitemap_flood += 1
+                    elif self.seed_strategy == "hybrid":
+                        # بذور مؤجَّلة: تُسحب بعد نضوب الروابط المكتشفة
+                        self.sitemap_seeds.append(normalized)
+                    # homepage: نتجاهل البذور تماماً
 
-            # إضافة start_url
-            if self.start_url not in self.queued_urls and self.start_url not in self.visited:
-                await self.queue.put((self.start_url, 0))
-                self.queued_urls.add(self.start_url)
-                total_added += 1
+            # حفظ روابط sitemap في DB لـ analyze-only
+            if self.use_db and self.db and self.sitemap_urls_seen:
+                try:
+                    self.db.set_meta("sitemap_urls", sorted(set(self.sitemap_urls_seen)))
+                except Exception as e:
+                    log.debug(f"تعذّر حفظ sitemap_urls: {e}")
 
-            gauge("crawler.initial_queue_size", total_added)
-            log.info(f"تمت إضافة {total_added} URL للقائمة الأولية")
+            gauge("crawler.initial_queue_size", self.queue.qsize())
+            gauge("crawler.sitemap_seeds", len(self.sitemap_seeds))
+            log.info(
+                f"استراتيجية الزحف: {self.seed_strategy} | الطابور الأولي={self.queue.qsize()} "
+                f"| بذور sitemap مؤجَّلة={len(self.sitemap_seeds)}"
+            )
+
+    async def _refill_from_sitemap(self) -> int:
+        """سحب دفعة من بذور sitemap إلى الطابور عند نضوب الروابط المكتشفة."""
+        added = 0
+        async with self._seed_lock:
+            while self._seed_index < len(self.sitemap_seeds):
+                url = self.sitemap_seeds[self._seed_index]
+                self._seed_index += 1
+                if (
+                    url in self.visited
+                    or url in self.queued_urls
+                    or self._should_skip_url(url)
+                ):
+                    continue
+                await self._enqueue(url, 0)
+                added += 1
+                if added >= self.sitemap_batch:
+                    break
+        if added:
+            increment("crawler.sitemap_refill", added)
+        return added
+
+    async def _enqueue(self, url: str, depth: int) -> None:
+        """إضافة URL للطابور مع تتبّع العمق."""
+        await self.queue.put((url, depth))
+        self.queued_urls.add(url)
+        self._url_depth[url] = depth
+
+    async def _restore_state(self) -> None:
+        """استئناف visited + الطابور من قاعدة البيانات (إن مُفعّل)."""
+        if not (self.use_db and self.db and self.resume_if_exists):
+            return
+        try:
+            visited = self.db.get_visited_all()
+            queued = self.db.get_queue_all()
+        except Exception as e:
+            log.debug(f"تعذّر استئناف الحالة: {e}")
+            return
+        if not visited and not queued:
+            return
+        self.visited |= visited
+        self._persisted_visited |= visited  # سبق حفظها — لا نُعيد كتابتها
+        restored = 0
+        for url, depth in queued:
+            if url not in self.visited and url not in self.queued_urls:
+                await self._enqueue(url, depth)
+                restored += 1
+        log.info(f"♻️  استئناف: {len(visited)} مزحوف، {restored} في الانتظار")
+
+    def _snapshot_state(self, force: bool = False) -> None:
+        """حفظ snapshot للحالة (visited + الطابور) في قاعدة البيانات للاستئناف."""
+        if not (self.use_db and self.db):
+            return
+        if not force:
+            self._pages_since_snapshot += 1
+            if self._pages_since_snapshot < self.snapshot_interval:
+                return
+        self._pages_since_snapshot = 0
+        try:
+            # نكتب فقط الـ visited الجديدة منذ آخر snapshot (تقليل I/O)
+            new_visited = self.visited - self._persisted_visited
+            if new_visited:
+                self.db.mark_visited_many(list(new_visited))
+                self._persisted_visited |= new_visited
+            queue_items = [(u, self._url_depth.get(u, 0)) for u in self.queued_urls]
+            self.db.replace_queue(queue_items)
+        except Exception as e:
+            log.debug(f"تعذّر حفظ snapshot: {e}")
 
     # ========================================================
     # === Main Crawl Loop ===
@@ -261,11 +519,21 @@ class AsyncCrawler:
             max_pages = self.crawl_config["max_pages"]
             total_estimate = max_pages if max_pages > 0 else None
 
+            # نُعطّل شريط tqdm في وضع الواجهة/العملية الفرعية (SCT_PROGRESS_FILE مضبوط)
+            # أو عند عدم وجود طرفية تفاعلية، كي لا تتلوّث run.log بأشرطة التقدّم.
+            # الواجهة تعتمد على progress.json للتقدّم الحيّ بأي حال.
+            try:
+                _is_tty = sys.stdout.isatty()
+            except (AttributeError, ValueError):
+                _is_tty = False
+            quiet_progress = bool(os.environ.get("SCT_PROGRESS_FILE")) or not _is_tty
+
             self.progress_bar = tqdm(
                 total=total_estimate,
                 desc="Async Crawling",
                 unit="page",
                 dynamic_ncols=True,
+                disable=quiet_progress,
             )
 
             # إنشاء workers
@@ -275,20 +543,15 @@ class AsyncCrawler:
             ]
 
             try:
-                # انتظار حتى تفرغ القائمة
-                await self.queue.join()
-            except KeyboardInterrupt:
-                log.warning("\nتم استلام إشارة إيقاف...")
-                self._stop_requested = True
+                # ننتظر انتهاء كل الـ workers ذاتياً (لا نعتمد على queue.join()
+                # الذي يتعلّق لو خرج worker تاركاً عناصر في الطابور — إصلاح C1)
+                await asyncio.gather(*workers)
             finally:
-                # إلغاء كل الـ workers
-                for w in workers:
-                    w.cancel()
-
-                # انتظار حتى ينتهوا
+                # ضمان توقف الجميع ثم انتظارهم
+                self._stop_requested = True
                 await asyncio.gather(*workers, return_exceptions=True)
 
-                if self.progress_bar:
+                if self.progress_bar is not None:
                     self.progress_bar.close()
 
     async def _worker(self, worker_id: int) -> None:
@@ -303,71 +566,81 @@ class AsyncCrawler:
             if robots_delay and robots_delay > delay:
                 delay = robots_delay
 
-        # تسجيل الـ worker كنشط
-        async with self._active_workers_lock:
-            self._active_workers += 1
-
+        worker_pages = 0
         try:
-            worker_pages = 0
             while not self._stop_requested:
+                # حد الصفحات: نطلب إيقافاً نظيفاً للجميع (إصلاح C1: لا break يترك
+                # عناصر معلّقة في الطابور تُسبّب تعليق الإنهاء).
+                if max_pages > 0 and self.stats.pages_crawled >= max_pages:
+                    self._reached_max_pages = True
+                    self._stop_requested = True
+                    break
+
+                # جلب URL من القائمة (مع timeout للكشف عن الانتهاء)
                 try:
-                    # حد الصفحات
-                    # ملاحظة مقصودة (مؤجَّلة عمداً، لن تُصلَح قريباً):
-                    # هذا الفحص بلا قفل، و pages_crawled يُزاد بعد انتهاء المعالجة،
-                    # لذا قد تتجاوز عدد الصفحات max_pages بمقدار (workers - 1) صفحة.
-                    # الأثر تجميلي بسيط، وأي إصلاح يحتاج قفل ميزانية مشترك قد يُدخل
-                    # مخاطر تعليق (deadlock/hang)؛ لذلك نتركه كما هو حتى إشعار لاحق.
-                    if max_pages > 0 and self.stats.pages_crawled >= max_pages:
+                    url, depth = await asyncio.wait_for(self.queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    # نضب الطابور: إن لم يكن أحد مشغولاً والطابور فارغ، فقد انتهى
+                    # الزحف بالروابط (BFS). عندها نسحب دفعة من بذور sitemap.
+                    async with self._busy_lock:
+                        idle_and_empty = self._busy_workers == 0 and self.queue.empty()
+                    if idle_and_empty:
+                        if await self._refill_from_sitemap():
+                            continue
+                        # لا روابط مكتشفة ولا بذور متبقية ⇒ انتهينا
+                        self._stop_requested = True
                         break
+                    continue
+                except asyncio.CancelledError:
+                    break
 
-                    # جلب URL من القائمة (مع timeout للتوقف بأمان)
-                    try:
-                        url, depth = await asyncio.wait_for(self.queue.get(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        # نتحقق: هل القائمة فارغة ولا يوجد workers تعمل؟
-                        # queue.empty() وحدها غير كافية — worker آخر قد يُضيف URLs
-                        async with self._active_workers_lock:
-                            if self.queue.empty() and self._active_workers == 1:
-                                # هذا الـ worker الأخير + القائمة فارغة = انتهينا
-                                break
-                        continue
-
+                # من هنا حصلنا على عنصر: نضمن task_done() مرة واحدة بالضبط
+                async with self._busy_lock:
+                    self._busy_workers += 1
+                try:
                     self.queued_urls.discard(url)
+                    self._url_depth.pop(url, None)
 
-                    # إصلاح Race Condition: check-and-add atomic باستخدام lock
-                    # بدون lock: Worker A يفحص → Worker B يفحص → كلاهما يزحف!
+                    # check-and-add atomic لتفادي زحف مزدوج
                     async with self._visited_lock:
                         if url in self.visited:
-                            self.queue.task_done()
                             continue
-                        # Claim الـ URL فوراً قبل الزحف
                         self.visited.add(url)
 
                     if depth > max_depth:
                         self.stats.pages_skipped += 1
                         increment("crawler.skipped.max_depth")
-                        self.queue.task_done()
+                        self._record_excluded(url, "max_depth")
                         continue
 
                     if self._should_skip_url(url):
                         self.stats.pages_skipped += 1
                         increment("crawler.skipped.filters")
-                        self.queue.task_done()
+                        self._record_excluded(url, "filters")
                         continue
 
                     if self.robots and not self.robots.can_fetch(url):
                         log.debug(f"Worker {worker_id}: robots blocked {url}")
                         self.stats.pages_skipped += 1
                         increment("crawler.skipped.robots")
-                        self.queue.task_done()
+                        self._record_excluded(url, "robots")
+                        continue
+
+                    # حماية SSRF (مهمة لأوضاع المنافسة/المقارنة)
+                    safe, reason = is_safe_remote_url(url, self.allow_private_hosts)
+                    if not safe:
+                        log.debug(f"Worker {worker_id}: SSRF blocked {url} ({reason})")
+                        self.stats.pages_skipped += 1
+                        increment("crawler.skipped.ssrf")
+                        self._record_excluded(url, f"ssrf:{reason}")
                         continue
 
                     # === زحف الصفحة ===
                     await self._crawl_page(url, depth)
                     worker_pages += 1
+                    self._snapshot_state()
 
-                    # تحديث progress
-                    if self.progress_bar:
+                    if self.progress_bar is not None:
                         self.progress_bar.update(1)
                         ok_count = sum(
                             cnt for status, cnt in self.stats.status_codes.items()
@@ -379,26 +652,71 @@ class AsyncCrawler:
                             "errors": self.stats.pages_failed,
                         })
 
-                    # تأخير
+                    self._emit_progress()
+
                     if delay > 0:
                         await asyncio.sleep(delay)
 
-                    self.queue.task_done()
-
                 except asyncio.CancelledError:
+                    # الـ finally سيستدعي task_done() ويُنقص العدّاد مرة واحدة
                     break
                 except Exception as e:
                     log.error(f"Worker {worker_id} error: {e}", exc_info=True)
-                    try:
-                        self.queue.task_done()
-                    except ValueError:
-                        pass
-
+                finally:
+                    self.queue.task_done()
+                    async with self._busy_lock:
+                        self._busy_workers -= 1
         finally:
-            # تسجيل الـ worker كغير نشط عند الانتهاء
             event("crawler.worker", "done", worker_id=worker_id, pages=worker_pages)
-            async with self._active_workers_lock:
-                self._active_workers -= 1
+
+    def _record_excluded(self, url: str, reason: str) -> None:
+        """تسجيل رابط مُستبعَد مع السبب (مع سقف لحجم القائمة)."""
+        key = reason.split(":", 1)[0]
+        self.excluded_counts[key] = self.excluded_counts.get(key, 0) + 1
+        if len(self.excluded) < self._excluded_cap:
+            self.excluded.append({"url": url, "reason": reason})
+
+    def get_excluded(self) -> list[dict[str, str]]:
+        return self.excluded.copy()
+
+    def _final_status(self) -> str:
+        """تحديد حالة الانتهاء النهائية بدقّة."""
+        if self._external_stop:
+            return "stopped"
+        if self._reached_max_pages:
+            return "partial_max_pages"
+        remaining = self.queue.qsize() + max(0, len(self.sitemap_seeds) - self._seed_index)
+        return "partial" if remaining > 0 else "complete"
+
+    def _emit_progress(self, status: str = "running") -> None:
+        """استدعاء progress_callback إن وُجد (للواجهة المرئية)."""
+        if self.progress_callback is None:
+            return
+        try:
+            remaining_seeds = max(0, len(self.sitemap_seeds) - self._seed_index)
+            self.progress_callback({
+                "pages_crawled": self.stats.pages_crawled,
+                "pages_failed": self.stats.pages_failed,
+                "pages_skipped": self.stats.pages_skipped,
+                "queue_size": self.queue.qsize() + remaining_seeds,
+                "elapsed_seconds": round(self.stats.duration_seconds, 1),
+                "pages_per_second": round(self.stats.pages_per_second, 2),
+                "status": status,
+            })
+        except Exception as e:
+            log.debug(f"progress_callback error: {e}")
+
+    def _write_progress_file(self, data: dict[str, Any]) -> None:
+        """كتابة التقدّم لملف JSON بشكل ذرّي (للمتابعة المباشرة عبر subprocess)."""
+        if not self._progress_file:
+            return
+        try:
+            tmp = self._progress_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp, self._progress_file)
+        except OSError as e:
+            log.debug(f"progress file write error: {e}")
 
     # ========================================================
     # === Page Crawling ===
@@ -438,7 +756,10 @@ class AsyncCrawler:
             if last_error:
                 increment("crawler.pages.failed")
                 self.stats.pages_failed += 1
-                self._record_failed_page(url, depth, last_error, result.get("status_code", 0))
+                self._record_failed_page(
+                    url, depth, last_error, result.get("status_code", 0),
+                    result.get("redirects", []),
+                )
 
     async def _fetch_page(self, url: str, depth: int) -> dict[str, Any]:
         """
@@ -460,6 +781,7 @@ class AsyncCrawler:
             final_url = url
             content_type = ""
             redirect_chain: list[tuple[str, int]] = []
+            page_redirects: list[dict[str, Any]] = []
             error: Optional[str] = None
             size_bytes = 0
 
@@ -480,10 +802,9 @@ class AsyncCrawler:
                         allow_redirects=False,
                         ssl=self.verify_ssl,
                     ) as response:
-                        # تسجيل status code
-                        self.stats.status_codes[response.status] = (
-                            self.stats.status_codes.get(response.status, 0) + 1
-                        )
+                        # عدّاد خام لكل استجابة HTTP (مراقبة فقط). توزيع الصفحات حسب
+                        # الحالة (stats.status_codes) يُحسب مرة واحدة لكل صفحة محفوظة
+                        # أدناه، كي يطابق ملخّص اللوغ عدد الصفحات فعلاً (لا قفزات/إعادات).
                         increment(f"http.status.{response.status}")
 
                         if 300 <= response.status < 400:
@@ -494,18 +815,25 @@ class AsyncCrawler:
                                 break
                             next_url = urljoin(current_url, next_url)
 
-                            # سجل الـ redirect
-                            redirect_record = {
+                            # حماية SSRF على وجهة الـ redirect
+                            safe, reason = is_safe_remote_url(next_url, self.allow_private_hosts)
+                            if not safe:
+                                error = f"Redirect to unsafe URL: {reason}"
+                                break
+
+                            # احترام robots على وجهة الـ redirect (إصلاح H1)
+                            if self.robots and not self.robots.can_fetch(next_url):
+                                error = "Redirect target blocked by robots.txt"
+                                break
+
+                            # سجل الـ redirect محلياً (to_url = الوجهة المباشرة)
+                            page_redirects.append({
                                 "from_url": current_url,
                                 "to_url": next_url,
                                 "status_code": response.status,
-                                "chain_length": len(redirect_chain),
+                                "chain_length": 0,  # تُضبط بعد اكتمال السلسلة
                                 "original_url": url,
-                            }
-                            if self.use_db and self.db:
-                                self.db.save_redirects([redirect_record])
-                            else:
-                                self.all_redirects.append(redirect_record)
+                            })
                             increment("crawler.redirects")
 
                             current_url = next_url
@@ -521,7 +849,7 @@ class AsyncCrawler:
                             "ok",
                             url=url,
                             final_url=final_url,
-                            status=response_status,
+                            http_status=response_status,
                             content_type=content_type,
                         )
 
@@ -561,44 +889,71 @@ class AsyncCrawler:
             except Exception as e:
                 error = f"Unexpected: {type(e).__name__}: {str(e)[:100]}"
 
+            # ضبط طول السلسلة لكل سجلات redirect لهذه الصفحة (دلالة موحّدة مع sync)
+            for rec in page_redirects:
+                rec["chain_length"] = len(page_redirects)
+
             elapsed_ms = (time.time() - start_time) * 1000
             gauge("crawler.last_response_time_ms", round(elapsed_ms, 2))
 
             if error:
                 increment("crawler.fetch.errors")
-                event("crawler.fetch", "error", url=url, error=error, status=response_status)
+                self.stats.fetch_errors += 1
+                event("crawler.fetch", "error", url=url, error=error, http_status=response_status)
                 # لا نزيد stats هنا — _crawl_page يُقرر بعد كل المحاولات
                 # no_retry=True للأخطاء الدائمة مثل "page too large"
-                no_retry = error == "Page too large" or "Redirect loop" in error
+                no_retry = (
+                    error == "Page too large"
+                    or "Redirect loop" in error
+                    or "unsafe URL" in error
+                    or "blocked by robots" in error
+                )
                 return {
                     "success": False,
                     "error": error,
                     "status_code": response_status,
                     "no_retry": no_retry,
+                    "redirects": page_redirects,
                 }
 
             # غير HTML؟
             if content_type and not self._is_html_content(content_type):
                 increment("crawler.non_html")
                 self._record_non_html_page(
-                    url, depth, response_status, content_type, size_bytes, elapsed_ms, final_url
+                    url, depth, response_status, content_type, size_bytes, elapsed_ms,
+                    final_url, page_redirects
                 )
                 self.stats.pages_crawled += 1
+                self.stats.status_codes[response_status] = (
+                    self.stats.status_codes.get(response_status, 0) + 1
+                )
                 return {"success": True, "error": None, "status_code": response_status}
 
-            # تحليل HTML
+            # تحليل HTML الخام
             soup = BeautifulSoup(response_text, "lxml")
+
+            # === تصيير JS (الخطة #4): قد يستبدل soup بالنسخة المُصيَّرة ===
+            js_data = {}
+            if self.js_renderer is not None:
+                soup, js_data = await self._maybe_render(url, soup, response_text)
 
             # استخراج كل البيانات — يُرجع (page, pre_extracted) لتجنب double-call
             page_data, pre_extracted = self._extract_all(
                 url, depth, final_url, response_status, response_headers,
                 content_type, size_bytes, elapsed_ms, redirect_chain, soup
             )
+            if js_data:
+                page_data.js_rendered = True
+                page_data.js_console_errors = js_data.get("console_errors", [])
+                page_data.js_network_requests = js_data.get("network_requests", 0)
 
             # حفظ — نمرر pre_extracted لتجنب إعادة extract_headings/extract_schema
-            self._save_page_data(page_data, soup, url, response_headers, pre_extracted)
+            self._save_page_data(page_data, soup, url, response_headers, pre_extracted, page_redirects)
 
             self.stats.pages_crawled += 1
+            self.stats.status_codes[response_status] = (
+                self.stats.status_codes.get(response_status, 0) + 1
+            )
             self.stats.total_bytes += size_bytes
             increment("crawler.bytes", size_bytes)
             gauge("crawler.queue_size", self.queue.qsize())
@@ -687,6 +1042,13 @@ class AsyncCrawler:
                 with span("crawler.extract.hreflang", url=url):
                     page.hreflang_tags = extract_hreflang(soup, headers, url)
 
+            if self._extract_enabled("pagination"):
+                with span("crawler.extract.pagination", url=url):
+                    pg = extract_pagination(soup, headers, url)
+                page.pagination_next = pg["pagination_next"]
+                page.pagination_prev = pg["pagination_prev"]
+                page.is_paginated = pg["is_paginated"]
+
             if self._extract_enabled("og"):
                 with span("crawler.extract.og", url=url):
                     og_data = extract_og_twitter(soup)
@@ -712,6 +1074,7 @@ class AsyncCrawler:
                 page.text_to_html_ratio = content_data["text_to_html_ratio"]
                 page.language = content_data["language"]
                 page.content_hash = content_data["content_hash"]
+                page.content_simhash = content_data.get("content_simhash", "")
 
             if self._extract_enabled("headers"):
                 with span("crawler.extract.headers", url=url):
@@ -743,6 +1106,7 @@ class AsyncCrawler:
         url: str,
         response_headers: dict[str, str],
         pre_extracted: dict[str, Any],
+        redirects: list[dict[str, Any]] | None = None,
     ) -> None:
         """
         حفظ كل البيانات المستخرَجة (DB أو memory).
@@ -751,6 +1115,19 @@ class AsyncCrawler:
                        لتجنب إعادة استدعاء نفس extractors (double-call bug fix)
         """
         with span("crawler.save_page_data", url=url):
+            # === Custom Extraction (الخطة #5) ===
+            if self.custom_rules:
+                html_for_rules = str(soup) if self._custom_needs_html else ""
+                vals = extract_custom(soup, html_for_rules, self.custom_rules)
+                self.all_custom.append({"page_url": url, **vals})
+
+            # === Resource Inventory (الخطة #3) ===
+            if self.extraction_config.get("extract_resources", False) and \
+                    len(self.all_resources) < self._resources_cap:
+                self.all_resources.extend(
+                    extract_resources(soup, url, self.primary_domain, self.additional_domains)
+                )
+
             # === Headings تفصيلية — من pre_extracted (مرة واحدة!) ===
             headings_result = pre_extracted["headings"]
             headings_detailed = headings_result["detailed"]
@@ -800,9 +1177,11 @@ class AsyncCrawler:
                 page.mixed_content_passive_count = mixed.get("passive_count", 0)
                 page.mixed_content_form_count = mixed.get("form_count", 0)
 
+            redirects = redirects or []
+
             # === حفظ ===
             if self.use_db and self.db:
-                # حفظ مباشر في DB
+                # حفظ مباشر في DB (مع redirects ضمن نفس الحزمة/الـ transaction)
                 self.db.save_page_bundle(
                     page,
                     links=links_with_url,
@@ -810,6 +1189,7 @@ class AsyncCrawler:
                     headings=headings_with_url,
                     schema_entries=schema_with_url,
                     header_data=headers_entry,
+                    redirects=redirects,
                 )
             else:
                 # حفظ في الذاكرة
@@ -818,6 +1198,7 @@ class AsyncCrawler:
                 self.all_images.extend(images_with_url)
                 self.all_headings.extend(headings_with_url)
                 self.all_schema.extend(schema_with_url)
+                self.all_redirects.extend(redirects)
                 if headers_entry:
                     self.all_headers.append(headers_entry)
 
@@ -866,8 +1247,7 @@ class AsyncCrawler:
                     if "nofollow" in rel:
                         continue
 
-                await self.queue.put((normalized, depth + 1))
-                self.queued_urls.add(normalized)
+                await self._enqueue(normalized, depth + 1)
                 discovered += 1
             increment("crawler.discovered_links", discovered)
             gauge("crawler.queue_size", self.queue.qsize())
@@ -916,7 +1296,8 @@ class AsyncCrawler:
         return True, "Indexable"
 
     def _record_failed_page(
-        self, url: str, depth: int, error: str, status: int
+        self, url: str, depth: int, error: str, status: int,
+        redirects: list[dict[str, Any]] | None = None,
     ) -> None:
         page = PageData(
             url=url,
@@ -927,14 +1308,17 @@ class AsyncCrawler:
             is_indexable=False,
             indexability_reason=error,
         )
+        redirects = redirects or []
         if self.use_db and self.db:
-            self.db.save_page(page)
+            self.db.save_page(page, redirects=redirects)
         else:
             self.pages.append(page)
+            self.all_redirects.extend(redirects)
 
     def _record_non_html_page(
         self, url: str, depth: int, status: int, content_type: str,
-        size: int, elapsed: float, final_url: str
+        size: int, elapsed: float, final_url: str,
+        redirects: list[dict[str, Any]] | None = None,
     ) -> None:
         page = PageData(
             url=url,
@@ -948,49 +1332,135 @@ class AsyncCrawler:
             is_indexable=False,
             indexability_reason=f"Non-HTML: {content_type}",
         )
+        redirects = redirects or []
         if self.use_db and self.db:
-            self.db.save_page(page)
+            self.db.save_page(page, redirects=redirects)
         else:
             self.pages.append(page)
+            self.all_redirects.extend(redirects)
 
     # ========================================================
     # === Public Getters (compatibility مع sync version) ===
     # ========================================================
 
+    def _memo_db(self, key: str, builder) -> list[Any]:
+        """يبني القائمة من DB مرة واحدة ويخزّنها؛ يعيد نسخة سطحية لكل مستدعٍ."""
+        cached = self._getter_cache.get(key)
+        if cached is None:
+            cached = builder()
+            self._getter_cache[key] = cached
+        return list(cached)
+
     def get_pages(self) -> list[PageData]:
         if self.use_db and self.db:
-            return list(self.db.get_all_pages())
+            return self._memo_db("pages", lambda: list(self.db.get_all_pages()))
         return self.pages.copy()
 
     def get_links(self) -> list[dict[str, Any]]:
         if self.use_db and self.db:
-            return list(self.db.get_all_links())
+            return self._memo_db("links", lambda: list(self.db.get_all_links()))
         return self.all_links.copy()
 
     def get_images(self) -> list[dict[str, Any]]:
         if self.use_db and self.db:
-            return list(self.db.get_all_images())
+            return self._memo_db("images", lambda: list(self.db.get_all_images()))
         return self.all_images.copy()
 
     def get_headings(self) -> list[dict[str, Any]]:
         if self.use_db and self.db:
-            return list(self.db.get_all_headings())
+            return self._memo_db("headings", lambda: list(self.db.get_all_headings()))
         return self.all_headings.copy()
 
     def get_schema(self) -> list[dict[str, Any]]:
         if self.use_db and self.db:
-            return list(self.db.get_all_schema())
+            return self._memo_db("schema", lambda: list(self.db.get_all_schema()))
         return self.all_schema.copy()
 
     def get_headers(self) -> list[dict[str, Any]]:
         if self.use_db and self.db:
-            return list(self.db.get_all_headers())
+            return self._memo_db("headers", lambda: list(self.db.get_all_headers()))
         return self.all_headers.copy()
 
     def get_redirects(self) -> list[dict[str, Any]]:
         if self.use_db and self.db:
-            return list(self.db.get_all_redirects())
+            return self._memo_db("redirects", lambda: list(self.db.get_all_redirects()))
         return self.all_redirects.copy()
+
+    def get_custom_extraction(self) -> list[dict[str, Any]]:
+        return self.all_custom.copy()
+
+    def get_resources(self) -> list[dict[str, Any]]:
+        return self.all_resources.copy()
+
+    def get_js_diff(self) -> list[dict[str, Any]]:
+        return self.all_js_diff.copy()
+
+    @staticmethod
+    def _quick_seo(soup: BeautifulSoup) -> dict[str, Any]:
+        """قراءة سريعة لحقول SEO للمقارنة raw↔rendered."""
+        title = ""
+        if soup.title and soup.title.string:
+            title = soup.title.string.strip()
+        md = ""
+        m = soup.find("meta", attrs={"name": "description"})
+        if m:
+            md = (m.get("content") or "").strip()
+        canon = ""
+        c = soup.select_one("link[rel=canonical]")
+        if c:
+            canon = (c.get("href") or "").strip()
+        return {
+            "title": title,
+            "meta_description": md,
+            "canonical": canon,
+            "h1_count": len(soup.find_all("h1")),
+            "link_count": len(soup.find_all("a", href=True)),
+            "word_count": len(soup.get_text(" ", strip=True).split()),
+        }
+
+    def _should_render(self, raw_soup: BeautifulSoup) -> bool:
+        if self.js_max_pages and self._js_rendered_count >= self.js_max_pages:
+            return False
+        if self.js_mode == "on_empty_content":
+            words = len(raw_soup.get_text(" ", strip=True).split())
+            return words < self.js_empty_threshold
+        # all | sample → نصيّر ضمن الحد
+        return True
+
+    async def _maybe_render(self, url: str, raw_soup: BeautifulSoup, raw_html: str):
+        """تصيير الصفحة وإرجاع (soup, js_data)؛ يسجّل diff بين raw وrendered."""
+        if not self._should_render(raw_soup):
+            return raw_soup, {}
+        async with self._js_sem:
+            if self.js_max_pages and self._js_rendered_count >= self.js_max_pages:
+                return raw_soup, {}
+            rendered = await self.js_renderer.render(url)
+            self._js_rendered_count += 1
+        if not rendered.is_success or not rendered.html:
+            increment("crawler.js.render_failed")
+            return raw_soup, {}
+
+        rendered_soup = BeautifulSoup(rendered.html, "lxml")
+        raw = self._quick_seo(raw_soup)
+        ren = self._quick_seo(rendered_soup)
+        self.all_js_diff.append({
+            "page_url": url,
+            "raw_words": raw["word_count"], "rendered_words": ren["word_count"],
+            "words_added": ren["word_count"] - raw["word_count"],
+            "raw_links": raw["link_count"], "rendered_links": ren["link_count"],
+            "links_added": ren["link_count"] - raw["link_count"],
+            "raw_empty": raw["word_count"] < self.js_empty_threshold,
+            "title_changed": raw["title"] != ren["title"],
+            "meta_changed": raw["meta_description"] != ren["meta_description"],
+            "canonical_changed": raw["canonical"] != ren["canonical"],
+            "console_errors": len(rendered.console_errors or []),
+        })
+        increment("crawler.js.rendered")
+        # نستخدم النسخة المُصيَّرة للاستخراج واكتشاف الروابط (قيمة JS الحقيقية)
+        return rendered_soup, {
+            "console_errors": rendered.console_errors or [],
+            "network_requests": rendered.network_requests,
+        }
 
     def get_stats(self) -> CrawlStats:
         return self.stats
@@ -1005,6 +1475,13 @@ class AsyncCrawler:
         log.info(f"الصفحات:         {self.stats.pages_crawled}")
         log.info(f"فاشلة:           {self.stats.pages_failed}")
         log.info(f"متجاهلة:         {self.stats.pages_skipped}")
+        # أخطاء جلب مؤقتة (شبكة/مهلة) أُعيدت المحاولة لها — مرئية في اللوغ كتحذير
+        # كي يعرف المستخدم أنها حدثت حتى لو نجحت الصفحات في النهاية.
+        if self.stats.fetch_errors:
+            log.warning(
+                f"⚠️ أخطاء جلب مؤقتة (أُعيدت المحاولة): {self.stats.fetch_errors} "
+                f"— راجع metrics.json (crawler.fetch.errors)"
+            )
         log.info(f"السرعة:          {self.stats.pages_per_second:.2f} صفحة/ثانية")
         log.info(f"الروابط الداخلية: {self.stats.total_internal_links}")
         log.info(f"الروابط الخارجية: {self.stats.total_external_links}")

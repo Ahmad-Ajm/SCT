@@ -29,8 +29,13 @@ def analyze_url_issues(
     pages: list[Any],
     max_length: int = 115,
     max_query_params: int = 5,
+    flag_non_ascii: bool = False,
 ) -> dict[str, Any]:
-    """Analyze crawled page URLs for technical SEO hygiene issues."""
+    """Analyze crawled page URLs for technical SEO hygiene issues.
+
+    flag_non_ascii: المواقع العربية تستخدم روابط non-ASCII بشكل مقصود، لذا
+    لا نعدّها مشكلة افتراضياً (معلومة فقط عند تفعيل الخيار).
+    """
     issues = {
         "long_urls": [],
         "uppercase_urls": [],
@@ -70,7 +75,7 @@ def analyze_url_issues(
             issues["tracking_params"].append(_row(url, params=tracking_found))
         if parsed.fragment:
             issues["fragment_urls"].append(_row(url, fragment=parsed.fragment))
-        if not _is_ascii(url):
+        if flag_non_ascii and not _is_ascii(url):
             issues["non_ascii_urls"].append(_row(url))
 
         normalized_path = path.rstrip("/").lower() or "/"

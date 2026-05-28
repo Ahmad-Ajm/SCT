@@ -88,11 +88,36 @@ def analyze_images(all_images: list[dict[str, Any]]) -> dict[str, Any]:
         alt: imgs for alt, imgs in alt_to_images.items() if len(imgs) > 1
     }
 
+    # === إحصائيات الصور الفريدة (حسب src) — لتجنّب تضخيم الأرقام ===
+    # (شعار يتكرر في 500 صفحة يجب ألا يُحسب 500 مرة)
+    unique_by_src: dict[str, dict] = {}
+    for img in all_images:
+        src = img.get("src", "")
+        if src and src not in unique_by_src:
+            unique_by_src[src] = img
+    unique_imgs = list(unique_by_src.values())
+    unique_total = len(unique_imgs)
+    unique_no_alt = sum(1 for img in unique_imgs if not img.get("has_alt"))
+    unique_no_dimensions = sum(
+        1 for img in unique_imgs if not img.get("has_explicit_dimensions")
+    )
+    unique_legacy = sum(
+        1 for img in unique_imgs
+        if str(img.get("file_extension", "")).lower() in {"jpg", "jpeg", "png", "gif"}
+    )
+    unique_not_lazy = sum(1 for img in unique_imgs if not img.get("is_lazy_loaded"))
+
     # === إحصائيات ===
     total_images = len(all_images)
 
     return {
         "total_images": total_images,
+        # إحصائيات الصور الفريدة (حسب src) — الأدقّ للتقييم
+        "unique_images": unique_total,
+        "unique_no_alt_count": unique_no_alt,
+        "unique_no_dimensions_count": unique_no_dimensions,
+        "unique_legacy_formats_count": unique_legacy,
+        "unique_not_lazy_loaded_count": unique_not_lazy,
         "no_alt_count": len(no_alt),
         "no_alt": no_alt[:100],  # نُقيِّد لـ 100 للـ output
         "empty_alt_intentional_count": len(empty_alt_intentional),

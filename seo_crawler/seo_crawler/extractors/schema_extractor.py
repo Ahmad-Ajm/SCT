@@ -96,6 +96,8 @@ def extract_schema(soup: BeautifulSoup) -> dict[str, Any]:
             "format": "microdata",
             "type": schema_type,
             "properties": properties,
+            # raw_data يسمح للمحلّل (schema_validator) بفحص الحقول المطلوبة (إصلاح H6)
+            "raw_data": properties,
         }
         result["raw"].append(entry)
         result["types"].append(schema_type)

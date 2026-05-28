@@ -92,7 +92,12 @@ CREATE TABLE IF NOT EXISTS pages (
     
     -- Hreflang
     hreflang_tags TEXT,  -- JSON
-    
+
+    -- Pagination (rel=next/prev)
+    pagination_next TEXT,
+    pagination_prev TEXT,
+    is_paginated INTEGER DEFAULT 0,
+
     -- OG/Twitter
     og_title TEXT,
     og_description TEXT,
@@ -115,6 +120,7 @@ CREATE TABLE IF NOT EXISTS pages (
     text_to_html_ratio REAL,
     language TEXT,
     content_hash TEXT,
+    content_simhash TEXT,
     
     -- Counts
     internal_links_count INTEGER,
@@ -244,6 +250,9 @@ CREATE TABLE IF NOT EXISTS http_headers (
     hsts TEXT,
     hsts_enabled INTEGER,
     x_frame_options TEXT,
+    x_content_type_options TEXT,
+    referrer_policy TEXT,
+    permissions_policy TEXT,
     csp TEXT,
     x_robots_tag TEXT,
     has_noindex_in_header INTEGER,
@@ -352,6 +361,9 @@ class CrawlDatabase:
         # Thread-local connections (SQLite needs one per thread)
         self._local = threading.local()
         self._wal_mode = wal_mode
+        # كاش أعمدة الجداول: الـ schema ثابت بعد التهيئة، فنتفادى PRAGMA لكل صفحة
+        # (كانت تُنفَّذ ~4 مرات لكل صفحة عبر _insert_page/links/images/headers).
+        self._columns_cache: dict[str, list[str]] = {}
 
         # إنشاء الـ schema
         self._initialize()
@@ -361,6 +373,17 @@ class CrawlDatabase:
         "mixed_content_active_count": "INTEGER DEFAULT 0",
         "mixed_content_passive_count": "INTEGER DEFAULT 0",
         "mixed_content_form_count": "INTEGER DEFAULT 0",
+        "pagination_next": "TEXT",
+        "pagination_prev": "TEXT",
+        "is_paginated": "INTEGER DEFAULT 0",
+        "content_simhash": "TEXT",
+    }
+
+    # أعمدة قد تكون مفقودة في جدول http_headers (قواعد قديمة)
+    _HEADER_MIGRATIONS: dict[str, str] = {
+        "x_content_type_options": "TEXT",
+        "referrer_policy": "TEXT",
+        "permissions_policy": "TEXT",
     }
 
     def _initialize(self) -> None:
@@ -375,11 +398,15 @@ class CrawlDatabase:
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         """إضافة أي أعمدة جديدة مفقودة في قواعد بيانات أُنشئت بإصدار أقدم."""
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(pages)")}
-        for column, definition in self._PAGE_MIGRATIONS.items():
-            if column not in existing:
-                conn.execute(f"ALTER TABLE pages ADD COLUMN {column} {definition}")
-                log.info(f"ترقية المخطط: أُضيف العمود pages.{column}")
+        for table, migrations in (
+            ("pages", self._PAGE_MIGRATIONS),
+            ("http_headers", self._HEADER_MIGRATIONS),
+        ):
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for column, definition in migrations.items():
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                    log.info(f"ترقية المخطط: أُضيف العمود {table}.{column}")
 
     def _get_connection(self) -> sqlite3.Connection:
         """الحصول على connection للـ thread الحالي."""
@@ -424,6 +451,7 @@ class CrawlDatabase:
         headings: list[dict[str, Any]] | None = None,
         schema_entries: list[dict[str, Any]] | None = None,
         header_data: dict[str, Any] | None = None,
+        redirects: list[dict[str, Any]] | None = None,
     ) -> None:
         """Save all extracted page data in a single transaction."""
         try:
@@ -435,11 +463,19 @@ class CrawlDatabase:
                 schema_entries=len(schema_entries or []),
             ):
                 with self.transaction() as conn:
+                    # حذف-ثم-إدراج: يمنع تكرار صفوف الجداول الفرعية عند إعادة
+                    # زحف نفس الصفحة (إعادة تشغيل/استئناف). pages نفسها INSERT OR REPLACE.
+                    page_url = getattr(page_data, "url", None)
+                    if page_url is None and isinstance(page_data, dict):
+                        page_url = page_data.get("url")
+                    if page_url:
+                        self._delete_page_children(conn, page_url)
                     self._insert_page(conn, page_data)
                     self._insert_links(conn, links or [])
                     self._insert_images(conn, images or [])
                     self._insert_headings(conn, headings or [])
                     self._insert_schema(conn, schema_entries or [])
+                    self._insert_redirects(conn, redirects or [])
                     if header_data:
                         self._insert_headers(conn, header_data)
                 increment("db.pages_saved")
@@ -449,17 +485,24 @@ class CrawlDatabase:
                 url = page_data.get("url")
             log.error(f"خطأ في حفظ حزمة الصفحة {url or 'unknown'}: {e}")
 
-    def save_page(self, page_data: Any) -> None:
+    def save_page(self, page_data: Any, redirects: list[dict[str, Any]] | None = None) -> None:
         """
         حفظ بيانات صفحة كاملة.
 
         Args:
             page_data: PageData dataclass أو dict
+            redirects: redirects الخاصة بالصفحة (اختياري)
         """
         try:
             with span("db.save_page"):
                 with self.transaction() as conn:
+                    page_url = getattr(page_data, "url", None)
+                    if page_url is None and isinstance(page_data, dict):
+                        page_url = page_data.get("url")
+                    if page_url:
+                        conn.execute("DELETE FROM redirects WHERE original_url = ?", (page_url,))
                     self._insert_page(conn, page_data)
+                    self._insert_redirects(conn, redirects or [])
                 increment("db.pages_saved")
         except sqlite3.Error as e:
             url = getattr(page_data, "url", None)
@@ -471,10 +514,11 @@ class CrawlDatabase:
         """
         استرجاع كل الصفحات كـ generator (لا تحمّل كل شيء للذاكرة).
         """
-        with self._get_connection() as conn:
-            cursor = conn.execute("SELECT * FROM pages")
-            for row in cursor:
-                yield self._row_to_dict(row)
+        # لا نستخدم الاتصال كـ context manager (يفتح transaction) للقراءة فقط
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT * FROM pages")
+        for row in cursor:
+            yield self._row_to_dict(row)
 
     def get_pages_count(self) -> int:
         """عدد الصفحات المحفوظة."""
@@ -509,10 +553,10 @@ class CrawlDatabase:
 
     def get_all_links(self) -> Iterator[dict[str, Any]]:
         """generator لكل الروابط."""
-        with self._get_connection() as conn:
-            cursor = conn.execute("SELECT * FROM links")
-            for row in cursor:
-                yield self._row_to_dict(row)
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT * FROM links")
+        for row in cursor:
+            yield self._row_to_dict(row)
 
     def get_inlinks_for(self, url: str) -> list[dict]:
         """جلب كل الروابط الواردة لـ URL محدد."""
@@ -551,10 +595,10 @@ class CrawlDatabase:
             log.error(f"خطأ في حفظ الصور: {e}")
 
     def get_all_images(self) -> Iterator[dict[str, Any]]:
-        with self._get_connection() as conn:
-            cursor = conn.execute("SELECT * FROM images")
-            for row in cursor:
-                yield self._row_to_dict(row)
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT * FROM images")
+        for row in cursor:
+            yield self._row_to_dict(row)
 
     # ========================================================
     # === Headings ===
@@ -573,10 +617,10 @@ class CrawlDatabase:
             log.error(f"خطأ في حفظ Headings: {e}")
 
     def get_all_headings(self) -> Iterator[dict[str, Any]]:
-        with self._get_connection() as conn:
-            cursor = conn.execute("SELECT * FROM headings")
-            for row in cursor:
-                yield self._row_to_dict(row)
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT * FROM headings")
+        for row in cursor:
+            yield self._row_to_dict(row)
 
     # ========================================================
     # === Schema ===
@@ -595,10 +639,10 @@ class CrawlDatabase:
             log.error(f"خطأ في حفظ Schema: {e}")
 
     def get_all_schema(self) -> Iterator[dict[str, Any]]:
-        with self._get_connection() as conn:
-            cursor = conn.execute("SELECT * FROM schema_entries")
-            for row in cursor:
-                yield self._row_to_dict(row)
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT * FROM schema_entries")
+        for row in cursor:
+            yield self._row_to_dict(row)
 
     # ========================================================
     # === Headers ===
@@ -615,10 +659,10 @@ class CrawlDatabase:
             log.error(f"خطأ في حفظ Headers: {e}")
 
     def get_all_headers(self) -> Iterator[dict[str, Any]]:
-        with self._get_connection() as conn:
-            cursor = conn.execute("SELECT * FROM http_headers")
-            for row in cursor:
-                yield self._row_to_dict(row)
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT * FROM http_headers")
+        for row in cursor:
+            yield self._row_to_dict(row)
 
     # ========================================================
     # === Redirects ===
@@ -627,33 +671,37 @@ class CrawlDatabase:
     def save_redirects(self, redirects: list[dict[str, Any]]) -> None:
         if not redirects:
             return
+        try:
+            with span("db.save_redirects", rows=len(redirects)):
+                with self.transaction() as conn:
+                    self._insert_redirects(conn, redirects)
+                increment("db.redirects_saved", len(redirects))
+        except sqlite3.Error as e:
+            log.error(f"خطأ في حفظ Redirects: {e}")
 
-        rows = []
-        for r in redirects:
-            rows.append([
+    def _insert_redirects(self, conn: sqlite3.Connection, redirects: list[dict[str, Any]]) -> None:
+        if not redirects:
+            return
+        rows = [
+            [
                 r.get("from_url"),
                 r.get("to_url"),
                 r.get("status_code"),
                 r.get("chain_length"),
                 r.get("original_url"),
-            ])
-
-        try:
-            with span("db.save_redirects", rows=len(rows)):
-                with self.transaction() as conn:
-                    conn.executemany(
-                        "INSERT INTO redirects (from_url, to_url, status_code, chain_length, original_url) VALUES (?, ?, ?, ?, ?)",
-                        rows,
-                    )
-                increment("db.redirects_saved", len(rows))
-        except sqlite3.Error as e:
-            log.error(f"خطأ في حفظ Redirects: {e}")
+            ]
+            for r in redirects
+        ]
+        conn.executemany(
+            "INSERT INTO redirects (from_url, to_url, status_code, chain_length, original_url) VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
 
     def get_all_redirects(self) -> Iterator[dict[str, Any]]:
-        with self._get_connection() as conn:
-            cursor = conn.execute("SELECT * FROM redirects")
-            for row in cursor:
-                yield self._row_to_dict(row)
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT * FROM redirects")
+        for row in cursor:
+            yield self._row_to_dict(row)
 
     # ========================================================
     # === External Links Status ===
@@ -688,7 +736,9 @@ class CrawlDatabase:
             cursor = conn.execute(
                 """SELECT DISTINCT to_url FROM links
                    WHERE is_internal = 0
+                   AND COALESCE(is_special_link, 0) = 0
                    AND to_url NOT IN (SELECT url FROM external_link_status)
+                   AND (to_url LIKE 'http://%' OR to_url LIKE 'https://%')
                    AND to_url NOT LIKE 'mailto:%'
                    AND to_url NOT LIKE 'tel:%'
                    AND to_url NOT LIKE 'javascript:%'"""
@@ -696,11 +746,12 @@ class CrawlDatabase:
             return [row[0] for row in cursor]
 
     def get_broken_external_links(self) -> list[dict[str, Any]]:
-        """جلب الروابط الخارجية المكسورة."""
+        """جلب الروابط الخارجية المكسورة فعلاً (نستبعد 401/403/429 = حجب bots)."""
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """SELECT * FROM external_link_status
-                   WHERE status_code >= 400 OR error IS NOT NULL"""
+                   WHERE (status_code >= 400 AND status_code NOT IN (401, 403, 429))
+                      OR error IS NOT NULL"""
             )
             return [self._row_to_dict(row) for row in cursor]
 
@@ -737,6 +788,47 @@ class CrawlDatabase:
     def queue_size(self) -> int:
         with self._get_connection() as conn:
             return conn.execute("SELECT COUNT(*) FROM crawl_queue").fetchone()[0]
+
+    def get_queue_all(self) -> list[tuple[str, int]]:
+        """جلب كل عناصر الطابور (url, depth) للاستئناف."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT url, depth FROM crawl_queue")
+            return [(row[0], row[1] if row[1] is not None else 0) for row in cursor.fetchall()]
+
+    def replace_queue(self, items: list[tuple[str, int]]) -> None:
+        """استبدال محتوى الطابور بالكامل (snapshot للاستئناف)."""
+        try:
+            now = datetime.now().isoformat()
+            rows = [(url, depth, now, 5) for url, depth in items]
+            with self.transaction() as conn:
+                conn.execute("DELETE FROM crawl_queue")
+                if rows:
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO crawl_queue (url, depth, added_at, priority) VALUES (?, ?, ?, ?)",
+                        rows,
+                    )
+        except sqlite3.Error as e:
+            log.error(f"خطأ في حفظ الطابور: {e}")
+
+    def mark_visited_many(self, urls: list[str]) -> None:
+        """تسجيل عدة URLs كـ visited دفعة واحدة."""
+        if not urls:
+            return
+        try:
+            now = datetime.now().isoformat()
+            with self.transaction() as conn:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO visited_urls (url, visited_at) VALUES (?, ?)",
+                    [(u, now) for u in urls],
+                )
+        except sqlite3.Error as e:
+            log.error(f"خطأ في حفظ visited: {e}")
+
+    def get_visited_all(self) -> set[str]:
+        """جلب كل الـ URLs المزارة للاستئناف."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT url FROM visited_urls")
+            return {row[0] for row in cursor.fetchall()}
 
     def mark_visited(self, url: str) -> None:
         """تسجيل URL كـ visited."""
@@ -805,7 +897,8 @@ class CrawlDatabase:
                 data[key] = json.dumps(data[key], ensure_ascii=False)
 
         for key in ("canonical_in_header", "canonical_is_self", "is_indexable",
-                    "hsts_enabled", "js_rendered", "is_redirect", "has_mixed_content"):
+                    "hsts_enabled", "js_rendered", "is_redirect", "has_mixed_content",
+                    "is_paginated"):
             if key in data:
                 data[key] = int(bool(data[key]))
 
@@ -821,6 +914,15 @@ class CrawlDatabase:
             f"INSERT OR REPLACE INTO pages ({cols_str}) VALUES ({placeholders})",
             list(filtered_data.values()),
         )
+
+    def _delete_page_children(self, conn: sqlite3.Connection, page_url: str) -> None:
+        """حذف صفوف الجداول الفرعية المرتبطة بصفحة قبل إعادة إدراجها."""
+        conn.execute("DELETE FROM links WHERE from_url = ?", (page_url,))
+        conn.execute("DELETE FROM images WHERE page_url = ?", (page_url,))
+        conn.execute("DELETE FROM headings WHERE page_url = ?", (page_url,))
+        conn.execute("DELETE FROM schema_entries WHERE page_url = ?", (page_url,))
+        conn.execute("DELETE FROM redirects WHERE original_url = ?", (page_url,))
+        # http_headers مفتاحها page_url مع INSERT OR REPLACE فلا تحتاج حذفاً
 
     def _insert_links(self, conn: sqlite3.Connection, links: list[dict[str, Any]]) -> None:
         if not links:
@@ -916,9 +1018,16 @@ class CrawlDatabase:
         if table_name not in VALID_TABLES:
             log.warning(f"_get_table_columns: اسم جدول غير مسموح: '{table_name}'")
             return []
-        with self._get_connection() as conn:
-            cursor = conn.execute(f"PRAGMA table_info({table_name})")
-            return [row[1] for row in cursor]
+        cached = self._columns_cache.get(table_name)
+        if cached is not None:
+            return cached
+        conn = self._get_connection()
+        cursor = conn.execute(f"PRAGMA table_info({table_name})")
+        cols = [row[1] for row in cursor]
+        # نُخزّن فقط بعد اكتمال الترقية (لتفادي تثبيت قائمة ناقصة قبل ALTER)
+        if cols:
+            self._columns_cache[table_name] = cols
+        return cols
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         """تحويل sqlite3.Row إلى dict مع decode للـ JSON.

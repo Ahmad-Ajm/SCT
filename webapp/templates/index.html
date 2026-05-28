@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCT — Crawler & SEO Audit</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/i18n.js"></script>
+<style>
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 4px;border-bottom:2px solid #e5e7eb}
+  .tab{background:#eef2f7;border:1px solid #e5e7eb;border-bottom:none;padding:9px 16px;
+    border-radius:10px 10px 0 0;cursor:pointer;font-size:.95rem;color:#334155}
+  .tab.active{background:#1F4E79;color:#fff;font-weight:700}
+  .tabpane{display:none}
+  .tabpane.active{display:block}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO</h1>
+  <button id="langToggle" class="btn sm" type="button">English</button>
+</header>
+
+<main class="container">
+  <nav class="tabs" id="tabbar">
+    <button type="button" class="tab active" data-tab="crawl" data-i18n="tab_crawl">🕷️ الزحف</button>
+    <button type="button" class="tab" data-tab="integ" data-i18n="tab_integ">🔌 احضار التكامل</button>
+    <button type="button" class="tab" data-tab="ai" data-i18n="tab_ai">🤖 الذكاء</button>
+    <button type="button" class="tab" data-tab="report" data-i18n="tab_report">📄 إعدادات التقارير</button>
+    <button type="button" class="tab" data-tab="settings" data-i18n="tab_settings">⚙️ الإعدادات</button>
+  </nav>
+
+  <form id="crawlForm">
+    <!-- ============ تبويب 1: الزحف ============ -->
+    <div class="tabpane active" data-pane="crawl">
+    <section class="panel">
+      <h2 data-i18n="sec1">الموقع وإعدادات الزحف</h2>
+      <div class="grid">
+        <label class="full"><span data-i18n="url">رابط الموقع</span>
+          <input type="url" name="url" data-i18n-ph="url_ph" placeholder="https://example.com/" required>
+        </label>
+        <label><span data-i18n="mode">الوضع (mode)</span>
+          <select name="mode">
+            <option value="audit" data-i18n="mode_audit">تدقيق كامل (audit)</option>
+            <option value="competitor" data-i18n="mode_competitor">منافس (competitor)</option>
+            <option value="compare" data-i18n="mode_compare">مقارنة (compare)</option>
+          </select>
+        </label>
+
+        <label class="full"><span data-i18n="seed_strategy">طريقة اكتشاف الروابط</span>
+          <select name="seed_strategy">
+            <option value="hybrid" selected data-i18n="seed_hybrid">هجين (الرئيسية + الروابط أولاً، ثم sitemap) — مُوصى به</option>
+            <option value="homepage" data-i18n="seed_homepage">من الصفحة الرئيسية فقط</option>
+            <option value="sitemap" data-i18n="seed_sitemap">من sitemap أولاً (تغطية واسعة للمنتجات)</option>
+          </select>
+          <span class="muted sm" data-i18n="seed_hint"> يبدأ من الرئيسية ويتبع الروابط (يلتقط التصنيفات/التنقّل/403/404).</span>
+        </label>
+        <label><span data-i18n="max_pages">أقصى عدد صفحات</span>
+          <input type="number" name="max_pages" id="maxPages" value="500" min="0">
+          <label class="chk" style="margin-top:6px">
+            <input type="checkbox" id="allPages"> <span data-i18n="all_pages">الكل (زحف جميع صفحات الموقع بلا حد)</span>
+          </label>
+        </label>
+        <label><span data-i18n="max_depth">أقصى عمق</span>
+          <input type="number" name="max_depth" value="10" min="1">
+        </label>
+        <label class="full"><span data-i18n="speed">سرعة الزحف:</span> <span id="speedLabel" class="speed-tag">متوازن</span>
+          <input type="range" id="speedSlider" min="1" max="5" step="1" value="3">
+          <span class="muted sm" data-i18n="speed_hint">كلما زادت السرعة قلّ التأخير وزاد التزامن. هناك حدّ أدنى للتأخير لحماية الموقع.</span>
+        </label>
+        <label><span data-i18n="delay">التأخير بين الطلبات (ث)</span>
+          <input type="number" step="0.1" name="delay_seconds" value="0.5" min="0.1">
+        </label>
+        <label><span data-i18n="concurrency">الطلبات المتزامنة</span>
+          <input type="number" name="concurrent_requests" value="5" min="1" max="20">
+        </label>
+      </div>
+      <div class="checks">
+        <label class="chk"><input type="checkbox" name="respect_robots" checked> <span data-i18n="respect_robots">احترام robots.txt</span></label>
+        <label class="chk"><input type="checkbox" name="no_resume"> <span data-i18n="fresh_start">بدء جديد (تجاهل الاستئناف)</span></label>
+        <label class="chk"><input type="checkbox" name="skip_external"> <span data-i18n="skip_external">تخطّي الروابط الخارجية</span></label>
+        <label class="chk"><input type="checkbox" name="ext_sample_per_host" checked> <span data-i18n="ext_sample_per_host">تسريع: رابط واحد لكل نطاق خارجي (sample per host) — موصى به</span></label>
+        <label><span data-i18n="ext_max_urls">سقف عدد الروابط الخارجية المفحوصة (0 = بلا حد)</span>
+          <input type="number" name="ext_max_urls" placeholder="0" min="0">
+        </label>
+        <label class="chk"><input type="checkbox" name="check_resource_status"> <span data-i18n="check_resource_status">فحص حالة موارد الصفحة (CSS/JS/صور) — أبطأ، يتطلّب جمع الموارد</span></label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="sec-head">
+        <h2 data-i18n="sec2">ما الذي تريد جمعه؟</h2>
+        <label class="chk"><input type="checkbox" id="selectAllGroups" checked> <span data-i18n="select_all_groups">تحديد كل المجموعات</span></label>
+      </div>
+      <div class="groups">
+        {% for g in groups %}
+        <fieldset class="group" data-group="{{ g.id }}">
+          <legend>
+            <label class="chk strong"><input type="checkbox" class="group-all" checked> <span data-i18n="grpcat_{{ g.id }}">{{ g.label }}</span></label>
+          </legend>
+          {% for it in g['items'] %}
+          <label class="chk"><input type="checkbox" name="extraction" value="{{ it.key }}" class="item" checked> <span data-i18n="grp_{{ it.key }}">{{ it.label }}</span></label>
+          {% endfor %}
+        </fieldset>
+        {% endfor %}
+      </div>
+    </section>
+
+    <div class="submit-bar">
+      <button type="submit" class="btn primary" data-i18n="start_btn">▶️ ابدأ الزحف</button>
+      <span id="formMsg" class="muted"></span>
+    </div>
+    </div>
+
+    <!-- ============ تبويب 2: احضار التكامل ============ -->
+    <div class="tabpane" data-pane="integ">
+    <section class="panel">
+      <h2 data-i18n="integ_h">احضار معلومات التكامل (بلا زحف)</h2>
+      <p class="muted sm" data-i18n="integ_p">فعّل المصادر المطلوبة ثم اضغط «احضر». الربط والمفاتيح تُضبط مرّة واحدة في تبويب «الإعدادات». (يُستخدم الرابط المُدخَل في تبويب «الزحف» لفحص PageSpeed للصفحة الرئيسية.)</p>
+
+      <label class="chk"><input type="checkbox" name="gsc_enabled"> <span data-i18n="gsc_enable">تفعيل Google Search Console</span></label>
+      <div class="grid">
+        <label><span data-i18n="gsc_site">رابط الموقع في GSC</span><input type="text" name="gsc_site_url" placeholder="https://example.com/"></label>
+        <label><span data-i18n="gsc_months">عدد الأشهر (GSC)</span><input type="number" name="gsc_months_back" placeholder="16" min="1"></label>
+      </div>
+
+      <label class="chk"><input type="checkbox" name="ga4_enabled"> <span data-i18n="ga4_enable">تفعيل Google Analytics 4</span></label>
+      <div class="grid">
+        <label><span data-i18n="ga4_prop">GA4 property_id</span><input type="text" name="ga4_property_id" placeholder="123456789"></label>
+        <label><span data-i18n="ga4_range">نطاق التاريخ (أيام)</span><input type="number" name="ga4_date_range_days" placeholder="90" min="1"></label>
+      </div>
+
+      <label class="chk"><input type="checkbox" name="pagespeed_enabled"> <span data-i18n="pagespeed_enable">تفعيل PageSpeed API</span></label>
+      <div class="grid">
+        <label><span data-i18n="pagespeed_max">أقصى عدد URLs (افتراضي 25 — كل URL ~25ث × 2؛ لا تضع 0 على موقع كبير)</span><input type="number" name="pagespeed_max_urls" value="25" min="0"></label>
+      </div>
+      <label class="chk"><input type="checkbox" name="pagespeed_save_raw"> <span data-i18n="pagespeed_save_raw">حفظ تقرير Lighthouse الكامل (JSON خام لكل صفحة) — للتحليل العميق، كبير الحجم</span></label>
+      <p class="muted sm" data-i18n="pagespeed_deep_hint">«PageSpeed API» = Lighthouse نفسه. تحصل على: pagespeed.csv (الدرجات) + pagespeed_opportunities.csv (فرص التحسين العميقة: ما يُبطئ كل صفحة وكم يوفّر) + التقرير الخام الكامل عند تفعيل الخيار أعلاه.</p>
+
+      <label class="chk"><input type="checkbox" name="lighthouse_enabled"> <span data-i18n="lighthouse_enable">استيراد Lighthouse/PageSpeed JSON (ملفات محلية)</span></label>
+      <p class="muted sm" data-i18n="lighthouse_hint">ليس جلباً أونلاين — يقرأ ملفات JSON تصدّرها أنت يدوياً (Chrome DevTools / Lighthouse CLI) وتضعها في المجلد. لمعظم الحالات لا تحتاجه: PageSpeed API أعلاه يعطي نفس بيانات Lighthouse مباشرةً.</p>
+      <div class="grid">
+        <label><span data-i18n="lighthouse_folder">مجلد ملفات Lighthouse</span><input type="text" name="lighthouse_folder" placeholder="./external_data/lighthouse"></label>
+      </div>
+
+      <label class="chk"><input type="checkbox" name="awt_enabled"> <span data-i18n="awt_enable">استيراد Ahrefs Webmaster (CSV)</span></label>
+      <div class="grid">
+        <label><span data-i18n="awt_folder">مجلد AWT</span><input type="text" name="awt_csv_folder" placeholder="./external_data/awt"></label>
+      </div>
+
+      <div class="submit-bar">
+        <button type="button" id="fetchIntegBtn" class="btn primary" data-i18n="fetch_integ_btn">📥 احضر بيانات التكامل (بلا زحف)</button>
+        <span id="integMsg" class="muted"></span>
+      </div>
+    </section>
+    </div>
+
+    <!-- ============ تبويب 3: الذكاء ============ -->
+    <div class="tabpane" data-pane="ai">
+    <section class="panel">
+      <h2 data-i18n="ai_h">مستشار الذكاء الاصطناعي</h2>
+      <label class="chk"><input type="checkbox" name="ai_enabled"> <span data-i18n="ai_enable">تفعيل تحليل الذكاء الاصطناعي وتوصياته</span></label>
+      <div class="grid">
+        <label><span data-i18n="ai_max_opps">عدد الفرص المُرسلة للنموذج</span><input type="number" name="ai_max_opportunities" placeholder="15" min="1" max="50"></label>
+      </div>
+      <p class="muted sm" data-i18n="ai_page_note">يعمل تلقائياً أثناء الزحف عند التفعيل: يقرأ ملخّص التدقيق وأهم الفرص ويُرجع ملخّصاً تنفيذياً وتوصيات مرتّبة (تظهر في التقرير وملف ai_recommendations.csv). إعدادات المزوّد والمفتاح في تبويب «الإعدادات». لا تُرسَل بيانات مستخدمين — فقط روابط وأنواع مشاكل وأرقام مجمّعة.</p>
+    </section>
+    </div>
+
+    <!-- ============ تبويب 4: إعدادات التقارير ============ -->
+    <div class="tabpane" data-pane="report">
+    <section class="panel">
+      <h2 data-i18n="sec3">نوع الملفات الناتجة</h2>
+      <div class="checks">
+        {% for f in formats %}
+        <label class="chk"><input type="checkbox" name="formats" value="{{ f.key }}" {% if f.default %}checked{% endif %} {% if f.key == 'pdf' %}id="fmtPdf"{% endif %}> {{ f.label }}</label>
+        {% endfor %}
+      </div>
+
+      <div id="pdfOptions" class="subpanel">
+        <h3 data-i18n="pdf_format">تنسيق تقرير PDF/HTML</h3>
+        <div class="grid">
+          <label><span data-i18n="report_lang">لغة التقرير</span>
+            <select name="language" data-i18n-followlang>
+              <option value="ar" data-i18n="lang_ar">العربية</option>
+              <option value="en" data-i18n="lang_en">English</option>
+            </select>
+          </label>
+          <label><span data-i18n="report_type">نوع التقرير</span>
+            <select name="audience">
+              <option value="expert" data-i18n="aud_expert">خبير SEO (تفصيلي)</option>
+              <option value="client" data-i18n="aud_client">عميل (مختصر ومبسّط)</option>
+              <option value="both" data-i18n="aud_both">كلاهما (تقريران)</option>
+            </select>
+          </label>
+          <label><span data-i18n="client_name">اسم العميل</span>
+            <input type="text" name="client_name" data-i18n-ph="optional" placeholder="اختياري">
+          </label>
+          <label class="full"><span data-i18n="logo_url">رابط الشعار (اختياري)</span>
+            <input type="url" name="logo_url" placeholder="https://.../logo.png">
+          </label>
+          <label><span data-i18n="max_rows">حد صفوف الجداول</span>
+            <input type="number" name="max_rows" value="100" min="10">
+          </label>
+        </div>
+        <p class="muted sm" data-i18n="sections_label">الأقسام المضمّنة:</p>
+        <div class="checks">
+          {% for s in sections %}
+          <label class="chk"><input type="checkbox" name="sections" value="{{ s.key }}" checked> <span data-i18n="sec_{{ s.key }}">{{ s.label }}</span></label>
+          {% endfor %}
+        </div>
+        <p class="muted sm" data-i18n="severity_label">مستويات الخطورة المضمّنة:</p>
+        <div class="checks">
+          {% for sev in severities %}
+          <label class="chk"><input type="checkbox" name="severity_filter" value="{{ sev }}" checked> {{ sev }}</label>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+    </div>
+
+    <!-- ============ تبويب 5: الإعدادات (تكامل + ذكاء) ============ -->
+    <div class="tabpane" data-pane="settings">
+    <section class="panel">
+      <h2 data-i18n="settings_h">إعدادات التكامل والذكاء (تُضبط مرّة واحدة)</h2>
+
+      <!-- ربط Google من المتصفّح -->
+      <div class="subpanel">
+        <h3 data-i18n="g_connect_h">🔐 ربط Google (GA4 + GSC) بنقرة من المتصفّح</h3>
+        <p class="muted sm" data-i18n="g_connect_p">ارفع ملف OAuth client secret (Desktop app) من Google Cloud، ثم اضغط «وافق» — يفتح المتصفّح للموافقة بحسابك مرّة واحدة وتُحفظ الـtokens محلياً. بعدها تُستعمل تلقائياً.</p>
+        <div class="grid">
+          <label class="full"><span data-i18n="g_client_file">ملف client_secret.json</span>
+            <input type="file" id="gClientFile" accept=".json">
+          </label>
+        </div>
+        <div class="actions" style="margin-top:6px">
+          <button type="button" id="gUploadBtn" class="btn sm" data-i18n="g_upload">📤 رفع الملف</button>
+          <button type="button" id="gAuthBtn" class="btn sm primary" data-i18n="g_auth">🔐 وافق بحسابي (يفتح المتصفّح)</button>
+          <button type="button" id="gStatusBtn" class="btn sm" data-i18n="g_status_btn">🔄 تحقّق</button>
+          <button type="button" id="gDisconnectBtn" class="btn sm" data-i18n="g_disconnect">🚪 قطع الربط</button>
+        </div>
+        <p id="gStatus" class="muted sm" style="margin-top:6px"></p>
+      </div>
+
+      <!-- تثبيت متطلبات -->
+      <div class="subpanel">
+        <h3 data-i18n="setup_h">🧩 تثبيت المتطلبات (مرّة واحدة)</h3>
+        <div class="actions">
+          <button type="button" id="pwInstallBtn" class="btn sm" data-i18n="pw_install">⬇️ ثبّت Chromium (لتقارير PDF)</button>
+          <span id="pwStatus" class="muted sm"></span>
+        </div>
+        <div class="actions" style="margin-top:6px">
+          <button type="button" id="ga4InstallBtn" class="btn sm" data-i18n="ga4_install">⬇️ ثبّت مكتبة GA4</button>
+          <span id="ga4Status" class="muted sm"></span>
+        </div>
+      </div>
+
+      <!-- مسارات الاعتماد والمفاتيح -->
+      <div class="subpanel">
+        <h3 data-i18n="creds_h">مسارات الاعتماد والمفاتيح</h3>
+        <div class="grid">
+          <label><span data-i18n="gsc_cred">ملف اعتماد GSC</span><input type="text" name="gsc_credentials_file" placeholder="(يُعبّأ تلقائياً بعد ربط Google)"></label>
+          <label><span data-i18n="ga4_cred">ملف اعتماد GA4</span><input type="text" name="ga4_credentials_file" placeholder="(يُعبّأ تلقائياً بعد ربط Google)"></label>
+          <label class="full"><span data-i18n="pagespeed_key">PageSpeed API key</span><input type="text" name="pagespeed_api_key" data-i18n-ph="pagespeed_key_ph" placeholder="مفتاحك الخاص"></label>
+        </div>
+        <p class="muted sm" data-i18n="integrations_note">المفاتيح/المسارات تُحفظ محلياً فقط ولا تُرفع إلى Git.</p>
+      </div>
+
+      <!-- إعدادات الذكاء الاصطناعي -->
+      <div class="subpanel">
+        <h3 data-i18n="ai_settings_h">🤖 إعدادات مزوّد الذكاء الاصطناعي</h3>
+        <div class="grid">
+          <label><span data-i18n="ai_provider">المزوّد</span>
+            <select name="ai_provider">
+              <option value="openai">OpenAI (GPT)</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="huggingface">Hugging Face</option>
+              <option value="openai_compatible" data-i18n="ai_provider_compatible">نقطة متوافقة مع OpenAI (مخصّص/محلي)</option>
+            </select>
+          </label>
+          <label><span data-i18n="ai_key">مفتاح API</span>
+            <input type="password" name="ai_api_key" data-i18n-ph="ai_key_ph" placeholder="sk-... (يُحفظ محلياً فقط)" autocomplete="off">
+          </label>
+          <label><span data-i18n="ai_model">النموذج (اختياري)</span>
+            <input type="text" name="ai_model" data-i18n-ph="ai_model_ph" placeholder="فارغ = الافتراضي لكل مزوّد">
+          </label>
+          <label><span data-i18n="ai_base_url">عنوان الخدمة base_url (اختياري)</span>
+            <input type="url" name="ai_base_url" data-i18n-ph="ai_base_url_ph" placeholder="مطلوب فقط للنقطة المخصّصة">
+          </label>
+        </div>
+        <label class="chk"><input type="checkbox" name="ai_allow_private"> <span data-i18n="ai_allow_private">السماح بنقطة محلية/خاصة (للنماذج المحلية مثل Ollama على 127.0.0.1)</span></label>
+      </div>
+
+      <!-- الاستخراج المخصّص -->
+      <div class="subpanel">
+        <h3 data-i18n="adv_custom">🧩 الاستخراج المخصّص (Custom Extraction)</h3>
+        <label class="chk"><input type="checkbox" id="customEnabled" name="custom_enabled"> <span data-i18n="custom_enable">تفعيل الاستخراج المخصّص</span></label>
+        <table class="tbl" id="customRules"><thead><tr>
+          <th data-i18n="th_name">الاسم</th><th data-i18n="th_type">النوع</th><th data-i18n="th_selector">المحدّد/النمط</th><th data-i18n="th_extract">الاستخراج</th><th data-i18n="th_attr">attr/group</th><th></th>
+        </tr></thead><tbody></tbody></table>
+        <button type="button" id="addRuleBtn" class="btn sm" data-i18n="add_rule">➕ إضافة قاعدة</button>
+        <input type="hidden" name="custom_rules_json" id="customRulesJson">
+        <p class="muted sm"><span data-i18n="custom_note">CSS: المحدّد + استخراج (text/attr/html). Regex: النمط + group.</span> <code>.price</code> · <code>SKU:\s*([A-Z0-9-]+)</code></p>
+      </div>
+
+      <!-- عتبات التحليل -->
+      <div class="subpanel">
+        <h3 data-i18n="adv_thresholds">📏 عتبات التحليل</h3>
+        <div class="grid">
+          <label><span data-i18n="thin_threshold">حد المحتوى الرقيق (كلمات)</span><input type="number" name="thin_content_threshold" placeholder="300" min="0"></label>
+          <label><span data-i18n="title_min">أدنى طول Title</span><input type="number" name="title_min_length" placeholder="30" min="0"></label>
+          <label><span data-i18n="title_max">أقصى طول Title</span><input type="number" name="title_max_length" placeholder="60" min="0"></label>
+          <label><span data-i18n="desc_min">أدنى طول Description</span><input type="number" name="description_min_length" placeholder="70" min="0"></label>
+          <label><span data-i18n="desc_max">أقصى طول Description</span><input type="number" name="description_max_length" placeholder="160" min="0"></label>
+        </div>
+        <label class="chk"><input type="checkbox" name="url_flag_non_ascii"> <span data-i18n="flag_non_ascii">اعتبار الروابط non-ASCII مشكلة (للمواقع العربية: اتركه فارغاً)</span></label>
+      </div>
+    </section>
+    </div>
+  </form>
+
+  <section class="panel">
+    <h2 data-i18n="recent_jobs">المهام الأخيرة</h2>
+    {% if active_job %}
+      <p class="muted"><span data-i18n="active_job">⏳ مهمة نشطة حالياً:</span> <a href="/jobs/{{ active_job }}">{{ active_job }}</a></p>
+    {% endif %}
+    {% if jobs %}
+    <table class="tbl">
+      <thead><tr><th data-i18n="th_job">المهمة</th><th data-i18n="th_site">الموقع</th><th data-i18n="th_mode">الوضع</th><th data-i18n="th_status">الحالة</th><th></th></tr></thead>
+      <tbody>
+      {% for j in jobs %}
+        <tr>
+          <td class="mono">{{ j.job_id }}</td>
+          <td>{{ j.url }}</td>
+          <td>{{ j.mode }}</td>
+          <td><span class="status {{ j.status }}">{{ j.status }}</span></td>
+          <td><a class="btn sm" href="/jobs/{{ j.job_id }}" data-i18n="view">عرض</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted" data-i18n="no_jobs">لا توجد مهام بعد.</p>
+    {% endif %}
+  </section>
+</main>
+
+<script>
+const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
+
+// --- التبويبات ---
+document.querySelectorAll('#tabbar .tab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const name = btn.getAttribute('data-tab');
+    document.querySelectorAll('#tabbar .tab').forEach((b) => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tabpane').forEach((p) =>
+      p.classList.toggle('active', p.getAttribute('data-pane') === name));
+    try { localStorage.setItem('sct_tab', name); } catch (e) {}
+  });
+});
+
+// --- خيار "الكل": تعطيل حقل أقصى عدد صفحات والزحف بلا حد ---
+const allPages = document.getElementById('allPages');
+const maxPages = document.getElementById('maxPages');
+allPages.addEventListener('change', () => {
+  maxPages.disabled = allPages.checked;
+  if (allPages.checked) {
+    maxPages.dataset.prev = maxPages.value;
+    maxPages.value = '';
+    maxPages.placeholder = T('no_limit', 'no limit');
+  } else {
+    maxPages.value = maxPages.dataset.prev || '500';
+    maxPages.placeholder = '';
+  }
+});
+
+// --- متحكّم السرعة ---
+const SPEED_MAP = {
+  1: {delay: 1.5, conc: 3,  key: "speed_1"},
+  2: {delay: 1.0, conc: 4,  key: "speed_2"},
+  3: {delay: 0.5, conc: 5,  key: "speed_3"},
+  4: {delay: 0.3, conc: 8,  key: "speed_4"},
+  5: {delay: 0.1, conc: 15, key: "speed_5"},
+};
+const speedSlider = document.getElementById('speedSlider');
+const speedLabel = document.getElementById('speedLabel');
+const delayInput = document.querySelector('[name="delay_seconds"]');
+const concInput = document.querySelector('[name="concurrent_requests"]');
+function applySpeed() {
+  const s = SPEED_MAP[speedSlider.value];
+  delayInput.value = s.delay;
+  concInput.value = s.conc;
+  speedLabel.textContent = T(s.key);
+}
+speedSlider.addEventListener('input', applySpeed);
+document.addEventListener('sct:langchange', () => {
+  speedLabel.textContent = T(SPEED_MAP[speedSlider.value].key);
+  if (allPages.checked) maxPages.placeholder = T('no_limit', 'no limit');
+});
+applySpeed();
+
+// --- منطق تحديد المجموعات ---
+function syncGroupAll(fs) {
+  const all = fs.querySelector('.group-all');
+  const items = [...fs.querySelectorAll('.item')];
+  const checked = items.filter(i => i.checked).length;
+  all.checked = checked === items.length;
+  all.indeterminate = checked > 0 && checked < items.length;
+}
+document.querySelectorAll('.group').forEach(fs => {
+  const all = fs.querySelector('.group-all');
+  all.addEventListener('change', () => {
+    fs.querySelectorAll('.item').forEach(i => i.checked = all.checked);
+    syncGlobal();
+  });
+  fs.querySelectorAll('.item').forEach(i =>
+    i.addEventListener('change', () => { syncGroupAll(fs); syncGlobal(); }));
+});
+const selectAll = document.getElementById('selectAllGroups');
+function syncGlobal() {
+  const items = [...document.querySelectorAll('.item')];
+  const checked = items.filter(i => i.checked).length;
+  selectAll.checked = checked === items.length;
+  selectAll.indeterminate = checked > 0 && checked < items.length;
+}
+selectAll.addEventListener('change', () => {
+  document.querySelectorAll('.item').forEach(i => i.checked = selectAll.checked);
+  document.querySelectorAll('.group').forEach(syncGroupAll);
+});
+
+// --- محرّر قواعد الاستخراج المخصّص ---
+const rulesBody = document.querySelector('#customRules tbody');
+function addRuleRow(r) {
+  r = r || {};
+  const tr = document.createElement('tr');
+  tr.innerHTML =
+    '<td><input class="r-name" value="' + (r.name||'') + '" placeholder="price"></td>' +
+    '<td><select class="r-type"><option value="css">css</option><option value="regex">regex</option></select></td>' +
+    '<td><input class="r-sel" value="' + (r.selector||r.pattern||'') + '" placeholder=".price / pattern"></td>' +
+    '<td><select class="r-extract"><option value="text">text</option><option value="attr">attr</option><option value="html">html</option></select></td>' +
+    '<td><input class="r-extra" value="' + (r.attr||r.group||'') + '" placeholder="href / 1"></td>' +
+    '<td><button type="button" class="btn sm r-del">✕</button></td>';
+  rulesBody.appendChild(tr);
+  if (r.type === 'regex') tr.querySelector('.r-type').value = 'regex';
+  if (r.extract) tr.querySelector('.r-extract').value = r.extract;
+  tr.querySelector('.r-del').addEventListener('click', () => tr.remove());
+}
+document.getElementById('addRuleBtn').addEventListener('click', () => addRuleRow());
+
+function collectCustomRules() {
+  const rules = [];
+  rulesBody.querySelectorAll('tr').forEach(tr => {
+    const name = tr.querySelector('.r-name').value.trim();
+    if (!name) return;
+    const type = tr.querySelector('.r-type').value;
+    const sel = tr.querySelector('.r-sel').value.trim();
+    const extract = tr.querySelector('.r-extract').value;
+    const extra = tr.querySelector('.r-extra').value.trim();
+    if (type === 'regex') {
+      rules.push({name, type: 'regex', pattern: sel, group: parseInt(extra) || 0});
+    } else {
+      const rule = {name, type: 'css', selector: sel, extract};
+      if (extract === 'attr') rule.attr = extra || 'href';
+      rules.push(rule);
+    }
+  });
+  document.getElementById('customRulesJson').value = JSON.stringify(rules);
+}
+
+// --- إظهار/إخفاء خيارات PDF ---
+function togglePdfOptions() {
+  const pdf = document.querySelector('input[name="formats"][value="pdf"]');
+  const html = document.querySelector('input[name="formats"][value="html"]');
+  const show = (pdf && pdf.checked) || (html && html.checked);
+  document.getElementById('pdfOptions').style.display = show ? 'block' : 'none';
+}
+document.querySelectorAll('input[name="formats"]').forEach(c =>
+  c.addEventListener('change', togglePdfOptions));
+togglePdfOptions();
+
+// --- بناء الطلب وإرساله (يُستخدم للزحف ولاحضار التكامل) ---
+async function startJob(opts, msgEl) {
+  opts = opts || {};
+  collectCustomRules();
+  const form = document.getElementById('crawlForm');
+  const fd = new FormData(form);
+  if (allPages.checked) fd.set('max_pages', '0');
+  ['respect_robots','no_resume','skip_external'].forEach(k => {
+    const el = form.querySelector('[name="'+k+'"]');
+    if (el) fd.set(k, el.checked ? 'true' : 'false');
+  });
+  for (const k in opts) fd.set(k, opts[k]);
+  if (msgEl) msgEl.textContent = T('msg_starting');
+  const res = await fetch('/api/start', { method: 'POST', body: fd });
+  if (res.ok) {
+    const data = await res.json();
+    window.location.href = '/jobs/' + data.job_id;
+  } else if (res.status === 409) {
+    const data = await res.json();
+    if (msgEl) msgEl.textContent = data.error || T('msg_active');
+  } else {
+    if (msgEl) msgEl.textContent = T('msg_start_failed');
+  }
+}
+
+// زحف كامل
+document.getElementById('crawlForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('formMsg');
+  const form = e.target;
+  if (form.querySelectorAll('input[name="extraction"]:checked').length === 0) {
+    msg.textContent = T('msg_pick_extraction'); return;
+  }
+  if (form.querySelectorAll('input[name="formats"]:checked').length === 0) {
+    msg.textContent = T('msg_pick_format'); return;
+  }
+  await startJob({ integrations_only: 'false' }, msg);
+});
+
+// احضار التكامل فقط
+document.getElementById('fetchIntegBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('integMsg');
+  const form = document.getElementById('crawlForm');
+  if (!form.querySelector('[name="url"]').value) {
+    msg.textContent = T('msg_need_url', 'أدخل رابط الموقع في تبويب «الزحف» أولاً'); return;
+  }
+  const anyOn = ['gsc_enabled','ga4_enabled','pagespeed_enabled','lighthouse_enabled','awt_enabled']
+    .some(n => { const el = form.querySelector('[name="'+n+'"]'); return el && el.checked; });
+  if (!anyOn) { msg.textContent = T('msg_pick_integ', 'فعّل مصدر تكامل واحداً على الأقل'); return; }
+  await startJob({ integrations_only: 'true' }, msg);
+});
+
+// ===== ربط Google من المتصفّح =====
+function _setG(text) { const el = document.getElementById('gStatus'); if (el) el.textContent = text; }
+function _autofillCreds(path) {
+  document.querySelectorAll('input[name="gsc_credentials_file"], input[name="ga4_credentials_file"]')
+    .forEach((i) => { i.value = path; });
+  if (window.sctSaveForm) window.sctSaveForm();
+}
+async function gUpload() {
+  const inp = document.getElementById('gClientFile');
+  const f = inp && inp.files[0];
+  if (!f) { _setG('اختر ملف client_secret.json أولاً.'); return; }
+  const fd = new FormData(); fd.append('file', f);
+  _setG('جارٍ الرفع…');
+  try {
+    const r = await fetch('/api/google/upload', { method: 'POST', body: fd });
+    const j = await r.json();
+    _setG(r.ok ? ('✓ تم رفع الملف: ' + j.path) : ('✗ ' + (j.error || 'فشل الرفع')));
+  } catch (e) { _setG('✗ ' + e); }
+}
+async function gAuth() {
+  const btn = document.getElementById('gAuthBtn');
+  _setG('سيُفتح المتصفّح للموافقة — اختر حسابك (مالك GA4/GSC) ووافق…');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/google/authorize', { method: 'POST' });
+    const j = await r.json();
+    if (r.ok) { _setG('✅ تم الربط بنجاح. عُبّئ مسار الاعتماد تلقائياً.'); _autofillCreds(j.client_secret); }
+    else { _setG('✗ ' + (j.error || 'فشل الربط')); }
+  } catch (e) { _setG('✗ ' + e); }
+  finally { if (btn) btn.disabled = false; }
+}
+async function gStatus() {
+  try {
+    const r = await fetch('/api/google/status');
+    const j = await r.json();
+    const parts = [
+      j.client_secret ? '✓ client_secret' : '— client_secret',
+      j.gsc_token ? '✓ GSC token' : '— GSC token',
+      j.ga4_token ? '✓ GA4 token' : '— GA4 token',
+    ];
+    _setG((j.connected ? '✅ مربوط — ' : 'الحالة: ') + parts.join(' • '));
+    if (j.client_secret) _autofillCreds(j.client_secret);
+  } catch (e) { _setG('✗ ' + e); }
+}
+async function gDisconnect() {
+  if (!confirm('قطع الربط: سيُحذف الـtoken المحفوظ. هل أنت متأكد؟')) return;
+  try {
+    const r = await fetch('/api/google/disconnect', { method: 'POST' });
+    const j = await r.json();
+    _setG(r.ok ? ('تم قطع الربط (' + (j.removed || []).join(', ') + ')') : ('✗ ' + j.error));
+  } catch (e) { _setG('✗ ' + e); }
+}
+// تثبيت في الخلفية ثم استفسار عن الحالة (يتفادى سقوط اتصال fetch على التثبيت الطويل)
+async function _install(tool, btnId, stId) {
+  const btn = document.getElementById(btnId), st = document.getElementById(stId);
+  if (st) st.textContent = 'جارٍ التثبيت في الخلفية (قد يستغرق دقائق، يتطلّب إنترنت)…';
+  if (btn) btn.disabled = true;
+  try {
+    await fetch('/api/setup/' + tool, { method: 'POST' });
+  } catch (e) {
+    if (st) st.textContent = '✗ تعذّر بدء التثبيت: ' + e;
+    if (btn) btn.disabled = false;
+    return;
+  }
+  const poll = setInterval(async () => {
+    try {
+      const r = await fetch('/api/setup/' + tool + '/status');
+      const j = await r.json();
+      if (j.running) return;
+      clearInterval(poll);
+      if (btn) btn.disabled = false;
+      if (st) st.textContent = j.ok ? '✅ تم التثبيت' : ('✗ فشل: ' + (j.message || '').slice(-200));
+    } catch (e) { /* استمرّ في المحاولة */ }
+  }, 2500);
+}
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if (!t || !t.id) return;
+  if (t.id === 'gUploadBtn')      { e.preventDefault(); gUpload(); }
+  if (t.id === 'gAuthBtn')        { e.preventDefault(); gAuth(); }
+  if (t.id === 'gStatusBtn')      { e.preventDefault(); gStatus(); }
+  if (t.id === 'gDisconnectBtn')  { e.preventDefault(); gDisconnect(); }
+  if (t.id === 'pwInstallBtn')    { e.preventDefault(); _install('playwright','pwInstallBtn','pwStatus'); }
+  if (t.id === 'ga4InstallBtn')   { e.preventDefault(); _install('ga4_lib','ga4InstallBtn','ga4Status'); }
+});
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(gStatus, 200);
+  // استعادة آخر تبويب
+  try {
+    const last = localStorage.getItem('sct_tab');
+    if (last) { const b = document.querySelector('#tabbar .tab[data-tab="'+last+'"]'); if (b) b.click(); }
+  } catch (e) {}
+});
+
+// ===== حفظ/استعادة قيم النموذج =====
+(function () {
+  const FORM_KEY = 'sct_form_v1';
+  const form = document.getElementById('crawlForm');
+  if (!form) return;
+  function _groups() {
+    const groups = {};
+    form.querySelectorAll('input, select, textarea').forEach((el) => {
+      if (!el.name || el.type === 'file' || el.type === 'submit' || el.type === 'button') return;
+      (groups[el.name] = groups[el.name] || []).push(el);
+    });
+    return groups;
+  }
+  function saveForm() {
+    const data = {}; const g = _groups();
+    for (const name in g) {
+      const els = g[name];
+      const allChk = els.every((e) => e.type === 'checkbox');
+      if (allChk && els.length > 1) data[name] = els.filter((e) => e.checked).map((e) => e.value);
+      else if (allChk) data[name] = !!els[0].checked;
+      else {
+        const el = els[0];
+        data[name] = (el.tagName === 'SELECT' && el.multiple)
+          ? [...el.selectedOptions].map((o) => o.value) : el.value;
+      }
+    }
+    try { localStorage.setItem(FORM_KEY, JSON.stringify(data)); } catch (e) {}
+  }
+  function restoreForm() {
+    let raw; try { raw = localStorage.getItem(FORM_KEY); } catch (e) { return; }
+    if (!raw) return;
+    let data; try { data = JSON.parse(raw); } catch (e) { return; }
+    const g = _groups();
+    for (const name in g) {
+      if (!(name in data)) continue;
+      const v = data[name]; const els = g[name];
+      const allChk = els.every((e) => e.type === 'checkbox');
+      if (allChk && els.length > 1 && Array.isArray(v)) els.forEach((e) => { e.checked = v.includes(e.value); });
+      else if (allChk) els[0].checked = !!v;
+      else {
+        const el = els[0];
+        if (el.tagName === 'SELECT' && el.multiple && Array.isArray(v))
+          [...el.options].forEach((o) => { o.selected = v.includes(o.value); });
+        else if (typeof v === 'string' || typeof v === 'number') el.value = String(v);
+      }
+    }
+  }
+  restoreForm();
+  let _t;
+  form.addEventListener('input', () => { clearTimeout(_t); _t = setTimeout(saveForm, 250); });
+  form.addEventListener('change', saveForm);
+  form.addEventListener('submit', saveForm);
+  window.sctSaveForm = saveForm;
+})();
+</script>
+</body>
+</html>

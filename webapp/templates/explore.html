@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Results Explorer — SCT</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/i18n.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="exp_title">🔎 مستكشف النتائج</h1>
+  <span>
+    <button id="langToggle" class="btn sm" type="button">English</button>
+    <a href="/jobs/{{ job_id }}" class="btn sm" data-i18n="back_job">⟵ المهمة</a>
+  </span>
+</header>
+
+<main class="container">
+  <section class="panel">
+    <h2><span data-i18n="exp_filter_title">تصفية وفرز الصفحات</span> <span id="countBadge" class="speed-tag"></span></h2>
+    <div class="grid">
+      <label><span data-i18n="exp_url_search">بحث في الرابط</span>
+        <input type="text" id="f_url" data-i18n-ph="exp_url_ph" placeholder="جزء من المسار">
+      </label>
+      <label><span data-i18n="exp_status">كود الحالة</span>
+        <select id="f_status">
+          <option value="" data-i18n="opt_all">الكل</option>
+          <option value="2xx">2xx</option>
+          <option value="3xx">3xx</option>
+          <option value="4xx">4xx</option>
+          <option value="5xx">5xx</option>
+        </select>
+      </label>
+      <label><span data-i18n="exp_index">قابلية الفهرسة</span>
+        <select id="f_index">
+          <option value="" data-i18n="opt_all">الكل</option>
+          <option value="yes" data-i18n="exp_indexable_yes">قابلة للفهرسة</option>
+          <option value="no" data-i18n="exp_indexable_no">غير قابلة</option>
+        </select>
+      </label>
+      <label><span data-i18n="exp_depth">العمق (≥)</span>
+        <input type="number" id="f_depth" min="0" data-i18n-ph="exp_any" placeholder="أي">
+      </label>
+      <label><span data-i18n="exp_ctype">نوع المحتوى يحوي</span>
+        <input type="text" id="f_ctype" placeholder="html">
+      </label>
+      <label><span data-i18n="exp_special">الحالة الخاصة</span>
+        <select id="f_special">
+          <option value="" data-i18n="opt_all">الكل</option>
+          <option value="no_h1" data-i18n="exp_no_h1">بدون H1</option>
+          <option value="no_meta" data-i18n="exp_no_meta">بدون Meta Description</option>
+          <option value="no_canonical" data-i18n="exp_no_canonical">بدون Canonical</option>
+          <option value="no_title" data-i18n="exp_no_title">بدون Title</option>
+        </select>
+      </label>
+    </div>
+    <div class="actions">
+      <button id="applyBtn" class="btn primary" data-i18n="exp_apply">تطبيق</button>
+      <button id="resetBtn" class="btn" data-i18n="exp_reset">إعادة ضبط</button>
+      <a id="csvBtn" class="btn sm" download="filtered_pages.csv" data-i18n="exp_csv">⬇️ تنزيل CSV للمصفّى</a>
+      <span id="msg" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div style="overflow:auto; max-height:65vh">
+      <table class="tbl" id="tbl">
+        <thead><tr>
+          <th data-sort="url" data-i18n="t_url">الرابط</th>
+          <th data-sort="status_code" data-i18n="t_status">الحالة</th>
+          <th data-sort="is_indexable" data-i18n="t_index">فهرسة</th>
+          <th data-sort="depth" data-i18n="t_depth">العمق</th>
+          <th data-sort="title_length" data-i18n="t_title_len">طول العنوان</th>
+          <th data-sort="meta_description_length" data-i18n="t_desc_len">طول الوصف</th>
+          <th data-sort="h1_count">H1</th>
+          <th data-sort="word_count" data-i18n="t_words">كلمات</th>
+          <th data-sort="internal_links_count" data-i18n="t_internal">روابط داخلية</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <p class="muted sm" id="renderNote"></p>
+  </section>
+</main>
+
+<script>
+const jobId = "{{ job_id }}";
+const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
+let allPages = [];
+let sortKey = null, sortDir = 1;
+const MAX_RENDER = 1000;
+
+async function load() {
+  const res = await fetch('/api/jobs/' + jobId + '/pages');
+  if (!res.ok) { document.getElementById('msg').textContent = T('exp_no_results'); return; }
+  const data = await res.json();
+  allPages = data.pages || [];
+  document.getElementById('countBadge').textContent = allPages.length;
+  render();
+}
+
+function band(code) {
+  code = Number(code) || 0;
+  if (code >= 200 && code < 300) return '2xx';
+  if (code >= 300 && code < 400) return '3xx';
+  if (code >= 400 && code < 500) return '4xx';
+  if (code >= 500) return '5xx';
+  return '';
+}
+
+function filtered() {
+  const fu = document.getElementById('f_url').value.trim().toLowerCase();
+  const fs = document.getElementById('f_status').value;
+  const fi = document.getElementById('f_index').value;
+  const fd = document.getElementById('f_depth').value;
+  const fc = document.getElementById('f_ctype').value.trim().toLowerCase();
+  const sp = document.getElementById('f_special').value;
+  let rows = allPages.filter(p => {
+    if (fu && !String(p.url || '').toLowerCase().includes(fu)) return false;
+    if (fs && band(p.status_code) !== fs) return false;
+    if (fi === 'yes' && !p.is_indexable) return false;
+    if (fi === 'no' && p.is_indexable) return false;
+    if (fd !== '' && (Number(p.depth) || 0) < Number(fd)) return false;
+    if (fc && !String(p.content_type || '').toLowerCase().includes(fc)) return false;
+    if (sp === 'no_h1' && (Number(p.h1_count) || 0) > 0) return false;
+    if (sp === 'no_meta' && (Number(p.meta_description_length) || 0) > 0) return false;
+    if (sp === 'no_canonical' && p.canonical) return false;
+    if (sp === 'no_title' && (Number(p.title_length) || 0) > 0) return false;
+    return true;
+  });
+  if (sortKey) {
+    rows.sort((a, b) => {
+      let x = a[sortKey], y = b[sortKey];
+      if (typeof x === 'string' || typeof y === 'string') { x = String(x||''); y = String(y||''); return x.localeCompare(y) * sortDir; }
+      return ((Number(x)||0) - (Number(y)||0)) * sortDir;
+    });
+  }
+  return rows;
+}
+
+function render() {
+  const rows = filtered();
+  const tb = document.getElementById('tbody');
+  tb.innerHTML = '';
+  const shown = rows.slice(0, MAX_RENDER);
+  const frag = document.createDocumentFragment();
+  for (const p of shown) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td style="word-break:break-all">' + esc(p.url) + '</td>' +
+      '<td class="ctr">' + esc(p.status_code) + '</td>' +
+      '<td class="ctr">' + (p.is_indexable ? '✓' : '✗') + '</td>' +
+      '<td class="ctr">' + esc(p.depth) + '</td>' +
+      '<td class="ctr">' + esc(p.title_length) + '</td>' +
+      '<td class="ctr">' + esc(p.meta_description_length) + '</td>' +
+      '<td class="ctr">' + esc(p.h1_count) + '</td>' +
+      '<td class="ctr">' + esc(p.word_count) + '</td>' +
+      '<td class="ctr">' + esc(p.internal_links_count) + '</td>';
+    frag.appendChild(tr);
+  }
+  tb.appendChild(frag);
+  document.getElementById('renderNote').textContent =
+    T('exp_showing') + ' ' + shown.length + ' / ' + rows.length +
+    ' (' + T('exp_total') + ' ' + allPages.length + ')';
+  buildCsv(rows);
+}
+
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function buildCsv(rows) {
+  const cols = ['url','status_code','is_indexable','depth','content_type','title_length','meta_description_length','h1_count','word_count','internal_links_count'];
+  const lines = [cols.join(',')];
+  for (const p of rows) {
+    lines.push(cols.map(c => '"' + String(p[c] == null ? '' : p[c]).replace(/"/g,'""') + '"').join(','));
+  }
+  const blob = new Blob(['﻿' + lines.join('\n')], {type:'text/csv'});
+  document.getElementById('csvBtn').href = URL.createObjectURL(blob);
+}
+
+document.getElementById('applyBtn').addEventListener('click', render);
+document.getElementById('resetBtn').addEventListener('click', () => {
+  ['f_url','f_status','f_index','f_depth','f_ctype','f_special'].forEach(id => document.getElementById(id).value = '');
+  sortKey = null; render();
+});
+document.querySelectorAll('#tbl th[data-sort]').forEach(th => {
+  th.style.cursor = 'pointer';
+  th.addEventListener('click', () => {
+    const k = th.getAttribute('data-sort');
+    if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+    render();
+  });
+});
+// أعِد رسم سطر العدّ عند تبديل اللغة
+document.addEventListener('sct:langchange', () => { if (allPages.length) render(); });
+load();
+</script>
+</body>
+</html>

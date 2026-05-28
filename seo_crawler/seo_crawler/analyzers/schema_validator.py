@@ -213,7 +213,8 @@ def validate_schemas(
     for entry in all_schemas:
         page_url = entry.get("page_url", "")
         schema_type = entry.get("type", "")
-        raw_data = entry.get("raw_data", {})
+        # دعم microdata: إن غاب raw_data نستخدم properties (إصلاح H6)
+        raw_data = entry.get("raw_data") or entry.get("properties", {})
 
         # عدّ الأنواع
         if schema_type:

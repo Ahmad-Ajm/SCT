@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مهمة {{ job_id }} — SCT</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/i18n.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="monitor_title">🕷️ متابعة الزحف</h1>
+  <span>
+    <button id="langToggle" class="btn sm" type="button">English</button>
+    <a href="/" class="btn sm" data-i18n="back_home">⟵ الرئيسية</a>
+  </span>
+</header>
+
+<main class="container">
+  <section class="panel">
+    <h2><span data-i18n="the_job">المهمة</span> <span class="mono">{{ job_id }}</span></h2>
+    <div class="meta-line">
+      <span><span data-i18n="lbl_site">الموقع:</span> <b>{{ meta.url }}</b></span>
+      <span><span data-i18n="lbl_mode">الوضع:</span> <b>{{ meta.mode }}</b></span>
+      <span><span data-i18n="lbl_status">الحالة:</span> <b id="statusBadge" class="status {{ meta.status }}">{{ meta.status }}</b></span>
+    </div>
+
+    <div class="timer-box">
+      <span class="timer-label" data-i18n="elapsed">⏱️ الوقت المنقضي</span>
+      <span id="timer" class="timer">00:00:00</span>
+    </div>
+
+    <div class="cards" id="liveCards">
+      <div class="card"><div class="num" id="m_pages">0</div><div class="lbl" data-i18n="c_pages">صفحات</div></div>
+      <div class="card"><div class="num" id="m_queue">0</div><div class="lbl" data-i18n="c_queue">في الطابور</div></div>
+      <div class="card"><div class="num" id="m_failed">0</div><div class="lbl" data-i18n="c_failed">فاشلة</div></div>
+      <div class="card"><div class="num" id="m_ext_checked">0</div><div class="lbl" data-i18n="c_ext_checked">روابط مفحوصة</div></div>
+      <div class="card"><div class="num" id="m_speed">0</div><div class="lbl" data-i18n="c_speed">صفحة/ث</div></div>
+      <div class="card"><div class="num" id="m_elapsed">0</div><div class="lbl" data-i18n="c_sec">ثانية</div></div>
+    </div>
+
+    <div class="phase-box" id="phaseBox">
+      <div class="phase-line">
+        <span id="phaseText">...</span>
+        <span id="phasePct" class="mono"></span>
+      </div>
+      <div class="progress-track"><div id="phaseBar" class="progress-bar"></div></div>
+      <p id="phaseHint" class="muted sm"></p>
+    </div>
+
+    <div class="actions">
+      <button id="stopBtn" class="btn danger" data-i18n="stop_btn">⏹️ إيقاف</button>
+      <button id="killBtn" class="btn danger" data-i18n="kill_btn" title="قتل فوري لو علقت العملية في تكامل خارجي" style="margin-inline-start:6px">🛑 قتل فوري</button>
+    </div>
+  </section>
+
+  <section class="panel" id="resultsPanel" style="display:none">
+    <h2 data-i18n="results">النتائج والتقارير</h2>
+    <div class="actions" id="downloads"></div>
+
+    <details id="filesBox" style="margin-top:12px">
+      <summary data-i18n="all_files">كل الملفات الناتجة (مختصّة)</summary>
+      <div class="adv-body">
+        <div class="actions" style="margin-bottom:8px">
+          <button type="button" id="dlSelected" class="btn sm" data-i18n="dl_selected">تنزيل المختار (ZIP)</button>
+          <label class="chk"><input type="checkbox" id="filesAll" checked> <span data-i18n="select_all">تحديد الكل</span></label>
+        </div>
+        <div id="filesList"></div>
+      </div>
+    </details>
+
+    <h3 data-i18n="customize_report">تخصيص تقرير PDF/HTML</h3>
+    <form id="reportForm" class="grid">
+      <label><span data-i18n="report_lang">اللغة</span>
+        <select name="language" data-i18n-followlang>
+          <option value="ar" data-i18n="lang_ar">العربية</option>
+          <option value="en" data-i18n="lang_en">English</option>
+        </select>
+      </label>
+      <label><span data-i18n="client_name">اسم العميل</span>
+        <input type="text" name="client_name" data-i18n-ph="optional" placeholder="اختياري">
+      </label>
+      <label><span data-i18n="report_type">نوع التقرير</span>
+        <select name="audience">
+          <option value="expert" data-i18n="aud_expert">خبير SEO (تفصيلي)</option>
+          <option value="client" data-i18n="aud_client">عميل (مختصر)</option>
+          <option value="both" data-i18n="aud_both">كلاهما</option>
+        </select>
+      </label>
+      <label class="chk full"><input type="checkbox" name="make_pdf" checked> <span data-i18n="make_pdf">توليد PDF</span></label>
+      <button type="submit" class="btn primary" data-i18n="rebuild_report">🧾 أعد بناء التقرير</button>
+      <span id="reportMsg" class="muted"></span>
+    </form>
+  </section>
+
+  <section class="panel" id="diagPanel" style="display:none">
+    <h2 data-i18n="diag_title">تشخيص اللوغ</h2>
+    <div class="cards">
+      <div class="card"><div class="num" id="d_errors">0</div><div class="lbl">Errors</div></div>
+      <div class="card"><div class="num" id="d_tracebacks">0</div><div class="lbl">Tracebacks</div></div>
+      <div class="card"><div class="num" id="d_warnings">0</div><div class="lbl">Warnings</div></div>
+    </div>
+    <pre id="diagLines" class="logbox"></pre>
+  </section>
+</main>
+
+<script>
+const jobId = "{{ job_id }}";
+
+// --- عدّاد الوقت الحيّ ---
+let lastServerElapsed = 0;   // آخر قيمة من الخادم (مرجعية)
+let lastUpdateTs = Date.now();
+let timerRunning = false;
+function fmtTime(total) {
+  total = Math.max(0, Math.floor(total));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h, m, s].map(x => String(x).padStart(2, '0')).join(':');
+}
+function renderTimer() {
+  let val = lastServerElapsed;
+  if (timerRunning) val += (Date.now() - lastUpdateTs) / 1000;
+  document.getElementById('timer').textContent = fmtTime(val);
+}
+setInterval(renderTimer, 1000);
+
+let lastResult = null;
+function renderDownloads(result) {
+  lastResult = result;
+  const box = document.getElementById('downloads');
+  const dlWord = (window.sctT ? window.sctT('download') : 'تنزيل');
+  box.innerHTML = '<span class="dl-label">⬇️ ' + dlWord + ':</span>';
+  const en = (document.documentElement.lang === 'en');
+  // في وضع «both» نعرض أزرار العميل/الخبير المنفصلة بدل تكرار التقرير العام
+  const bothMode = result && (result.html_client || result.html_expert);
+  let kinds;
+  if (bothMode) {
+    kinds = {
+      html_expert: en ? '🌐 HTML (Expert)' : '🌐 HTML (خبير)',
+      pdf_expert:  en ? '📄 PDF (Expert)'  : '📄 PDF (خبير)',
+      html_client: en ? '🌐 HTML (Client)' : '🌐 HTML (عميل)',
+      pdf_client:  en ? '📄 PDF (Client)'  : '📄 PDF (عميل)',
+      excel:'📊 Excel', json:'📦 JSON'};
+  } else {
+    kinds = {pdf:'📄 PDF', html:'🌐 HTML', excel:'📊 Excel', json:'📦 JSON'};
+  }
+  for (const k in kinds) {
+    if (result && result[k]) {
+      const a = document.createElement('a');
+      a.className = 'btn sm';
+      a.href = '/api/jobs/' + jobId + '/download/' + k;
+      a.textContent = dlWord + ' ' + kinds[k];
+      box.appendChild(a);
+    }
+  }
+  for (const k of Object.keys(result || {}).filter(x => x.startsWith('xml_')).sort()) {
+    const a = document.createElement('a');
+    a.className = 'btn sm';
+    a.href = '/api/jobs/' + jobId + '/download/' + k;
+    a.textContent = dlWord + ' 🧩 XML ' + k.replace('xml_', '');
+    box.appendChild(a);
+  }
+  if (result && result.html) {
+    const v = document.createElement('a');
+    v.className = 'btn sm';
+    v.href = '/api/jobs/' + jobId + '/view';
+    v.target = '_blank';
+    v.textContent = (window.sctT ? window.sctT('view_report') : '👁️ عرض التقرير');
+    box.appendChild(v);
+  }
+  if (result && result.json) {
+    const ex = document.createElement('a');
+    ex.className = 'btn sm';
+    ex.href = '/jobs/' + jobId + '/explore';
+    ex.textContent = (window.sctT ? window.sctT('explore_results') : '🔎 استكشاف النتائج');
+    box.appendChild(ex);
+  }
+  // تنزيل كل الملفات كـ ZIP واحد
+  const all = document.createElement('a');
+  all.className = 'btn sm primary';
+  all.href = '/api/jobs/' + jobId + '/download-all';
+  all.textContent = (window.sctT ? window.sctT('download_all') : '🗜️ تنزيل الكل (ZIP)');
+  box.appendChild(all);
+  loadFiles();
+}
+
+function _fmtSize(n) {
+  if (n > 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n > 1024) return (n / 1024).toFixed(0) + ' KB';
+  return n + ' B';
+}
+
+// قائمة كل الملفات الناتجة (مختصّة) مع تحديد منفصل وتنزيل جماعي
+async function loadFiles() {
+  const box = document.getElementById('filesList');
+  if (!box) return;
+  const lang = document.documentElement.lang || 'ar';
+  let data;
+  try {
+    const r = await fetch('/api/jobs/' + jobId + '/files?lang=' + lang);
+    data = await r.json();
+  } catch (e) { return; }
+  const files = (data && data.files) || [];
+  const groups = (data && data.groups) || {};
+  if (!files.length) { box.innerHTML = ''; return; }
+  const byGroup = {};
+  files.forEach(f => { (byGroup[f.group] = byGroup[f.group] || []).push(f); });
+  let html = '';
+  Object.keys(groups).forEach(g => {
+    const items = byGroup[g];
+    if (!items || !items.length) return;
+    html += '<div class="file-group"><b>' + groups[g] + '</b><ul style="list-style:none;padding:0;margin:6px 0">';
+    items.forEach(f => {
+      html += '<li style="margin:3px 0">'
+        + '<label class="chk" style="display:inline-flex;gap:6px;align-items:center">'
+        + '<input type="checkbox" class="fchk" value="' + f.rel + '" checked> '
+        + '<a href="/api/jobs/' + jobId + '/download-file?rel=' + encodeURIComponent(f.rel) + '">'
+        + f.label + '</a> <span class="muted sm">(' + _fmtSize(f.size) + ')</span>'
+        + '</label></li>';
+    });
+    html += '</ul></div>';
+  });
+  box.innerHTML = html;
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target && e.target.id === 'dlSelected') {
+    const sel = [...document.querySelectorAll('#filesList .fchk:checked')].map(c => c.value);
+    if (!sel.length) { alert(document.documentElement.lang === 'en' ? 'Select at least one file' : 'اختر ملفاً واحداً على الأقل'); return; }
+    window.location = '/api/jobs/' + jobId + '/download-all?only=' + encodeURIComponent(sel.join(','));
+  }
+  if (e.target && e.target.id === 'filesAll') {
+    document.querySelectorAll('#filesList .fchk').forEach(c => { c.checked = e.target.checked; });
+  }
+});
+
+function applyProgress(p) {
+  if (!p) return;
+  lastProgress = p;
+  document.getElementById('m_pages').textContent = p.pages_crawled ?? 0;
+  document.getElementById('m_queue').textContent = p.queue_size ?? 0;
+  document.getElementById('m_failed').textContent = p.pages_failed ?? 0;
+  document.getElementById('m_ext_checked').textContent = p.external_links_checked ?? 0;
+  document.getElementById('m_speed').textContent = p.pages_per_second ?? 0;
+  document.getElementById('m_elapsed').textContent = p.elapsed_seconds ?? 0;
+  applyPhaseDetails(p);
+  // مزامنة العدّاد مع الوقت المرجعي من الخادم
+  if (typeof p.elapsed_seconds === 'number') {
+    lastServerElapsed = p.elapsed_seconds;
+    lastUpdateTs = Date.now();
+    renderTimer();
+  }
+}
+
+const FINISHED = ['done','complete','partial','partial_max_pages','failed','stopped'];
+const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
+const phaseLabel = (s) => T('ph_' + s, s);
+let lastProgress = null;   // لإعادة الرسم عند تبديل اللغة
+
+function applyPhaseDetails(p) {
+  const status = p.status || 'running';
+  const pct = Number(p.report_percent || 0);
+  document.getElementById('phaseText').textContent = phaseLabel(status);
+  document.getElementById('phasePct').textContent = pct ? pct + '%' : '';
+  document.getElementById('phaseBar').style.width = pct ? pct + '%' : '12%';
+  const hint = document.getElementById('phaseHint');
+  if (status === 'building_pdf' || status === 'building_html' || status === 'building_report_data') {
+    hint.textContent = T('hint_preparing');
+    document.getElementById('stopBtn').textContent = T('btn_cancel_prep');
+  } else {
+    hint.textContent = '';
+    document.getElementById('stopBtn').textContent = T('stop_btn');
+  }
+}
+function effectiveStatus(meta, progress) {
+  const m = meta && meta.status;
+  if (FINISHED.includes(m)) return m;            // العملية خرجت → حالة نهائية
+  return (progress && progress.status) || m || 'running';
+}
+let lastStatus = null;
+function applyStatus(status) {
+  lastStatus = status;
+  const b = document.getElementById('statusBadge');
+  b.textContent = phaseLabel(status);
+  b.className = 'status ' + (FINISHED.includes(status) ? status : 'running');
+  // العدّاد يدقّ في كل المراحل غير النهائية، ويتجمّد عند الانتهاء
+  timerRunning = !FINISHED.includes(status);
+  if (FINISHED.includes(status)) {
+    document.getElementById('stopBtn').disabled = true;
+    renderTimer();  // تثبيت القيمة النهائية
+  }
+}
+
+function finish(meta) {
+  applyStatus(meta.status);
+  if (meta.result) {
+    document.getElementById('resultsPanel').style.display = 'block';
+    renderDownloads(meta.result);
+  }
+  renderDiagnostics(meta.diagnostics);
+}
+
+function renderDiagnostics(d) {
+  if (!d || !d.log_exists) return;
+  document.getElementById('diagPanel').style.display = 'block';
+  document.getElementById('d_errors').textContent = d.error_count ?? 0;
+  document.getElementById('d_tracebacks').textContent = d.traceback_count ?? 0;
+  document.getElementById('d_warnings').textContent = d.warning_count ?? 0;
+  const lines = d.last_important_lines || [];
+  document.getElementById('diagLines').textContent = lines.join('\n');
+}
+
+const es = new EventSource('/api/jobs/' + jobId + '/events');
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  applyProgress(data.progress);
+  applyStatus(effectiveStatus(data.meta, data.progress));
+};
+es.addEventListener('end', (e) => {
+  const data = JSON.parse(e.data);
+  applyProgress(data.progress);
+  finish(data.meta);
+  es.close();
+});
+es.onerror = () => { /* المتصفح يعيد المحاولة تلقائياً */ };
+
+document.getElementById('killBtn').addEventListener('click', async () => {
+  if (!confirm('قتل فوري للعملية بلا انتظار. لن تُصدَّر بيانات. متأكد؟')) return;
+  await fetch('/api/jobs/' + jobId + '/kill', { method: 'POST' });
+  setTimeout(() => location.reload(), 600);
+});
+document.getElementById('stopBtn').addEventListener('click', async () => {
+  await fetch('/api/jobs/' + jobId + '/stop', { method: 'POST' });
+});
+
+document.getElementById('reportForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('reportMsg');
+  msg.textContent = T('msg_building_report');
+  const fd = new FormData(e.target);
+  fd.set('make_pdf', fd.has('make_pdf') ? 'true' : 'false');
+  const res = await fetch('/api/jobs/' + jobId + '/report', { method: 'POST', body: fd });
+  if (res.ok) {
+    msg.textContent = T('msg_report_done');
+    const meta = await (await fetch('/api/jobs/' + jobId + '/progress')).json();
+    if (meta.meta && meta.meta.result) renderDownloads(meta.meta.result);
+  } else {
+    msg.textContent = T('msg_report_failed');
+  }
+});
+
+// إعادة رسم النصوص المولّدة بالـ JS عند تبديل اللغة
+document.addEventListener('sct:langchange', () => {
+  if (lastProgress) applyPhaseDetails(lastProgress);
+  if (lastStatus) applyStatus(lastStatus);
+  if (lastResult) renderDownloads(lastResult);
+});
+
+// إذا كانت المهمة منتهية مسبقاً عند فتح الصفحة
+{% if meta.status in ['done','complete','partial','partial_max_pages','failed','stopped'] %}
+finish({{ meta | tojson }});
+{% endif %}
+</script>
+</body>
+</html>

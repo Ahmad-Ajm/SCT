@@ -18,6 +18,7 @@ env/
 output/
 state/
 logs/
+webapp_jobs/
 *.db
 *.db-shm
 *.db-wal

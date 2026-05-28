@@ -96,7 +96,11 @@ def find_orphan_pages(
     # === Top/Bottom linked pages ===
     sorted_pages = sorted(inlink_counts.items(), key=lambda x: x[1], reverse=True)
     most_linked = sorted_pages[:20]
-    least_linked = sorted_pages[-20:]
+    # نتفادى تداخل القائمتين على المواقع الصغيرة (<40 صفحة مرتبطة)
+    if len(sorted_pages) <= 40:
+        least_linked = sorted_pages[len(most_linked):]
+    else:
+        least_linked = sorted_pages[-20:]
 
     return {
         "orphan_pages": orphan_pages,

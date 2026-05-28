@@ -15,7 +15,11 @@ crawl:
   retry_delay_seconds: 2
   respect_robots: true
   robots_failure_policy: "allow"
+  # homepage | sitemap | hybrid (موصى به)
+  seed_strategy: "hybrid"
   verify_ssl: true
+  # السماح بزحف عناوين داخلية/loopback. اتركه false لحماية SSRF.
+  allow_private_hosts: false
   concurrent_requests: 5
   user_agent: "SCTBot/1.0 (+https://github.com/your-org/simple-crawler-tool)"
   max_page_size_mb: 10
@@ -63,6 +67,8 @@ filters:
 
 analysis:
   thin_content_threshold: 300
+  thin_content_critical_threshold: 100
+  text_ratio_threshold: 10.0
   title_max_length: 60
   title_min_length: 30
   description_max_length: 160
@@ -77,8 +83,22 @@ output:
   formats:
     - csv
     - json
+    # - xml    # يكرّر بيانات CSV (لا معلومات إضافية) — أضِفه فقط عند الحاجة
+    # - html   # تقرير HTML
+    # - pdf    # تقرير PDF (يحتاج Playwright)
+    # - excel  # يحتاج openpyxl
   encoding: "utf-8-sig"
   timestamped_folder: true
+  json_full: false       # true = ضمّن المصفوفات الخام في JSON (قد يكون ضخماً)
+  xml_max_rows: 50000    # سقف صفوف XML لكل مجموعة (0 = بلا حد)
+
+# خيارات تقرير HTML/PDF (تُستخدم عند إضافة html/pdf إلى formats)
+report:
+  language: "ar"          # ar | en
+  client_name: ""         # يظهر في غلاف التقرير
+  logo_url: ""            # شعار اختياري في الغلاف
+  max_rows: 100           # حد صفوف الجداول في التقرير
+  unified: true           # تقرير موحّد: تقني + GSC + GA4 + أولويات
 
 state:
   state_dir: "./state"
@@ -112,6 +132,30 @@ integrations:
   awt:
     enabled: false
     csv_folder: "./external_data/awt"
+  # استيراد Lighthouse/PageSpeed JSON محلياً (بلا مفاتيح) — راجع docs/EXTERNAL_TOOLS_GUIDE
+  lighthouse:
+    enabled: false
+    folder: "./external_data/lighthouse"
+  # Google Analytics 4 (اختياري، بمفاتيحك) — pip install google-analytics-data
+  ga4:
+    enabled: false
+    property_id: ""
+    credentials_file: ""
+    date_range_days: 90
+
+# الاستخراج المخصّص (CSS/attr/text/regex) — معطّل افتراضياً
+custom_extraction:
+  enabled: false
+  rules: []
+  # rules:
+  #   - name: product_price
+  #     type: css
+  #     selector: ".price"
+  #     extract: text
+  #   - name: sku
+  #     type: regex
+  #     pattern: 'SKU:\s*([A-Z0-9-]+)'
+  #     group: 1
 
 logging:
   level: "INFO"

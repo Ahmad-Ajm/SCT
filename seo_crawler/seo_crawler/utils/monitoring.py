@@ -22,6 +22,20 @@ from utils.logger import get_logger
 
 log = get_logger(__name__)
 
+# مفاتيح محجوزة لتوقيع event()/span — نُعيد تسميتها في attrs لتفادي
+# TypeError: "got multiple values for argument ..." عند تمريرها من المتصل.
+_RESERVED_ATTR_KEYS = frozenset({"name", "status", "duration_ms", "error"})
+
+
+def _safe_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
+    """إعادة تسمية أي مفاتيح تتعارض مع وسائط event() الموضعية."""
+    if not any(k in _RESERVED_ATTR_KEYS for k in attrs):
+        return attrs
+    return {
+        (f"attr_{k}" if k in _RESERVED_ATTR_KEYS else k): v
+        for k, v in attrs.items()
+    }
+
 
 class MetricsCollector:
     """Thread-safe metrics collector for one CLI run."""
@@ -50,6 +64,8 @@ class MetricsCollector:
         self.log_url_events = bool(config.get("log_url_events", True))
         self.log_extraction_details = bool(config.get("log_extraction_details", True))
         self.slow_call_ms = float(config.get("slow_call_ms", 500))
+        # تجميع تحذيرات البطء في ملخص نهائي بدل تحذير لكل نداء (يقلّل ضجيج اللوغ)
+        self.slow_call_summary = bool(config.get("slow_call_summary", True))
         self.reset()
 
     @contextmanager
@@ -68,15 +84,22 @@ class MetricsCollector:
             elapsed_ms = (perf_counter() - start) * 1000
             self._record_timing(name, elapsed_ms)
             self.increment(f"errors.{name}")
-            self.event(name, "error", duration_ms=round(elapsed_ms, 2), error=type(exc).__name__, **attrs)
+            self.event(
+                name, "error", duration_ms=round(elapsed_ms, 2),
+                error=type(exc).__name__, **_safe_attrs(attrs),
+            )
             log.error("✖ %s failed after %.2fms: %s", name, elapsed_ms, exc)
             raise
         else:
             elapsed_ms = (perf_counter() - start) * 1000
             self._record_timing(name, elapsed_ms)
-            self.event(name, "ok", duration_ms=round(elapsed_ms, 2), **attrs)
+            self.event(name, "ok", duration_ms=round(elapsed_ms, 2), **_safe_attrs(attrs))
             if self.log_function_calls and self._should_log_span(name):
-                logger = log.warning if elapsed_ms >= self.slow_call_ms else log.debug
+                # عند تفعيل الملخص: لا نُحذّر لكل نداء بطيء (يُجمَّع في النهاية)
+                if elapsed_ms >= self.slow_call_ms and not self.slow_call_summary:
+                    logger = log.warning
+                else:
+                    logger = log.debug
                 logger("✓ %s end %.2fms %s", name, elapsed_ms, self._format_attrs(attrs))
 
     def increment(self, name: str, value: int | float = 1) -> None:
@@ -129,12 +152,31 @@ class MetricsCollector:
     def write(self, output_dir: str | Path, filename: str = "metrics.json") -> str:
         if not self.enabled:
             return ""
+        self.log_slow_summary()
         path = Path(output_dir) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.snapshot(), f, ensure_ascii=False, indent=2, default=str)
         log.info("📈 Metrics written: %s", path)
         return str(path)
+
+    def log_slow_summary(self, top_n: int = 10) -> None:
+        """ملخص أبطأ المراحل (بدل تحذير لكل نداء بطيء)."""
+        if not (self.enabled and self.slow_call_summary):
+            return
+        with self._lock:
+            slow = [
+                (name, data["max_ms"], data["total_ms"] / data["count"] if data["count"] else 0,
+                 int(data["count"]))
+                for name, data in self.timings.items()
+                if data["max_ms"] >= self.slow_call_ms
+            ]
+        if not slow:
+            return
+        slow.sort(key=lambda x: x[1], reverse=True)
+        log.info("⏱️  ملخص الأداء — أبطأ %d مرحلة (الحد %.0fms):", min(top_n, len(slow)), self.slow_call_ms)
+        for name, mx, avg, cnt in slow[:top_n]:
+            log.info("    %-32s count=%-5d avg=%.0fms max=%.0fms", name, cnt, avg, mx)
 
     def _record_timing(self, name: str, elapsed_ms: float) -> None:
         with self._lock:
@@ -173,6 +215,14 @@ class MetricsCollector:
 
 
 collector = MetricsCollector()
+
+
+def reset_monitoring() -> None:
+    """تصفير العدّادات/المؤشّرات/التوقيتات مع الحفاظ على الإعدادات.
+
+    يُستخدم بين مواقع وضع المقارنة كي لا تتراكم مقاييس موقع على آخر.
+    """
+    collector.reset()
 
 
 def configure_monitoring(config: dict[str, Any] | None) -> None:

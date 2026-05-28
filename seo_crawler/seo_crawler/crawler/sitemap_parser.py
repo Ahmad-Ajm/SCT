@@ -14,6 +14,7 @@ crawler/sitemap_parser.py
 """
 
 import gzip
+import io
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -109,14 +110,19 @@ class SitemapParser:
             log.warning(f"فشل جلب Sitemap: {sitemap_url} (status: {response.status_code})")
             return
 
-        # فك ضغط إذا كان .gz
+        # فك ضغط إذا كان .gz (مع سقف لحجم الخرج لتفادي قنابل الضغط)
         content = response.content
-        if sitemap_url.endswith(".gz") or response.content_type == "application/x-gzip":
-            try:
-                content = gzip.decompress(content)
-            except Exception as e:
-                log.error(f"فشل فك ضغط Sitemap: {e}")
+        ctype = (response.content_type or "").lower()
+        looks_gzip = (
+            sitemap_url.endswith(".gz")
+            or "gzip" in ctype
+            or content[:2] == b"\x1f\x8b"
+        )
+        if looks_gzip:
+            decompressed = self._safe_gunzip(content)
+            if decompressed is None:
                 return
+            content = decompressed
 
         # تحليل XML (آمن من XXE attacks بفضل defusedxml)
         try:
@@ -196,6 +202,27 @@ class SitemapParser:
             # جرّب بدون namespace
             elem = parent.find(tag_name)
         return elem.text.strip() if elem is not None and elem.text else None
+
+    # الحد الأقصى لحجم الـ sitemap بعد فك الضغط (حماية من decompression bombs)
+    MAX_DECOMPRESSED_BYTES = 100 * 1024 * 1024
+
+    def _safe_gunzip(self, content: bytes) -> Optional[bytes]:
+        """فك ضغط gzip تدريجياً بسقف حجم لتفادي قنابل الضغط."""
+        try:
+            out = io.BytesIO()
+            with gzip.GzipFile(fileobj=io.BytesIO(content)) as gz:
+                while True:
+                    chunk = gz.read(1 << 16)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    if out.tell() > self.MAX_DECOMPRESSED_BYTES:
+                        log.error("Sitemap بعد فك الضغط أكبر من الحد المسموح — تخطّي")
+                        return None
+            return out.getvalue()
+        except (OSError, EOFError) as e:
+            log.error(f"فشل فك ضغط Sitemap: {e}")
+            return None
 
     @staticmethod
     def _strip_namespace(tag: str) -> str:

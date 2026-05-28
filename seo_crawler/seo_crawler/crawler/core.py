@@ -11,7 +11,9 @@ crawler/core.py
 - حفظ الحالة دورياً
 """
 
+import os
 import signal
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -35,6 +37,7 @@ from crawler.sitemap_parser import SitemapParser
 
 from utils.helpers import (
     is_internal_url,
+    is_safe_remote_url,
     matches_any_pattern,
     normalize_url,
 )
@@ -96,6 +99,11 @@ class PageData:
     # === Hreflang ===
     hreflang_tags: list[dict[str, str]] = field(default_factory=list)
 
+    # === Pagination (rel=next/prev) ===
+    pagination_next: str = ""
+    pagination_prev: str = ""
+    is_paginated: bool = False
+
     # === Open Graph & Twitter ===
     og_title: str = ""
     og_description: str = ""
@@ -119,6 +127,7 @@ class PageData:
     text_to_html_ratio: float = 0.0
     language: str = ""
     content_hash: str = ""
+    content_simhash: str = ""  # بصمة SimHash للتشابه التقريبي
 
     # === Counts ===
     internal_links_count: int = 0
@@ -167,6 +176,7 @@ class CrawlStats:
     pages_crawled: int = 0
     pages_failed: int = 0
     pages_skipped: int = 0
+    fetch_errors: int = 0  # أخطاء جلب مؤقتة (قد تنجح بعد إعادة المحاولة)
     total_internal_links: int = 0
     total_external_links: int = 0
     total_images: int = 0
@@ -221,11 +231,24 @@ class Crawler:
         self.state_config = config.get("state", {})
         self.verify_ssl = self.crawl_config.get("verify_ssl", True)
         self.robots_failure_policy = self.crawl_config.get("robots_failure_policy", "allow")
+        self.allow_private_hosts = self.crawl_config.get("allow_private_hosts", False)
 
         # === Domain info ===
         self.start_url = normalize_url(self.site_config["start_url"])
         self.primary_domain = self.site_config["domain"]
         self.additional_domains = self.site_config.get("additional_internal_domains", [])
+        # كل روابط الـ sitemaps التي رُئيت (لـ sitemap_diff الكامل)
+        self.sitemap_urls_seen: list[str] = []
+
+        # === Custom Extraction (الخطة #5) ===
+        from extractors.custom_extractor import compile_rules
+        ce = config.get("custom_extraction", {}) or {}
+        self.custom_rules = compile_rules(ce.get("rules")) if ce.get("enabled") else []
+        self._custom_needs_html = any(r.get("type") == "regex" for r in self.custom_rules)
+        self.all_custom: list[dict[str, Any]] = []
+
+        # === Resource Inventory (الخطة #3) ===
+        self.all_resources: list[dict[str, Any]] = []
 
         # === Crawl state ===
         self.visited: set[str] = set()
@@ -260,6 +283,7 @@ class Crawler:
             follow_redirects=self.crawl_config["follow_redirects"],
             max_redirects=self.crawl_config["max_redirect_hops"],
             verify_ssl=self.crawl_config.get("verify_ssl", True),
+            allow_private_hosts=self.allow_private_hosts,
         )
 
         # === Robots parser ===
@@ -357,6 +381,14 @@ class Crawler:
         """إرجاع كل الـ redirects."""
         return self.all_redirects.copy()
 
+    def get_custom_extraction(self) -> list[dict[str, Any]]:
+        """إرجاع نتائج الاستخراج المخصّص."""
+        return self.all_custom.copy()
+
+    def get_resources(self) -> list[dict[str, Any]]:
+        """إرجاع جرد الموارد."""
+        return self.all_resources.copy()
+
     def get_stats(self) -> CrawlStats:
         """إرجاع الإحصائيات."""
         return self.stats
@@ -411,9 +443,14 @@ class Crawler:
         # تحليل كل sitemap
         total_added = 0
         for sitemap_url in sitemap_urls:
+            safe, reason = is_safe_remote_url(sitemap_url, self.allow_private_hosts)
+            if not safe:
+                log.warning(f"تخطّي sitemap غير آمن {sitemap_url}: {reason}")
+                continue
             entries = self.sitemap_parser.parse(sitemap_url)
             for entry in entries:
                 normalized = normalize_url(entry.url)
+                self.sitemap_urls_seen.append(normalized)
                 if (
                     normalized not in self.visited
                     and normalized not in self.queued_urls
@@ -449,13 +486,19 @@ class Crawler:
                 delay = robots_delay
                 log.info(f"استخدام Crawl-Delay من robots.txt: {delay}s")
 
-        # شريط التقدم
+        # شريط التقدم — مُعطّل في وضع الواجهة/بلا طرفية (يتفادى تلويث run.log)
         total_estimate = max_pages if max_pages > 0 else None
+        try:
+            _is_tty = sys.stdout.isatty()
+        except (AttributeError, ValueError):
+            _is_tty = False
+        quiet_progress = bool(os.environ.get("SCT_PROGRESS_FILE")) or not _is_tty
         self.progress_bar = tqdm(
             total=total_estimate,
             desc="Crawling",
             unit="page",
             dynamic_ncols=True,
+            disable=quiet_progress,
         )
 
         try:
@@ -488,6 +531,13 @@ class Crawler:
                     self.stats.pages_skipped += 1
                     continue
 
+                # حماية SSRF
+                safe, reason = is_safe_remote_url(url, self.allow_private_hosts)
+                if not safe:
+                    log.debug(f"SSRF blocked {url}: {reason}")
+                    self.stats.pages_skipped += 1
+                    continue
+
                 # زحف الصفحة
                 self._crawl_page(url, depth)
                 self.visited.add(url)
@@ -512,7 +562,7 @@ class Crawler:
                     time.sleep(delay)
 
         finally:
-            if self.progress_bar:
+            if self.progress_bar is not None:
                 self.progress_bar.close()
 
             # حفظ نهائي
@@ -535,15 +585,18 @@ class Crawler:
                 self.stats.pages_failed += 1
                 return
 
-            # إذا redirect — سجّله ولكن استمر
+            # إذا redirect — سجّله ولكن استمر (دلالة موحّدة: to_url = القفزة التالية)
             if response.redirect_chain:
-                for from_url, status in response.redirect_chain:
+                chain = response.redirect_chain
+                for i, (from_url, status) in enumerate(chain):
+                    # to_url للقفزة = مصدر القفزة التالية، وآخر قفزة → الوجهة النهائية
+                    to_url = chain[i + 1][0] if i + 1 < len(chain) else response.final_url
                     self.all_redirects.append(
                         {
                             "from_url": from_url,
-                            "to_url": response.final_url,
+                            "to_url": to_url,
                             "status_code": status,
-                            "chain_length": len(response.redirect_chain),
+                            "chain_length": len(chain),
                             "original_url": url,
                         }
                     )
@@ -648,6 +701,14 @@ class Crawler:
 
             page.hreflang_tags = extract_hreflang(soup, response.headers, url)
 
+        if self._extract_enabled("pagination"):
+            from extractors.pagination_extractor import extract_pagination
+
+            pg = extract_pagination(soup, response.headers, url)
+            page.pagination_next = pg["pagination_next"]
+            page.pagination_prev = pg["pagination_prev"]
+            page.is_paginated = pg["is_paginated"]
+
         if self._extract_enabled("og"):
             from extractors.og_extractor import extract_og_twitter
 
@@ -682,6 +743,7 @@ class Crawler:
             page.text_to_html_ratio = content_data["text_to_html_ratio"]
             page.language = content_data["language"]
             page.content_hash = content_data["content_hash"]
+            page.content_simhash = content_data.get("content_simhash", "")
 
         if self._extract_enabled("images"):
             from extractors.images_extractor import extract_images
@@ -739,6 +801,22 @@ class Crawler:
             page.mixed_content_active_count = mixed.get("active_count", 0)
             page.mixed_content_passive_count = mixed.get("passive_count", 0)
             page.mixed_content_form_count = mixed.get("form_count", 0)
+
+        # === Custom Extraction (الخطة #5) ===
+        if self.custom_rules:
+            from extractors.custom_extractor import extract_custom
+
+            html_for_rules = str(soup) if self._custom_needs_html else ""
+            vals = extract_custom(soup, html_for_rules, self.custom_rules)
+            self.all_custom.append({"page_url": url, **vals})
+
+        # === Resource Inventory (الخطة #3) — معطّل افتراضياً ===
+        if self.extraction_config.get("extract_resources", False):
+            from extractors.resources_extractor import extract_resources
+
+            self.all_resources.extend(
+                extract_resources(soup, url, self.primary_domain, self.additional_domains)
+            )
 
         return page
 

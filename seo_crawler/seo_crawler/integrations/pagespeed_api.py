@@ -49,6 +49,7 @@ class PageSpeedClient:
         timeout: int = 60,
         cache: Optional[Any] = None,
         cache_ttl_days: int = 7,
+        raw_dir: Optional[str] = None,
     ):
         """
         Args:
@@ -63,6 +64,7 @@ class PageSpeedClient:
         self.timeout = timeout
         self.cache = cache
         self.cache_ttl_seconds = cache_ttl_days * 86400
+        self.raw_dir = raw_dir  # حفظ تقرير Lighthouse الكامل (JSON خام) لكل صفحة
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -126,6 +128,10 @@ class PageSpeedClient:
 
             data = response.json()
 
+            # حفظ تقرير Lighthouse الكامل (الخام) إن طُلب — للتحليل العميق
+            if self.raw_dir:
+                self._save_raw(data, url, strategy)
+
             # تأخير لاحترام rate limits
             time.sleep(self.delay_seconds)
 
@@ -146,6 +152,22 @@ class PageSpeedClient:
         except Exception as e:
             log.error(f"خطأ في PageSpeed لـ {url}: {e}")
             return {"url": url, "strategy": strategy, "error": str(e)[:200]}
+
+    def _save_raw(self, data: dict[str, Any], url: str, strategy: str) -> None:
+        """يحفظ استجابة PageSpeed/Lighthouse الكاملة في ملف JSON لكل صفحة."""
+        try:
+            import json as _json
+            import re
+            from pathlib import Path
+
+            d = Path(self.raw_dir)
+            d.mkdir(parents=True, exist_ok=True)
+            slug = re.sub(r"[^A-Za-z0-9._-]+", "_", url)[:80].strip("_") or "page"
+            (d / f"{slug}__{strategy}.json").write_text(
+                _json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except (OSError, ValueError) as e:
+            log.debug(f"تعذّر حفظ raw PageSpeed لـ {url}: {e}")
 
     def get_cache_stats(self) -> dict[str, int]:
         """إحصائيات استخدام الـ cache."""

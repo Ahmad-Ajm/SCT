@@ -104,6 +104,8 @@ def collect_seo_issues(
     title_min = analysis_config.get("title_min_length", 30)
     desc_max = analysis_config.get("description_max_length", 160)
     desc_min = analysis_config.get("description_min_length", 70)
+    thin_threshold = analysis_config.get("thin_content_threshold", 300)
+    thin_critical = analysis_config.get("thin_content_critical_threshold", 100)
 
     issues: list[SEOIssue] = []
 
@@ -453,10 +455,10 @@ def collect_seo_issues(
                 severity=IssueSeverity.HIGH,
                 category="Content",
                 issue_type="Critical Thin Content",
-                description=f"{thin_content_data['critical_thin_count']} صفحة بأقل من 100 كلمة",
+                description=f"{thin_content_data['critical_thin_count']} صفحة بأقل من {thin_critical} كلمة",
                 affected_count=thin_content_data["critical_thin_count"],
                 affected_urls=[p["url"] for p in thin_content_data.get("critical_thin_pages", [])],
-                recommendation="أضف محتوى ذي قيمة (300+ كلمة موصى به)",
+                recommendation=f"أضف محتوى ذي قيمة ({thin_threshold}+ كلمة موصى به)",
             )
         )
 
@@ -571,7 +573,7 @@ def collect_seo_issues(
                 severity=IssueSeverity.MEDIUM,
                 category="Content",
                 issue_type="Thin Content",
-                description=f"{thin_content_data['thin_content_count']} صفحة بمحتوى رقيق (<300 كلمة)",
+                description=f"{thin_content_data['thin_content_count']} صفحة بمحتوى رقيق (<{thin_threshold} كلمة)",
                 affected_count=thin_content_data["thin_content_count"],
                 affected_urls=[p["url"] for p in thin_content_data.get("thin_content_pages", [])[:30]],
                 recommendation="وسّع المحتوى أو ادمج مع صفحات أخرى",

@@ -8,7 +8,8 @@ checkers/external_links_checker.py
 """
 
 import asyncio
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 try:
     import aiohttp
@@ -22,6 +23,14 @@ from utils.logger import get_logger
 from utils.monitoring import gauge, increment, span
 
 log = get_logger(__name__)
+
+# حالات تعني "محظور/مُقيَّد" غالباً (حجب bots) لا "مكسور": لا نعدّها أعطالاً
+# لأن مواقع مثل twitter.com/linkedin ترفض طلبات الـ bots بـ 403/401/429.
+BLOCKED_STATUSES = frozenset({401, 403, 429})
+
+
+def _is_broken_status(status: int) -> bool:
+    return status >= 400 and status not in BLOCKED_STATUSES
 
 
 class ExternalLinksChecker:
@@ -63,6 +72,7 @@ class ExternalLinksChecker:
         self,
         urls: list[str],
         progress: bool = True,
+        progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
     ) -> list[dict[str, Any]]:
         """
         فحص قائمة URLs بشكل متزامن.
@@ -80,7 +90,10 @@ class ExternalLinksChecker:
 
         with span("external_links.check_urls", urls=len(urls), concurrent=self.concurrent):
             # إزالة التكرارات مع الحفاظ على الترتيب
-            unique_urls = list(dict.fromkeys(urls))
+            unique_urls = [
+                url for url in dict.fromkeys(urls)
+                if self._is_checkable_http_url(url)
+            ]
             gauge("external_links.unique_urls", len(unique_urls))
             log.info(f"فحص {len(unique_urls)} رابط خارجي ({self.concurrent} متزامن)")
 
@@ -110,7 +123,7 @@ class ExternalLinksChecker:
                 headers={"User-Agent": self.user_agent},
             ) as session:
                 tasks = [
-                    self._check_one(session, url, semaphore, pbar)
+                    self._check_one(session, url, semaphore, pbar, progress_callback, len(unique_urls))
                     for url in unique_urls
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=False)
@@ -120,13 +133,18 @@ class ExternalLinksChecker:
 
             # إحصائيات
             ok_count = sum(1 for r in results if 200 <= r.get("status_code", 0) < 400)
-            broken_count = sum(1 for r in results if r.get("status_code", 0) >= 400)
+            broken_count = sum(1 for r in results if r.get("is_broken"))
+            blocked_count = sum(1 for r in results if r.get("is_blocked"))
             error_count = sum(1 for r in results if r.get("error"))
             gauge("external_links.ok", ok_count)
             gauge("external_links.broken", broken_count)
+            gauge("external_links.blocked", blocked_count)
             gauge("external_links.errors", error_count)
 
-            log.info(f"✅ نجح: {ok_count} | ❌ مكسور: {broken_count} | ⚠️ خطأ: {error_count}")
+            log.info(
+                f"✅ نجح: {ok_count} | ❌ مكسور: {broken_count} | "
+                f"🚫 محظور (bot): {blocked_count} | ⚠️ خطأ: {error_count}"
+            )
 
             return results
 
@@ -136,6 +154,8 @@ class ExternalLinksChecker:
         url: str,
         semaphore: asyncio.Semaphore,
         pbar: Optional[tqdm],
+        progress_callback: Optional[Callable[[dict[str, Any]], None]],
+        total_urls: int,
     ) -> dict[str, Any]:
         """فحص رابط واحد."""
         import time
@@ -149,6 +169,7 @@ class ExternalLinksChecker:
                     "response_time_ms": 0.0,
                     "error": None,
                     "is_broken": False,
+                    "is_blocked": False,
                     "is_redirect": False,
                 }
 
@@ -169,7 +190,8 @@ class ExternalLinksChecker:
                             result["final_url"] = str(response.url)
                             result["response_time_ms"] = round(elapsed, 2)
                             result["is_redirect"] = result["final_url"] != url
-                            result["is_broken"] = response.status >= 400
+                            result["is_broken"] = _is_broken_status(response.status)
+                            result["is_blocked"] = response.status in BLOCKED_STATUSES
                             increment(f"external_links.status.{response.status}")
                             break  # نجح
 
@@ -189,7 +211,8 @@ class ExternalLinksChecker:
                                     result["final_url"] = str(response.url)
                                     result["response_time_ms"] = round(elapsed, 2)
                                     result["is_redirect"] = result["final_url"] != url
-                                    result["is_broken"] = response.status >= 400
+                                    result["is_broken"] = _is_broken_status(response.status)
+                                    result["is_blocked"] = response.status in BLOCKED_STATUSES
                                     increment(f"external_links.status.{response.status}")
                                 break
                             except Exception as ge:
@@ -197,7 +220,8 @@ class ExternalLinksChecker:
                         else:
                             result["error"] = f"HTTP {e.status}: {str(e)[:100]}"
                             result["status_code"] = e.status
-                            result["is_broken"] = e.status >= 400
+                            result["is_broken"] = _is_broken_status(e.status)
+                            result["is_blocked"] = e.status in BLOCKED_STATUSES
                             increment(f"external_links.status.{e.status}")
 
                     except asyncio.TimeoutError:
@@ -227,7 +251,29 @@ class ExternalLinksChecker:
                     if result.get("is_broken"):
                         pbar.set_postfix({"last": "❌ broken"})
 
+                if progress_callback:
+                    progress_callback({
+                        "checked": 1,
+                        "total": total_urls,
+                        "broken": 1 if result.get("is_broken") else 0,
+                        "blocked": 1 if result.get("is_blocked") else 0,
+                        "ok": 1 if 200 <= result.get("status_code", 0) < 400 else 0,
+                        "errors": 1 if result.get("error") else 0,
+                    })
+
                 return result
+
+    @staticmethod
+    def _is_checkable_http_url(url: str) -> bool:
+        """استبعاد fragments/روابط خاصة لا يجوز فحصها كروابط خارجية."""
+        if not url:
+            return False
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        if not parsed.netloc:
+            return False
+        return True
 
     def check_urls_sync(self, urls: list[str], progress: bool = True) -> list[dict]:
         """
