@@ -85,3 +85,57 @@ input[type="range"] { width: 100%; accent-color: #1F4E79; }
   .grid { grid-template-columns: 1fr; }
   .groups { grid-template-columns: 1fr; }
 }
+
+/* ===== تحسينات الواجهة: بطاقات/شارات/خطوات/وضع داكن ===== */
+.card {
+  border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px;
+  margin: 10px 0; background: #fbfdff; box-shadow: 0 1px 3px rgba(16,40,80,.05);
+}
+.subpanel {
+  border: 1px solid #e8edf3; border-radius: 12px; padding: 14px 16px;
+  margin: 12px 0; background: #f7f9fc;
+}
+.subpanel h3 { margin: 0 0 8px; color: #1F4E79; }
+
+.badge {
+  display: inline-block; font-size: .8rem; font-weight: 700; padding: 2px 10px;
+  border-radius: 999px; margin-inline-start: 8px; vertical-align: middle;
+}
+.badge.ok   { background: #DEF7E5; color: #176c33; }
+.badge.warn { background: #FFF1D6; color: #92600a; }
+.badge.err  { background: #FDE2E2; color: #a11; }
+.badge.off  { background: #eef1f5; color: #667; }
+
+.steps { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 6px 0 14px; list-style: none; }
+.steps li {
+  background: #eef2f7; color: #334155; border-radius: 8px; padding: 6px 12px; font-size: .85rem;
+}
+
+/* أزرار: حالة معطّلة + مؤشّر انشغال */
+.btn:disabled { opacity: .6; cursor: progress; }
+
+/* شريط التبويبات لاصق أعلى الصفحة */
+.tabs { position: sticky; top: 0; z-index: 20; background: #fff; }
+
+/* استجابة أوسع */
+@media (max-width: 760px) {
+  .grid { grid-template-columns: 1fr; }
+  .tabs { overflow-x: auto; }
+  .tab { white-space: nowrap; }
+}
+
+/* وضع داكن (تلقائي حسب تفضيل النظام) */
+@media (prefers-color-scheme: dark) {
+  body { background: #0f1722; color: #e5edf5; }
+  .panel, .card { background: #16202e; border-color: #243244; box-shadow: none; }
+  .subpanel { background: #131c28; border-color: #243244; }
+  .subpanel h3, h2, h1 { color: #cfe0f2; }
+  input, select, textarea { background: #0f1722; color: #e5edf5; border-color: #2c3a4d; }
+  .tabs { background: #0f1722; border-color: #243244; }
+  .tab { background: #1a2533; color: #cdd8e6; border-color: #243244; }
+  .tab.active { background: #2e6fb0; color: #fff; }
+  .muted { color: #95a6b8; }
+  .steps li { background: #1a2533; color: #cdd8e6; }
+  .tbl th { background: #2e6fb0; }
+  .tbl td { border-color: #243244; }
+}

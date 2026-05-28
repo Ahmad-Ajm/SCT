@@ -710,6 +710,75 @@ def _run_setup_bg(tool: str) -> None:
         _setup_state[tool] = {"running": False, "ok": ok, "message": msg[-600:]}
 
 
+@app.post("/api/test/gsc")
+async def test_gsc(site_url: str = Form("")):
+    """اختبار اتصال GSC: يصادق ويسرد المواقع التي يملك الحساب صلاحيتها — يكشف فوراً
+    إن كان موقع العميل متاحاً أم يحتاج منحه صلاحية."""
+    gd = _google_dir()
+    cs = gd / "client_secret.json"
+    if not cs.exists():
+        return JSONResponse({"ok": False, "error": "لم يُربط Google بعد (ارفع client_secret ثم «وافق»)."})
+
+    def _run():
+        from integrations.gsc_api import GSCClient
+        c = GSCClient(credentials_path=str(cs), site_url=site_url or "https://example.com/")
+        if not c.authenticate():
+            return {"ok": False, "error": "فشل المصادقة — تأكّد من إتمام «وافق بحسابي»."}
+        try:
+            resp = c.service.sites().list().execute()
+            sites = [s.get("siteUrl", "") for s in resp.get("siteEntry", [])]
+            return {"ok": True, "sites": sites}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    res = await asyncio.get_event_loop().run_in_executor(None, _run)
+    if res.get("ok") and site_url:
+        target = site_url.rstrip("/")
+        res["site_accessible"] = any(
+            (s or "").rstrip("/") == target or target in (s or "")
+            for s in res.get("sites", [])
+        )
+    return JSONResponse(res)
+
+
+@app.post("/api/test/ga4")
+async def test_ga4(property_id: str = Form("")):
+    """اختبار اتصال GA4: محاولة تقرير صغير على property_id."""
+    if not property_id.strip():
+        return JSONResponse({"ok": False, "error": "أدخل GA4 property_id."})
+    gd = _google_dir()
+    cs = gd / "client_secret.json"
+
+    def _run():
+        from integrations.ga4_api import GA4Client
+        c = GA4Client(property_id=property_id.strip(), credentials_file=str(cs))
+        if not c.authenticate():
+            return {"ok": False, "error": "فشل المصادقة — تأكّد من تثبيت مكتبة GA4 وربط Google "
+                                          "وأن الحساب مُضاف للـProperty."}
+        try:
+            c._run(dimensions=["date"], metrics=["sessions"], limit=1)
+            return {"ok": True}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    return JSONResponse(await asyncio.get_event_loop().run_in_executor(None, _run))
+
+
+@app.post("/api/test/pagespeed")
+async def test_pagespeed(api_key: str = Form("")):
+    """اختبار مفتاح PageSpeed بفحص صفحة معروفة."""
+    if not api_key.strip():
+        return JSONResponse({"ok": False, "error": "أدخل مفتاح PageSpeed API."})
+
+    def _run():
+        from integrations.pagespeed_api import PageSpeedClient
+        c = PageSpeedClient(api_key=api_key.strip(), timeout=60)
+        r = c.audit("https://www.google.com/", strategy="mobile", categories=["performance"])
+        return {"ok": False, "error": r["error"]} if r.get("error") else {"ok": True}
+
+    return JSONResponse(await asyncio.get_event_loop().run_in_executor(None, _run))
+
+
 @app.post("/api/setup/{tool}")
 async def setup_install(tool: str):
     """يبدأ تثبيت متطلّب في الخلفية ويعود فوراً (راجع الحالة عبر /api/setup/{tool}/status)."""

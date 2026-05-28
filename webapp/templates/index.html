@@ -78,13 +78,18 @@
       <div class="checks">
         <label class="chk"><input type="checkbox" name="respect_robots" checked> <span data-i18n="respect_robots">احترام robots.txt</span></label>
         <label class="chk"><input type="checkbox" name="no_resume"> <span data-i18n="fresh_start">بدء جديد (تجاهل الاستئناف)</span></label>
-        <label class="chk"><input type="checkbox" name="skip_external"> <span data-i18n="skip_external">تخطّي الروابط الخارجية</span></label>
-        <label class="chk"><input type="checkbox" name="ext_sample_per_host" checked> <span data-i18n="ext_sample_per_host">تسريع: رابط واحد لكل نطاق خارجي (sample per host) — موصى به</span></label>
-        <label><span data-i18n="ext_max_urls">سقف عدد الروابط الخارجية المفحوصة (0 = بلا حد)</span>
-          <input type="number" name="ext_max_urls" placeholder="0" min="0">
-        </label>
-        <label class="chk"><input type="checkbox" name="check_resource_status"> <span data-i18n="check_resource_status">فحص حالة موارد الصفحة (CSS/JS/صور) — أبطأ، يتطلّب جمع الموارد</span></label>
       </div>
+      <details class="adv">
+        <summary data-i18n="adv_crawl">خيارات زحف متقدمة (الروابط الخارجية والموارد)</summary>
+        <div class="checks">
+          <label class="chk"><input type="checkbox" name="skip_external"> <span data-i18n="skip_external">تخطّي الروابط الخارجية</span></label>
+          <label class="chk"><input type="checkbox" name="ext_sample_per_host" checked> <span data-i18n="ext_sample_per_host">تسريع: رابط واحد لكل نطاق خارجي (sample per host) — موصى به</span></label>
+          <label><span data-i18n="ext_max_urls">سقف عدد الروابط الخارجية المفحوصة (0 = بلا حد)</span>
+            <input type="number" name="ext_max_urls" placeholder="0" min="0">
+          </label>
+          <label class="chk"><input type="checkbox" name="check_resource_status"> <span data-i18n="check_resource_status">فحص حالة موارد الصفحة (CSS/JS/صور) — أبطأ، يتطلّب جمع الموارد</span></label>
+        </div>
+      </details>
     </section>
 
     <section class="panel">
@@ -116,23 +121,42 @@
     <div class="tabpane" data-pane="integ">
     <section class="panel">
       <h2 data-i18n="integ_h">احضار معلومات التكامل (بلا زحف)</h2>
-      <p class="muted sm" data-i18n="integ_p">فعّل المصادر المطلوبة ثم اضغط «احضر». الربط والمفاتيح تُضبط مرّة واحدة في تبويب «الإعدادات». (يُستخدم الرابط المُدخَل في تبويب «الزحف» لفحص PageSpeed للصفحة الرئيسية.)</p>
+      <ol class="steps">
+        <li><span data-i18n="step1">1) اضبط الربط/المفاتيح في «الإعدادات»</span></li>
+        <li><span data-i18n="step2">2) فعّل المصادر واختبر الاتصال</span></li>
+        <li><span data-i18n="step3">3) اضغط «احضر»</span></li>
+      </ol>
 
-      <label class="chk"><input type="checkbox" name="gsc_enabled"> <span data-i18n="gsc_enable">تفعيل Google Search Console</span></label>
-      <div class="grid">
-        <label><span data-i18n="gsc_site">رابط الموقع في GSC</span><input type="text" name="gsc_site_url" placeholder="https://example.com/"></label>
-        <label><span data-i18n="gsc_months">عدد الأشهر (GSC)</span><input type="number" name="gsc_months_back" placeholder="16" min="1"></label>
+      <div class="card">
+        <label class="chk"><input type="checkbox" name="gsc_enabled"> <span data-i18n="gsc_enable">تفعيل Google Search Console</span></label>
+        <span class="badge off" id="gscBadge" data-i18n="badge_unknown">لم يُختبر</span>
+        <div class="grid">
+          <label><span data-i18n="gsc_site">رابط الموقع في GSC</span><input type="text" name="gsc_site_url" placeholder="https://example.com/"></label>
+          <label><span data-i18n="gsc_months">عدد الأشهر (GSC)</span><input type="number" name="gsc_months_back" placeholder="16" min="1"></label>
+        </div>
+        <button type="button" id="testGscBtn" class="btn sm" data-i18n="test_conn">🔎 اختبار الاتصال</button>
+        <p id="gscTestMsg" class="muted sm"></p>
       </div>
 
-      <label class="chk"><input type="checkbox" name="ga4_enabled"> <span data-i18n="ga4_enable">تفعيل Google Analytics 4</span></label>
-      <div class="grid">
-        <label><span data-i18n="ga4_prop">GA4 property_id</span><input type="text" name="ga4_property_id" placeholder="123456789"></label>
-        <label><span data-i18n="ga4_range">نطاق التاريخ (أيام)</span><input type="number" name="ga4_date_range_days" placeholder="90" min="1"></label>
+      <div class="card">
+        <label class="chk"><input type="checkbox" name="ga4_enabled"> <span data-i18n="ga4_enable">تفعيل Google Analytics 4</span></label>
+        <span class="badge off" id="ga4Badge" data-i18n="badge_unknown">لم يُختبر</span>
+        <div class="grid">
+          <label><span data-i18n="ga4_prop">GA4 property_id</span><input type="text" name="ga4_property_id" placeholder="123456789"></label>
+          <label><span data-i18n="ga4_range">نطاق التاريخ (أيام)</span><input type="number" name="ga4_date_range_days" placeholder="90" min="1"></label>
+        </div>
+        <button type="button" id="testGa4Btn" class="btn sm" data-i18n="test_conn">🔎 اختبار الاتصال</button>
+        <p id="ga4TestMsg" class="muted sm"></p>
       </div>
 
-      <label class="chk"><input type="checkbox" name="pagespeed_enabled"> <span data-i18n="pagespeed_enable">تفعيل PageSpeed API</span></label>
-      <div class="grid">
-        <label><span data-i18n="pagespeed_max">أقصى عدد URLs (افتراضي 25 — كل URL ~25ث × 2؛ لا تضع 0 على موقع كبير)</span><input type="number" name="pagespeed_max_urls" value="25" min="0"></label>
+      <div class="card">
+        <label class="chk"><input type="checkbox" name="pagespeed_enabled"> <span data-i18n="pagespeed_enable">تفعيل PageSpeed API</span></label>
+        <span class="badge off" id="psBadge" data-i18n="badge_unknown">لم يُختبر</span>
+        <div class="grid">
+          <label><span data-i18n="pagespeed_max">أقصى عدد URLs (افتراضي 25 — كل URL ~25ث × 2؛ لا تضع 0 على موقع كبير)</span><input type="number" name="pagespeed_max_urls" value="25" min="0"></label>
+        </div>
+        <button type="button" id="testPsBtn" class="btn sm" data-i18n="test_conn">🔎 اختبار الاتصال</button>
+        <p id="psTestMsg" class="muted sm"></p>
       </div>
       <label class="chk"><input type="checkbox" name="pagespeed_save_raw"> <span data-i18n="pagespeed_save_raw">حفظ تقرير Lighthouse الكامل (JSON خام لكل صفحة) — للتحليل العميق، كبير الحجم</span></label>
       <p class="muted sm" data-i18n="pagespeed_deep_hint">«PageSpeed API» = Lighthouse نفسه. تحصل على: pagespeed.csv (الدرجات) + pagespeed_opportunities.csv (فرص التحسين العميقة: ما يُبطئ كل صفحة وكم يوفّر) + التقرير الخام الكامل عند تفعيل الخيار أعلاه.</p>
@@ -607,6 +631,58 @@ async function _install(tool, btnId, stId) {
     } catch (e) { /* استمرّ في المحاولة */ }
   }, 2500);
 }
+// ===== اختبار اتصال التكاملات =====
+function setBadge(id, state, text) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  b.className = 'badge ' + state;
+  b.textContent = text;
+}
+async function testConn(kind) {
+  const form = document.getElementById('crawlForm');
+  const map = {
+    gsc: { badge: 'gscBadge', msg: 'gscTestMsg' },
+    ga4: { badge: 'ga4Badge', msg: 'ga4TestMsg' },
+    pagespeed: { badge: 'psBadge', msg: 'psTestMsg' },
+  }[kind];
+  const fd = new FormData();
+  if (kind === 'gsc') fd.set('site_url',
+    (form.querySelector('[name=gsc_site_url]').value || form.querySelector('[name=url]').value || ''));
+  if (kind === 'ga4') fd.set('property_id', form.querySelector('[name=ga4_property_id]').value || '');
+  if (kind === 'pagespeed') {
+    const k = form.querySelector('[name=pagespeed_api_key]');
+    fd.set('api_key', k ? k.value : '');
+  }
+  setBadge(map.badge, 'warn', '… يختبر');
+  const msg = document.getElementById(map.msg); if (msg) msg.textContent = '';
+  try {
+    const r = await fetch('/api/test/' + kind, { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok) {
+      if (kind === 'gsc') {
+        const n = (j.sites || []).length;
+        if (j.site_accessible === false) {
+          setBadge(map.badge, 'warn', '⚠️ الموقع غير متاح');
+          if (msg) msg.textContent = 'الحساب متصل (' + n + ' موقعاً) لكن الموقع المطلوب ليس ضمنها — '
+            + 'اطلب من العميل إضافة بريدك كـUser في Search Console. المتاح: '
+            + (j.sites || []).slice(0, 10).join('، ');
+        } else {
+          setBadge(map.badge, 'ok', '✅ متصل');
+          if (msg) msg.textContent = 'متصل — ' + n + ' موقعاً متاحاً'
+            + (j.site_accessible ? ' (الموقع المطلوب متاح ✓)' : '')
+            + (n ? '. أمثلة: ' + (j.sites || []).slice(0, 6).join('، ') : '');
+        }
+      } else {
+        setBadge(map.badge, 'ok', '✅ متصل');
+        if (msg) msg.textContent = 'الاتصال ناجح ✓';
+      }
+    } else {
+      setBadge(map.badge, 'err', '✗ فشل');
+      if (msg) msg.textContent = '✗ ' + (j.error || 'فشل');
+    }
+  } catch (e) { setBadge(map.badge, 'err', '✗ خطأ'); if (msg) msg.textContent = '✗ ' + e; }
+}
+
 document.addEventListener('click', (e) => {
   const t = e.target;
   if (!t || !t.id) return;
@@ -616,6 +692,9 @@ document.addEventListener('click', (e) => {
   if (t.id === 'gDisconnectBtn')  { e.preventDefault(); gDisconnect(); }
   if (t.id === 'pwInstallBtn')    { e.preventDefault(); _install('playwright','pwInstallBtn','pwStatus'); }
   if (t.id === 'ga4InstallBtn')   { e.preventDefault(); _install('ga4_lib','ga4InstallBtn','ga4Status'); }
+  if (t.id === 'testGscBtn')      { e.preventDefault(); testConn('gsc'); }
+  if (t.id === 'testGa4Btn')      { e.preventDefault(); testConn('ga4'); }
+  if (t.id === 'testPsBtn')       { e.preventDefault(); testConn('pagespeed'); }
 });
 window.addEventListener('DOMContentLoaded', () => {
   setTimeout(gStatus, 200);
