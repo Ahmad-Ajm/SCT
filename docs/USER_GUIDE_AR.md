@@ -206,6 +206,8 @@ python main.py --url https://example.com --mode audit
 | `pagespeed_js_treemap.csv` | حجم كل سكربت JS + نسبة الكود غير المستخدَم (محسوبة). |
 | `crux_history.csv` | اتجاه Core Web Vitals (p75) عبر الزمن من CrUX History — عند تفعيله. |
 | `priority_opportunities.csv` | الصفحات مرتّبة بالأثر × الخطورة، مع أهم إصلاح لكل صفحة. |
+| `page_priority.csv` | محرّك الأولويات v2: درجة لكل صفحة + نوعها + المالك + سهولة الإصلاح + تفكيك العوامل. |
+| `action_board.csv` | لوحة العمل: الصفحات مجمّعة (افعل الآن / يحتاج محتوى / مطوّراً / دعم المنصّة / لاحقاً / منخفض الأثر). |
 | `ai_recommendations.csv` | توصيات مستشار الذكاء الاصطناعي — العنوان، السبب، الإجراء، الأولوية. |
 | `lighthouse_import.csv` | درجات الأداء/الوصولية/أفضل الممارسات/SEO المستوردة (0–100). |
 | `js_diff.csv` | فروقات الخام مقابل المُصيَّر بـJS — الروابط، المحتوى، Title، canonical، أخطاء console. |

@@ -38,6 +38,9 @@ Arabic documentation is available in [README_ar.md](README_ar.md).
 - GSC-derived insights: keyword cannibalization and internal-link opportunities.
 - Crawl-over-time comparison (fixed / new / persisting issues) and actionable issue hints
   (impact / effort / why / how / priority score).
+- Priority Engine v2 + Action Board: a transparent multi-factor per-page score
+  (severity × impact × ease × confidence) with page-type and ease/owner classification,
+  grouped into Do now / Needs developer / Needs platform / Needs content / Do later.
 - Sitemap generator, adaptive crawl throttle, and e-commerce platform presets
   (Zid / Salla / Shopify / WooCommerce).
 - Auto-install of optional requirements (allowlisted; disable with `SCT_NO_AUTO_INSTALL=1`).

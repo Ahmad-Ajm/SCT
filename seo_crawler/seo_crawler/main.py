@@ -1129,6 +1129,17 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
             if opps:
                 csv_files["priority_opportunities"] = csv_exporter._export(
                     "priority_opportunities.csv", opps)
+            # محرّك الأولويات v2: درجة لكل صفحة + لوحة العمل
+            prio = analysis.get("priority", {}) or {}
+            prio_pages = prio.get("pages") or []
+            if prio_pages:
+                csv_files["page_priority"] = csv_exporter._export(
+                    "page_priority.csv", prio_pages)
+                from reporting.priority_engine import build_action_board
+                board = build_action_board(prio)
+                if board:
+                    csv_files["action_board"] = csv_exporter._export(
+                        "action_board.csv", board)
 
             # درجة الروابط الداخلية (PageRank داخلي) لكل صفحة
             ls = (analysis.get("link_score", {}) or {}).get("pages") or []
@@ -1250,6 +1261,7 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
                 custom_extraction=getattr(crawler, "get_custom_extraction", lambda: [])(),
                 js_diff=getattr(crawler, "get_js_diff", lambda: [])(),
                 opportunities=analysis.get("opportunities", {}),
+                priority=analysis.get("priority", {}),
                 cannibalization=analysis.get("cannibalization", {}),
                 internal_link_opportunities=analysis.get("internal_link_opportunities", {}),
                 ai_analysis=analysis.get("ai_analysis", {}),
@@ -1907,14 +1919,20 @@ async def main_async(args, config: dict[str, Any]):
                 )
                 analysis["unified_rows"] = unified_rows
                 analysis["opportunities"] = compute_opportunities(unified_rows)
+                # محرّك الأولويات v2: درجة متعددة العوامل + لوحة عمل (حتمي)
+                from reporting.priority_engine import compute_priority
+                platform = (config.get("site", {}) or {}).get("platform_preset", "")
+                analysis["priority"] = compute_priority(unified_rows, platform=platform)
                 log.info(
                     f"→ Unified report: {len(unified_rows)} pages | "
-                    f"opportunities {analysis['opportunities']['total_with_issues']}"
+                    f"opportunities {analysis['opportunities']['total_with_issues']} | "
+                    f"priority do-now {analysis['priority']['summary'].get('do_now', 0)}"
                 )
             except Exception as e:
                 log.error(f"Unified report build failed: {e}")
                 analysis["unified_rows"] = []
                 analysis["opportunities"] = {}
+                analysis["priority"] = {}
 
             # === Phase 3.5: AI Advisor (اختياري) ===
             analysis["ai_analysis"] = run_ai_analysis(analysis, config)

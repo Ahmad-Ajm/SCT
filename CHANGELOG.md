@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **Priority Engine v2 + Action Board** (deterministic, no AI): a transparent multi-factor
+  per-page priority score `severity × impact × ease × confidence`, where *impact* combines
+  search demand (GSC) + business value (GA4) + **page importance** (page type + depth +
+  internal links). Each page gets a `page_type` (home/category/product/blog/static), an
+  `ease`/`owner` (content / SEO / developer / platform-support — platform-aware for
+  Zid/Salla/Shopify), a relative `priority_band` (high/medium/low), and an `action_group`
+  (Do now / Needs content / Needs developer / Needs platform / Do later / Low impact). New
+  outputs `page_priority.csv` (with a full factor breakdown for transparency) and
+  `action_board.csv`, a `priority` block in the JSON, and an **Action Board section in the
+  expert report**. Works even without integrations (page importance + severity still rank).
 - **Deep PageSpeed/Lighthouse tables** (from the raw report we already fetch, no extra API
   call): `pagespeed_audits.csv` (all ~150 audits), `pagespeed_network_requests.csv` (every
   request with size/status/protocol/priority/entity), `pagespeed_js_treemap.csv` (per-script

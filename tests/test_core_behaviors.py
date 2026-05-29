@@ -992,5 +992,77 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("مهلة", res["error"])  # رسالة انتهاء المهلة
 
 
+    def test_priority_engine_page_type_and_ease(self):
+        from reporting.priority_engine import (
+            classify_page_type, page_importance, ease_of_fix)
+        self.assertEqual(classify_page_type("https://x.com/"), "home")
+        self.assertEqual(classify_page_type("https://x.com/products/123-book"), "product")
+        self.assertEqual(classify_page_type("https://x.com/categories/fiqh"), "category")
+        self.assertEqual(classify_page_type("https://x.com/products"), "category")  # listing
+        self.assertEqual(classify_page_type("https://x.com/blog/post-1"), "blog")
+        self.assertEqual(classify_page_type("https://x.com/about"), "static")
+        # schema يتغلّب على المسار
+        self.assertEqual(classify_page_type("https://x.com/anything", ["Product"]), "product")
+        # أهمية: الرئيسية أعلى من صفحة ثابتة عميقة
+        self.assertGreater(page_importance("home", 0, 50), page_importance("static", 5, 0))
+        # سهولة الإصلاح: أصعب مشكلة تحكم؛ والمنصّة تُحوّل ملكية الترقيم لدعم المنصّة
+        self.assertEqual(ease_of_fix(["missing_title"]), ("easy", "content"))
+        self.assertEqual(ease_of_fix(["missing_title", "broken"]), ("hard", "developer"))
+        self.assertEqual(ease_of_fix(["404_with_inlinks"], platform="zid"),
+                         ("hard", "platform_support"))
+
+    def test_html_report_renders_action_board(self):
+        # تقرير الخبير يعرض لوحة العمل عند توفّر بيانات الأولوية
+        audit = {
+            "site_config": {"start_url": "https://x.com/"},
+            "pages": [{"url": "https://x.com/", "status_code": 200, "is_indexable": True}],
+            "seo_issues": {"summary": {"total_issues": 0, "critical_count": 0, "high_count": 0,
+                           "medium_count": 0, "low_count": 0}, "by_severity": {}},
+            "priority": {"pages": [
+                {"url": "https://x.com/p", "page_type": "product", "priority_score": 12.3,
+                 "owner": "content", "action_group": "do_now", "ease": "easy",
+                 "top_fix": "Add a unique title", "technical_issues": "missing_title"}],
+                "summary": {"by_action_group": {"do_now": 1}}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = HTMLReportExporter(tmp, "ab.html").export(
+                audit, {"language": "en", "audience": "expert"})
+            content = Path(path).read_text(encoding="utf-8")
+        self.assertIn("Action Board", content)
+        self.assertIn("Do now", content)
+        self.assertIn("https://x.com/p", content)
+
+    def test_priority_engine_scores_and_action_board(self):
+        from reporting.priority_engine import compute_priority, build_action_board
+        rows = [
+            # صفحة منتج مركزية بظهور عالٍ + عنوان ناقص (مكسب سريع) ⇒ do_now
+            {"url": "https://x.com/products/big", "technical_issues": ["missing_title"],
+             "depth": 1, "internal_links_count": 40, "clicks": 80, "impressions": 9000,
+             "sessions": 300},
+            # صفحة 404 لها روابط داخلية على زد ⇒ needs_platform
+            {"url": "https://x.com/c/x?page=0", "technical_issues": ["404_with_inlinks"],
+             "depth": 2, "internal_links_count": 5, "clicks": 0, "impressions": 50,
+             "sessions": 0},
+            # صفحة بلا مشاكل ⇒ تُستبعَد
+            {"url": "https://x.com/clean", "technical_issues": [], "impressions": 1000},
+        ]
+        r = compute_priority(rows, platform="zid")
+        self.assertEqual(r["count"], 2)  # الصفحة النظيفة مُستبعَدة
+        top = r["pages"][0]
+        self.assertEqual(top["url"], "https://x.com/products/big")
+        self.assertEqual(top["page_type"], "product")
+        self.assertEqual(top["priority_band"], "high")
+        self.assertEqual(top["action_group"], "do_now")
+        groups = {p["url"]: p["action_group"] for p in r["pages"]}
+        self.assertEqual(groups["https://x.com/c/x?page=0"], "needs_platform")
+        # لوحة العمل مرتّبة: do_now قبل needs_platform
+        board = build_action_board(r)
+        first_groups = [b["action_group"] for b in board]
+        self.assertEqual(first_groups[0], "do_now")
+        # تفكيك العوامل موجود للشفافية
+        self.assertIn("factor_severity", top)
+        self.assertGreater(top["priority_score"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

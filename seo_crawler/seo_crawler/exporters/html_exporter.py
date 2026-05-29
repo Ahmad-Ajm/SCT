@@ -33,9 +33,21 @@ DEFAULT_SECTIONS = ["cover", "summary", "opportunities", "issues", "problem_page
 CLIENT_SECTIONS = ["cover", "health", "summary", "ai", "opportunities", "issues"]
 
 # تقرير الخبير: كل التفاصيل التقنية (يشمل أقسام الترقيم/hreflang/الموارد الجديدة).
-EXPERT_SECTIONS = ["cover", "summary", "ai", "opportunities", "issues", "problem_pages",
-                   "search_visibility", "user_behavior", "redirects", "pagination",
-                   "hreflang", "resources", "schema"]
+EXPERT_SECTIONS = ["cover", "summary", "ai", "opportunities", "action_board", "issues",
+                   "problem_pages", "search_visibility", "user_behavior", "redirects",
+                   "pagination", "hreflang", "resources", "schema"]
+
+# تسميات مجموعات لوحة العمل (Action Board)
+_ACTION_GROUP_LABELS = {
+    "do_now": ("افعل الآن", "Do now"),
+    "needs_content": ("يحتاج محتوى", "Needs content"),
+    "needs_developer": ("يحتاج مطوّراً", "Needs developer"),
+    "needs_platform": ("يحتاج دعم المنصّة", "Needs platform support"),
+    "do_later": ("افعل لاحقاً", "Do later"),
+    "low_impact": ("منخفض الأثر", "Low impact"),
+}
+_ACTION_GROUP_ORDER = ["do_now", "needs_content", "needs_developer",
+                       "needs_platform", "do_later", "low_impact"]
 
 _SEVERITY_ORDER = ["🔴 Critical", "🟠 High", "🟡 Medium", "🟢 Low"]
 
@@ -132,6 +144,8 @@ class HTMLReportExporter:
                 body_parts.append(self._ai(audit, L))
             if "opportunities" in sections:
                 body_parts.append(self._opportunities(audit, L, max_rows))
+            if "action_board" in sections:
+                body_parts.append(self._action_board(audit, L, max_rows))
             if "issues" in sections:
                 body_parts.append(self._issues(audit, L, severity_filter, plain=(audience == "client")))
             if "problem_pages" in sections:
@@ -442,6 +456,41 @@ class HTMLReportExporter:
         return (f'<section><h2>⭐ {_e(title)}</h2>'
                 f'<p class="muted">{_e(note)}</p>'
                 f'<table class="tbl"><thead><tr>{hdr}</tr></thead><tbody>{rows}</tbody></table></section>')
+
+    def _action_board(self, audit, L, max_rows) -> str:
+        """لوحة عمل: الصفحات مرتّبة حسب مجموعة الإجراء (افعل الآن / يحتاج مطوّراً…)."""
+        prio = audit.get("priority", {}) or {}
+        pages = prio.get("pages", []) or []
+        if not pages:
+            return ""
+        ar = L["lang"] == "ar"
+        title = "لوحة العمل (ماذا تُصلح أولاً؟)" if ar else "Action Board (what to fix first)"
+        order = {g: i for i, g in enumerate(_ACTION_GROUP_ORDER)}
+        rows_sorted = sorted(
+            pages,
+            key=lambda p: (order.get(p.get("action_group"), 99), -p.get("priority_score", 0)),
+        )[:max_rows]
+        gl = 0 if ar else 1
+        head = (("المجموعة", "الرابط", "النوع", "الدرجة", "المالك", "أهم إصلاح")
+                if ar else ("Group", "URL", "Type", "Score", "Owner", "Top fix"))
+        body = "".join(
+            f'<tr><td><b>{_e(_ACTION_GROUP_LABELS.get(p.get("action_group"), ("",""))[gl])}</b></td>'
+            f'<td>{_e(p.get("url"))}</td>'
+            f'<td class="muted sm">{_e(p.get("page_type"))}</td>'
+            f'<td class="ctr"><b>{_e(p.get("priority_score"))}</b></td>'
+            f'<td class="muted sm">{_e(p.get("owner"))}</td>'
+            f'<td class="muted sm">{_e(p.get("top_fix"))}</td></tr>'
+            for p in rows_sorted
+        )
+        hdr = "".join(f"<th>{_e(h)}</th>" for h in head)
+        counts = prio.get("summary", {}).get("by_action_group", {}) or {}
+        chips = " · ".join(
+            f"{_ACTION_GROUP_LABELS.get(g, (g, g))[gl]}: {counts[g]}"
+            for g in _ACTION_GROUP_ORDER if counts.get(g)
+        )
+        return (f'<section><h2>🗂️ {_e(title)}</h2>'
+                f'<p class="muted">{_e(chips)}</p>'
+                f'<table class="tbl"><thead><tr>{hdr}</tr></thead><tbody>{body}</tbody></table></section>')
 
     def _search_visibility(self, audit, L, max_rows) -> str:
         g = audit.get("gsc_summary", {}) or {}

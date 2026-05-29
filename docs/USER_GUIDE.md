@@ -210,6 +210,8 @@ and download the filtered set as CSV.
 | `pagespeed_js_treemap.csv` | Per-script JS bytes + computed unused-code %. |
 | `crux_history.csv` | Core Web Vitals trend over time (p75) from CrUX History — when enabled. |
 | `priority_opportunities.csv` | Pages ranked by impact × severity, with the top fix for each. |
+| `page_priority.csv` | Priority Engine v2: per-page score + page type + owner + ease + full factor breakdown. |
+| `action_board.csv` | Action Board: pages grouped (Do now / Needs content / developer / platform / Do later / Low impact). |
 | `ai_recommendations.csv` | AI advisor recommendations — title, why, action, priority. |
 | `lighthouse_import.csv` | Imported performance / accessibility / best-practices / SEO scores (0–100). |
 | `js_diff.csv` | Raw vs JavaScript-rendered differences — links, content, title, canonical, console errors. |
