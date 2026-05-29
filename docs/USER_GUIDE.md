@@ -86,7 +86,10 @@ Useful flags:
 7. **Report type** — Expert (full technical), Client (short, plain‑language with a health
    score), or Both.
 8. **Advanced settings** (collapsible) — integrations, AI advisor, custom extraction,
-   analysis thresholds, and "check resource HTTP status".
+   analysis thresholds, and "check resource HTTP status". Advanced crawl options also include
+   the **e-commerce platform preset** (Zid/Salla/Shopify/WooCommerce), **adaptive throttle**,
+   and **sitemap generation**; the integration cards add **GSC URL Inspection** and
+   **CrUX History** — all configurable from the UI, no terminal needed.
 
 During the crawl, the job page shows the live phase, an elapsed‑time counter, page counts,
 and a **Stop** button. Stopping still exports the partial results so you can download them.

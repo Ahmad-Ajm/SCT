@@ -88,6 +88,17 @@
             <input type="number" name="ext_max_urls" placeholder="0" min="0">
           </label>
           <label class="chk"><input type="checkbox" name="check_resource_status"> <span data-i18n="check_resource_status">فحص حالة موارد الصفحة (CSS/JS/صور) — أبطأ، يتطلّب جمع الموارد</span></label>
+          <label class="chk"><input type="checkbox" name="adaptive_throttle"> <span data-i18n="adaptive_throttle">تحكّم تكيّفي بالسرعة (يبطئ تلقائياً عند 429/5xx/البطء)</span></label>
+          <label class="chk"><input type="checkbox" name="generate_sitemap"> <span data-i18n="generate_sitemap">توليد sitemap.xml من الصفحات القابلة للفهرسة</span></label>
+          <label class="full"><span data-i18n="platform_preset">قالب منصّة التجارة (يستبعد السلّة/الدفع/الحساب)</span>
+            <select name="platform_preset">
+              <option value="" selected data-i18n="platform_none">بدون</option>
+              <option value="zid">Zid (زد)</option>
+              <option value="salla">Salla (سلة)</option>
+              <option value="shopify">Shopify</option>
+              <option value="woocommerce">WooCommerce</option>
+            </select>
+          </label>
         </div>
       </details>
     </section>
@@ -133,7 +144,9 @@
         <div class="grid">
           <label><span data-i18n="gsc_site">رابط الموقع في GSC</span><input type="text" name="gsc_site_url" placeholder="https://example.com/"></label>
           <label><span data-i18n="gsc_months">عدد الأشهر (GSC)</span><input type="number" name="gsc_months_back" placeholder="16" min="1"></label>
+          <label><span data-i18n="gsc_inspect_max">سقف فحص الفهرسة (URL Inspection)</span><input type="number" name="gsc_inspect_max_urls" placeholder="50" min="1"></label>
         </div>
+        <label class="chk"><input type="checkbox" name="gsc_url_inspection"> <span data-i18n="gsc_url_inspection">فحص حالة الفهرسة الحقيقية لكل رابط (URL Inspection — يحترم الحصّة عبر السقف)</span></label>
         <button type="button" id="testGscBtn" class="btn sm" data-i18n="test_conn">🔎 اختبار الاتصال</button>
         <p id="gscTestMsg" class="muted sm"></p>
       </div>
@@ -159,6 +172,7 @@
         <p id="psTestMsg" class="muted sm"></p>
       </div>
       <label class="chk"><input type="checkbox" name="pagespeed_save_raw"> <span data-i18n="pagespeed_save_raw">حفظ تقرير Lighthouse الكامل (JSON خام لكل صفحة) — للتحليل العميق، كبير الحجم</span></label>
+      <label class="chk"><input type="checkbox" name="pagespeed_crux_history"> <span data-i18n="pagespeed_crux_history">اتجاه Core Web Vitals عبر الزمن (CrUX History — يستعمل نفس المفتاح)</span></label>
       <p class="muted sm" data-i18n="pagespeed_deep_hint">«PageSpeed API» = Lighthouse نفسه. تحصل على: pagespeed.csv (الدرجات) + pagespeed_opportunities.csv (فرص التحسين العميقة: ما يُبطئ كل صفحة وكم يوفّر) + التقرير الخام الكامل عند تفعيل الخيار أعلاه.</p>
 
       <label class="chk"><input type="checkbox" name="lighthouse_enabled"> <span data-i18n="lighthouse_enable">استيراد Lighthouse/PageSpeed JSON (ملفات محلية)</span></label>

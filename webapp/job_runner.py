@@ -110,6 +110,18 @@ class JobRunner:
             if strat in ("homepage", "sitemap", "hybrid"):
                 cfg["crawl"]["seed_strategy"] = strat
 
+        # قالب منصّة التجارة (IMP-11): يُطبَّق فقط لقيمة معروفة
+        preset = str(overrides.get("platform_preset", "") or "").strip().lower()
+        if preset in ("zid", "salla", "shopify", "woocommerce"):
+            cfg["site"]["platform_preset"] = preset
+        # توليد sitemap.xml (IMP-5)
+        if overrides.get("generate_sitemap") is not None:
+            cfg["output"]["generate_sitemap"] = bool(overrides["generate_sitemap"])
+        # تحكّم تكيّفي بالسرعة (IMP-10)
+        if overrides.get("adaptive_throttle") is not None:
+            cfg["crawl"].setdefault("adaptive_throttle", {})
+            cfg["crawl"]["adaptive_throttle"]["enabled"] = bool(overrides["adaptive_throttle"])
+
         # === اختيار ما يُجمَع (extraction) ===
         # إن مُرّرت قائمة extraction نُفعّل المختار فقط ونعطّل الباقي.
         selected = overrides.get("extraction")

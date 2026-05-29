@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **Web UI toggles for the new options** (no terminal needed): platform preset
+  (Zid/Salla/Shopify/WooCommerce), adaptive throttle, and sitemap generation in the advanced
+  crawl options; GSC URL Inspection (+ cap) in the GSC card; and CrUX History in the PageSpeed
+  card. Wired through `/api/start` → `job_runner._build_job_config`; form values persist in
+  localStorage like the rest of the form.
 - **Priority Engine v2 + Action Board** (deterministic, no AI): a transparent multi-factor
   per-page priority score `severity × impact × ease × confidence`, where *impact* combines
   search demand (GSC) + business value (GA4) + **page importance** (page type + depth +

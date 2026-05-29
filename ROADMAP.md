@@ -7,7 +7,6 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 
 | Priority | Feature | Importance | Notes |
 | --- | --- | --- | --- |
-| P1 | UI toggles for the new options | High | Surface the recently-added config options in the web UI (no terminal): `output.generate_sitemap`, `crawl.adaptive_throttle`, `gsc.url_inspection`, `pagespeed.crux_history`, `site.platform_preset`. Backend + config + tests already shipped; this is the form/i18n/job_runner wiring. |
 | P2 | Live wiring of accessibility (axe-core) | Medium | The pure summarizer + page runner exist (`analyzers/accessibility.py`); wire it into the JS-render path (run axe while the Playwright page is alive) and export `accessibility.csv`. Needs `playwright` + an axe-core source. |
 | P2 | Crawl comparison surfaced in the UI/report | Medium | `analyzers/crawl_compare.py` (fixed/new/persisting) is ready and tested; add a UI action to pick two runs and a report section. |
 | P2 | Dedicated Action Board / URL Explorer dashboards | Medium | The Priority Engine v2 + Action Board now ship as `page_priority.csv` / `action_board.csv` + an expert-report section; a dedicated interactive dashboard (per-URL drill-down combining crawl + GSC + GA4 + PageSpeed) is the remaining UI step. |
@@ -27,6 +26,8 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 - Priority Engine v2 + Action Board: multi-factor per-page priority (severity × impact × ease ×
   confidence) with page-type and ease/owner classification → `page_priority.csv` /
   `action_board.csv` + expert-report section. Non-interactive, time-bounded Google connection tests.
+- Web UI toggles for the shipped options (platform preset, adaptive throttle, sitemap generation,
+  GSC URL Inspection, CrUX History) — everything operable without the terminal.
 - Custom extraction (CSS/XPath/regex) and rendered-vs-raw JS diff (already implemented).
 - Internal link score (PageRank); near-duplicate (SimHash+LSH); orphan finder; JavaScript
   rendering wired into the async crawler with a page cap.
@@ -34,6 +35,6 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 
 ## Current top targets
 
-1. UI toggles for the shipped config options (keep everything operable without the terminal).
-2. Live axe-core accessibility wiring + `accessibility.csv`.
+1. Live axe-core accessibility wiring + `accessibility.csv`.
+2. Dedicated Action Board / URL Explorer dashboards.
 3. Installer / packaging for non-technical users.

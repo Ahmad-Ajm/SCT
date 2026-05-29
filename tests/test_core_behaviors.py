@@ -973,6 +973,32 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(s["by_impact"]["serious"], 1)
 
 
+    def test_job_config_maps_new_ui_options(self):
+        # توصيلات الواجهة: الخيارات المشحونة حديثاً تُكتب في إعداد المهمة بشكل صحيح
+        import yaml as _yaml
+        sys.path.insert(0, str(ROOT / "webapp"))
+        from job_runner import JobRunner
+        runner = JobRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            overrides = {
+                "url": "https://x.com/",
+                "platform_preset": "zid",
+                "generate_sitemap": True,
+                "adaptive_throttle": True,
+                "integrations": {
+                    "gsc": {"enabled": True, "url_inspection": True, "inspect_max_urls": 30},
+                    "pagespeed": {"enabled": True, "crux_history": True},
+                },
+            }
+            cfg_path = runner._build_job_config(Path(tmp), overrides)
+            cfg = _yaml.safe_load(Path(cfg_path).read_text(encoding="utf-8"))
+        self.assertEqual(cfg["site"]["platform_preset"], "zid")
+        self.assertTrue(cfg["output"]["generate_sitemap"])
+        self.assertTrue(cfg["crawl"]["adaptive_throttle"]["enabled"])
+        self.assertTrue(cfg["integrations"]["gsc"]["url_inspection"])
+        self.assertEqual(cfg["integrations"]["gsc"]["inspect_max_urls"], 30)
+        self.assertTrue(cfg["integrations"]["pagespeed"]["crux_history"])
+
     def test_connection_test_helper_times_out(self):
         # اختبارات الاتصال محدودة بمهلة كي لا يتعلّق الطلب (سبب CancelledError عند الإيقاف)
         import asyncio as _asyncio

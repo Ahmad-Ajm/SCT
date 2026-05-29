@@ -227,6 +227,10 @@ async def start(request: Request):
         "ext_sample_per_host": _b("ext_sample_per_host", False),
         "ext_max_urls": int(form.get("ext_max_urls") or 0),
         "check_resource_status": _b("check_resource_status", False),
+        # خيارات مشحونة حديثاً (تُعرض في الإعدادات المتقدمة)
+        "platform_preset": (form.get("platform_preset") or "").strip(),
+        "generate_sitemap": _b("generate_sitemap", False),
+        "adaptive_throttle": _b("adaptive_throttle", False),
         "formats": formats,
         # extraction: إن لم يُختر شيء نترك الإعداد الافتراضي (الكل)
         "extraction": extraction if extraction else None,
@@ -259,6 +263,11 @@ async def start(request: Request):
         mb = _int_or_none("gsc_months_back")
         if mb:
             gsc["months_back"] = mb
+        if _b("gsc_url_inspection", False):
+            gsc["url_inspection"] = True
+            im = _int_or_none("gsc_inspect_max_urls")
+            if im:
+                gsc["inspect_max_urls"] = im
         integrations["gsc"] = gsc
     if _b("ga4_enabled", False):
         ga4 = {
@@ -276,6 +285,7 @@ async def start(request: Request):
             "api_key": (form.get("pagespeed_api_key") or "").strip(),
             "max_urls": _int_or_none("pagespeed_max_urls") or 0,
             "save_raw_json": _b("pagespeed_save_raw", False),
+            "crux_history": _b("pagespeed_crux_history", False),
         }
     if _b("lighthouse_enabled", False):
         integrations["lighthouse"] = {
