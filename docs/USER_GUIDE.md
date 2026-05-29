@@ -48,6 +48,16 @@ appear (HTML, PDF, Excel, JSON, CSV, XML) plus an **Explore results** view.
 
 To expose it on your LAN: `python webapp/run.py --host 0.0.0.0 --port 9000`.
 
+### Option C — Docker (one command, bundles Chromium)
+
+```bash
+docker compose up --build
+# then open http://127.0.0.1:8000
+```
+
+Built on the official Playwright image, so JS rendering and PDF reports work out of the box.
+Outputs persist in `./webapp_jobs`; secrets are read from `.env` at runtime (never baked in).
+
 ### Option B — Command line
 
 ```bash
@@ -147,7 +157,8 @@ individually, grab **everything as one ZIP** ("Download all"), or tick a subset 
 "Download selected (ZIP)".
 
 **Explore results** (`/jobs/<id>/explore`) lets you filter/sort/search pages in the browser
-and download the filtered set as CSV.
+and download the filtered set as CSV. The **Action Board** (`/jobs/<id>/board`) shows fix
+priorities grouped (Do now / Needs developer / …), filterable by group/page-type/priority.
 
 ### What each file contains
 
@@ -218,6 +229,8 @@ and download the filtered set as CSV.
 | `ai_recommendations.csv` | AI advisor recommendations — title, why, action, priority. |
 | `lighthouse_import.csv` | Imported performance / accessibility / best-practices / SEO scores (0–100). |
 | `js_diff.csv` | Raw vs JavaScript-rendered differences — links, content, title, canonical, console errors. |
+| `accessibility.csv` | axe-core accessibility summary per page: violation count + by-impact breakdown. |
+| `accessibility_issues.csv` | Every accessibility violation (axe rule, impact, node count). |
 
 **`xml/`** — `pages.xml`, `links.xml`, `images.xml`, `schema.xml`, `seo_issues.xml` (the same
 data in XML for tooling that prefers it).

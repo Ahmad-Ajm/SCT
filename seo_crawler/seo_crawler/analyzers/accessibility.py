@@ -13,9 +13,58 @@ analyzers/accessibility.py
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from utils.logger import get_logger
+
+log = get_logger(__name__)
+
 _IMPACT_ORDER = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3}
+
+# CDN افتراضي موثوق لمصدر axe-core (يُجلب فقط عند allow_cdn=True صراحةً)
+_DEFAULT_CDN = "https://cdn.jsdelivr.net/npm/axe-core@4/axe.min.js"
+_MAX_AXE_BYTES = 4 * 1024 * 1024  # سقف حجم ملف axe (~600KB فعلياً)
+
+
+def load_axe_source(
+    local_path: str = "",
+    cdn_url: str = "",
+    allow_cdn: bool = False,
+) -> str:
+    """يُحمّل نصّ axe-core JS: من ملف محلي إن وُجد، وإلا من CDN عند السماح صراحةً.
+
+    يعيد "" عند التعذّر (فيُعطَّل فحص الوصولية بسلاسة دون كسر الزحف).
+    """
+    if local_path:
+        try:
+            p = Path(local_path)
+            if p.is_file():
+                return p.read_text(encoding="utf-8")
+            log.warning("ملف axe-core غير موجود: %s", local_path)
+        except OSError as e:
+            log.warning("تعذّر قراءة axe-core المحلي: %s", e)
+    if allow_cdn:
+        url = cdn_url or _DEFAULT_CDN
+        try:
+            import requests
+            resp = requests.get(url, timeout=30, stream=True)
+            if resp.status_code != 200:
+                log.warning("تعذّر جلب axe-core من CDN (HTTP %s)", resp.status_code)
+                return ""
+            chunks, total = [], 0
+            for ch in resp.iter_content(8192):
+                if not ch:
+                    continue
+                total += len(ch)
+                if total > _MAX_AXE_BYTES:
+                    log.warning("ملف axe-core من CDN يتجاوز الحدّ — تخطّي")
+                    return ""
+                chunks.append(ch)
+            return b"".join(chunks).decode("utf-8", errors="replace")
+        except Exception as e:  # noqa: BLE001
+            log.warning("تعذّر جلب axe-core من CDN: %s", e)
+    return ""
 
 
 def summarize_axe_results(axe_json: dict[str, Any], url: str = "") -> dict[str, Any]:

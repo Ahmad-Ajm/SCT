@@ -117,6 +117,9 @@ class AsyncCrawler:
         self.all_js_diff: list[dict[str, Any]] = []
         self._js_rendered_count = 0
         self._js_sem = asyncio.Semaphore(max(1, int(_js.get("concurrency", 2) or 2)))
+        # فحص الوصولية (axe-core) — اختياري، يحتاج تصيير JS
+        self.a11y_config = config.get("accessibility", {}) or {}
+        self.all_accessibility: list[dict[str, Any]] = []
 
         # === Domain info ===
         self.start_url = normalize_url(self.site_config["start_url"])
@@ -262,6 +265,19 @@ class AsyncCrawler:
                 # === بدء مُصيّر JS (الخطة #4) إن كان مفعّلاً ===
                 if self.js_enabled:
                     from crawler.js_renderer import JSRendererAsync
+                    # فحص الوصولية يحتاج تصيير JS؛ نحمّل مصدر axe مرّة واحدة
+                    axe_source = ""
+                    if self.a11y_config.get("enabled"):
+                        from analyzers.accessibility import load_axe_source
+                        axe_source = load_axe_source(
+                            self.a11y_config.get("axe_source", ""),
+                            self.a11y_config.get("cdn_url", ""),
+                            bool(self.a11y_config.get("allow_cdn", False)),
+                        )
+                        if not axe_source:
+                            log.warning(
+                                "فحص الوصولية مفعّل لكن تعذّر تحميل axe-core "
+                                "(حدّد accessibility.axe_source محلياً أو فعّل allow_cdn)")
                     renderer = JSRendererAsync(
                         browser=self.js_config.get("browser", "chromium"),
                         headless=self.js_config.get("headless", True),
@@ -269,6 +285,8 @@ class AsyncCrawler:
                         timeout=self.js_config.get("timeout", 15),
                         user_agent=self.crawl_config["user_agent"],
                         block_resource_types=self.js_config.get("block_resource_types"),
+                        axe_source=axe_source,
+                        axe_max=int(self.a11y_config.get("max_pages", 50) or 0),
                     )
                     if await renderer.start():
                         self.js_renderer = renderer
@@ -1401,6 +1419,9 @@ class AsyncCrawler:
     def get_js_diff(self) -> list[dict[str, Any]]:
         return self.all_js_diff.copy()
 
+    def get_accessibility(self) -> list[dict[str, Any]]:
+        return self.all_accessibility.copy()
+
     @staticmethod
     def _quick_seo(soup: BeautifulSoup) -> dict[str, Any]:
         """قراءة سريعة لحقول SEO للمقارنة raw↔rendered."""
@@ -1445,6 +1466,10 @@ class AsyncCrawler:
         if not rendered.is_success or not rendered.html:
             increment("crawler.js.render_failed")
             return raw_soup, {}
+
+        # جمع ملخّص الوصولية (axe-core) إن توفّر للصفحة المُصيَّرة
+        if getattr(rendered, "accessibility", None):
+            self.all_accessibility.append(rendered.accessibility)
 
         rendered_soup = BeautifulSoup(rendered.html, "lxml")
         raw = self._quick_seo(raw_soup)

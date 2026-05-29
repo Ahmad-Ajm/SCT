@@ -7,12 +7,11 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 
 | Priority | Feature | Importance | Notes |
 | --- | --- | --- | --- |
-| P2 | Live wiring of accessibility (axe-core) | Medium | The pure summarizer + page runner exist (`analyzers/accessibility.py`); wire it into the JS-render path (run axe while the Playwright page is alive) and export `accessibility.csv`. Needs `playwright` + an axe-core source. |
 | P2 | Crawl comparison surfaced in the UI/report | Medium | `analyzers/crawl_compare.py` (fixed/new/persisting) is ready and tested; add a UI action to pick two runs and a report section. |
-| P2 | Dedicated Action Board / URL Explorer dashboards | Medium | The Priority Engine v2 + Action Board now ship as `page_priority.csv` / `action_board.csv` + an expert-report section; a dedicated interactive dashboard (per-URL drill-down combining crawl + GSC + GA4 + PageSpeed) is the remaining UI step. |
+| P2 | URL Explorer drill-down | Medium | The Action Board page (`/jobs/<id>/board`) and pages explorer exist; a per-URL detail view combining crawl + GSC + GA4 + PageSpeed in one screen is the remaining step. |
 | P3 | Log file analysis | Medium | Parse server logs for Googlebot crawl budget and bot-crawled orphans (Botify/OnCrawl style). Large, needs log access. |
 | P3 | Crawl visualizations | Low | Force-directed crawl map / directory tree. Needs a rendering lib (matplotlib not installed here); consider exporting a JSON graph the UI renders instead. |
-| P3 | Installer / packaging | Medium | One-click installer (PyInstaller/Inno Setup) or Docker image bundling deps + `playwright install chromium`. Build tooling, environment-specific. |
+| P3 | Windows installer | Low | Docker packaging now ships (`docker compose up`); a native one-click installer (PyInstaller/Inno Setup) for non-Docker Windows users is still open. |
 | P3 | Live third-party backlink APIs | Low | Backlink data via CSV is already supported through the AWT importer (`integrations/awt_importer.py`). A live Ahrefs/Majestic/Moz API integration (paid keys, off by default) is the remaining step. |
 
 ## Recently shipped (highlights)
@@ -28,6 +27,9 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
   `action_board.csv` + expert-report section. Non-interactive, time-bounded Google connection tests.
 - Web UI toggles for the shipped options (platform preset, adaptive throttle, sitemap generation,
   GSC URL Inspection, CrUX History) — everything operable without the terminal.
+- Accessibility checks (axe-core) wired into the JS-render path → `accessibility.csv` /
+  `accessibility_issues.csv`. Interactive Action Board page (`/jobs/<id>/board`). Docker
+  packaging (`Dockerfile` + `docker-compose.yml`) on the official Playwright image.
 - Custom extraction (CSS/XPath/regex) and rendered-vs-raw JS diff (already implemented).
 - Internal link score (PageRank); near-duplicate (SimHash+LSH); orphan finder; JavaScript
   rendering wired into the async crawler with a page cap.
@@ -35,6 +37,6 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 
 ## Current top targets
 
-1. Live axe-core accessibility wiring + `accessibility.csv`.
-2. Dedicated Action Board / URL Explorer dashboards.
-3. Installer / packaging for non-technical users.
+1. URL Explorer drill-down (per-URL view combining crawl + GSC + GA4 + PageSpeed).
+2. Crawl comparison surfaced in the UI/report.
+3. Log file analysis (crawl budget / bot-crawled orphans).

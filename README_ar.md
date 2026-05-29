@@ -62,6 +62,16 @@ python -m pip install fastapi "uvicorn[standard]" jinja2 python-multipart
 python webapp/run.py            # ثم افتح http://127.0.0.1:8000
 ```
 
+### Docker (أمر واحد، يتضمّن Chromium)
+
+```bash
+docker compose up --build       # ثم افتح http://127.0.0.1:8000
+```
+
+مبنية على صورة Playwright الرسمية، فيعمل تصيير JavaScript وتقارير PDF مباشرةً. تُحفظ المخرجات
+في `./webapp_jobs`. الأسرار تُقرأ وقت التشغيل من `.env` (لا تُخبز في الصورة)، ويمكن وصل
+اعتماد Google تحت `./credentials`.
+
 الواجهة تتيح تخصيص الإعدادات، إدخال الرابط، اختيار الوضع، تشغيل/إيقاف الزحف ومتابعته
 مباشرة (SSE)، وتنزيل تقارير HTML/PDF/Excel/JSON. مخرجات كل مهمة تُحفظ تحت
 `webapp_jobs/<job_id>/`.

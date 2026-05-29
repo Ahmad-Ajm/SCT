@@ -50,6 +50,7 @@ class RenderedPage:
     load_time_ms: float = 0.0
     error: Optional[str] = None
     is_success: bool = False
+    accessibility: Optional[dict] = None  # ملخّص axe-core عند تفعيله
 
     def __post_init__(self):
         if self.console_errors is None:
@@ -238,6 +239,8 @@ class JSRendererAsync:
         timeout: int = 15,
         user_agent: str = "SEOCrawlerBot/1.0",
         block_resource_types: Optional[list[str]] = None,
+        axe_source: str = "",
+        axe_max: int = 0,
     ):
         self.browser_name = browser
         self.headless = headless
@@ -245,6 +248,10 @@ class JSRendererAsync:
         self.timeout_ms = int(timeout) * 1000
         self.user_agent = user_agent
         self.block_resource_types = set(block_resource_types or [])
+        # فحص الوصولية (axe-core) — اختياري؛ يعمل عند توفّر مصدر axe وسقف موجب
+        self.axe_source = axe_source or ""
+        self.axe_max = int(axe_max or 0)
+        self._axe_count = 0
         self._pw = None
         self._browser = None
         self._context = None
@@ -298,6 +305,17 @@ class JSRendererAsync:
             result.console_errors = console_errors
             result.network_requests = requests_count["n"]
             result.is_success = True
+
+            # فحص الوصولية (axe-core) على الصفحة الحيّة ضمن السقف
+            if self.axe_source and (self.axe_max <= 0 or self._axe_count < self.axe_max):
+                try:
+                    await page.add_script_tag(content=self.axe_source)
+                    axe_raw = await page.evaluate("async () => await axe.run()")
+                    from analyzers.accessibility import summarize_axe_results
+                    result.accessibility = summarize_axe_results(axe_raw, page.url)
+                    self._axe_count += 1
+                except Exception as ax:  # noqa: BLE001
+                    log.debug("axe-core فشل على %s: %s", url, ax)
         except Exception as e:
             result.error = f"Render failed: {type(e).__name__}: {str(e)[:200]}"
             log.debug("%s: %s", url, result.error)

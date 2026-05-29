@@ -114,6 +114,14 @@ javascript:
   # هل نرى المتصفح؟ (false = headless)
   headless: true
 
+# === فحص الوصولية (axe-core) — اختياري، يتطلّب javascript.enabled ===
+accessibility:
+  enabled: false
+  max_pages: 50            # سقف الصفحات التي يُفحَص فيها axe
+  axe_source: ""           # مسار محلي لـ axe.min.js (موصى به للعمل دون إنترنت)
+  cdn_url: ""              # رابط CDN بديل (الافتراضي jsdelivr عند allow_cdn)
+  allow_cdn: false         # السماح بجلب axe-core من CDN عند غياب الملف المحلي
+
 # === إعدادات الاستخراج ===
 extraction:
   extract_meta: true

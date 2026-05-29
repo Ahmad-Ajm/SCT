@@ -1,0 +1,18 @@
+# تشغيل SCT بأمر واحد:  docker compose up --build
+# ثم افتح:  http://127.0.0.1:8000
+services:
+  sct:
+    build: .
+    image: sct:latest
+    ports:
+      - "8000:8000"
+    # الأسرار اختيارية: تُقرأ من .env إن وُجد (لا تُخبز في الصورة)
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # حفظ مخرجات/حالة المهام بين عمليات التشغيل
+      - ./webapp_jobs:/app/webapp_jobs
+      # ملفات اعتماد Google المحلية (اختياري) — للقراءة فقط
+      - ./credentials:/app/credentials:ro
+    restart: unless-stopped

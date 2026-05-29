@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Added
+- **Accessibility checks (axe-core)** (optional, `accessibility.enabled`, off by default;
+  requires JS rendering): runs axe-core in the rendered Playwright page (capped by
+  `accessibility.max_pages`), with the axe source from a local file (`accessibility.axe_source`)
+  or a trusted CDN (`allow_cdn`). Outputs `accessibility.csv` (per-page violation/impact counts)
+  + `accessibility_issues.csv` (every violation) and an `accessibility` block in the JSON.
+  Degrades gracefully if axe/Playwright is unavailable.
+- **Interactive Action Board page** (`/jobs/<id>/board`): an in-browser view of the Priority
+  Engine output — grouped by action group, filterable by group/page-type/priority/URL, sortable,
+  with a filtered-CSV download (served by `/api/jobs/<id>/priority`). Linked from the job page
+  next to "Explore results".
+- **Docker packaging**: a `Dockerfile` (on the official Playwright image, so Chromium/JS
+  rendering/PDF work out of the box) + `docker-compose.yml` + `.dockerignore`. `docker compose
+  up --build` runs the whole tool; outputs persist in `./webapp_jobs`; secrets stay out of the
+  image (read from `.env` at runtime).
 - **Web UI toggles for the new options** (no terminal needed): platform preset
   (Zid/Salla/Shopify/WooCommerce), adaptive throttle, and sitemap generation in the advanced
   crawl options; GSC URL Inspection (+ cap) in the GSC card; and CrUX History in the PageSpeed

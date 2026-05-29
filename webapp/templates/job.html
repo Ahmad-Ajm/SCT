@@ -175,6 +175,11 @@ function renderDownloads(result) {
     ex.href = '/jobs/' + jobId + '/explore';
     ex.textContent = (window.sctT ? window.sctT('explore_results') : '🔎 استكشاف النتائج');
     box.appendChild(ex);
+    const bd = document.createElement('a');
+    bd.className = 'btn sm';
+    bd.href = '/jobs/' + jobId + '/board';
+    bd.textContent = (window.sctT ? window.sctT('board_link') : '🗂️ لوحة العمل');
+    box.appendChild(bd);
   }
   // تنزيل كل الملفات كـ ZIP واحد
   const all = document.createElement('a');

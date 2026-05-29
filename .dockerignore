@@ -1,0 +1,34 @@
+# تحكّم Git والبيئة
+.git
+.gitignore
+.github
+
+# كاش وملفات بايثون المؤقتة
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# مخرجات وحالة وبيانات محلية (لا تدخل الصورة)
+webapp_jobs/
+state/
+logs/
+output/
+Reports/
+external_data/
+*.db
+*.sqlite3
+
+# أسرار ومحلّيات — يجب ألا تُخبز في الصورة
+.env
+.env.*
+credentials/
+secrets/
+*_token.json
+client_secret*.json
+
+# محرّرات/نظام
+.vscode/
+.idea/
+.DS_Store

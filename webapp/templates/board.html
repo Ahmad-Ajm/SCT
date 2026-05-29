@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Action Board — SCT</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/i18n.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="board_title">🗂️ لوحة العمل</h1>
+  <span>
+    <button id="langToggle" class="btn sm" type="button">English</button>
+    <a href="/jobs/{{ job_id }}" class="btn sm" data-i18n="back_job">⟵ المهمة</a>
+  </span>
+</header>
+
+<main class="container">
+  <section class="panel">
+    <h2><span data-i18n="board_intro">ماذا تُصلح أولاً ولماذا</span> <span id="countBadge" class="speed-tag"></span></h2>
+    <p id="chips" class="muted sm"></p>
+    <div class="grid">
+      <label><span data-i18n="board_filter_group">مجموعة الإجراء</span>
+        <select id="f_group"><option value="" data-i18n="opt_all">الكل</option></select>
+      </label>
+      <label><span data-i18n="board_filter_type">نوع الصفحة</span>
+        <select id="f_type"><option value="" data-i18n="opt_all">الكل</option></select>
+      </label>
+      <label><span data-i18n="board_filter_band">الأولوية</span>
+        <select id="f_band">
+          <option value="" data-i18n="opt_all">الكل</option>
+          <option value="high" data-i18n="band_high">عالية</option>
+          <option value="medium" data-i18n="band_medium">متوسطة</option>
+          <option value="low" data-i18n="band_low">منخفضة</option>
+        </select>
+      </label>
+      <label><span data-i18n="board_url_search">بحث في الرابط</span>
+        <input type="text" id="f_url" placeholder="…">
+      </label>
+    </div>
+    <div class="actions">
+      <button id="resetBtn" class="btn" data-i18n="exp_reset">إعادة ضبط</button>
+      <a id="csvBtn" class="btn sm" download="action_board.csv" data-i18n="board_csv">⬇️ تنزيل CSV للمصفّى</a>
+      <span id="msg" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div style="overflow:auto; max-height:65vh">
+      <table class="tbl" id="tbl">
+        <thead><tr>
+          <th data-sort="action_group" data-i18n="board_group">المجموعة</th>
+          <th data-sort="priority_band" data-i18n="t_band">الأولوية</th>
+          <th data-sort="url" data-i18n="t_url">الرابط</th>
+          <th data-sort="page_type" data-i18n="t_page_type">النوع</th>
+          <th data-sort="priority_score" data-i18n="t_score">الدرجة</th>
+          <th data-sort="owner" data-i18n="t_owner">المالك</th>
+          <th data-sort="ease" data-i18n="t_ease">السهولة</th>
+          <th data-sort="top_fix" data-i18n="t_top_fix">أهم إصلاح</th>
+          <th data-sort="technical_issues" data-i18n="t_issues">المشاكل</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <p class="muted sm" id="renderNote"></p>
+  </section>
+</main>
+
+<script>
+const jobId = "{{ job_id }}";
+const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
+let allRows = [];
+let sortKey = null, sortDir = 1;
+const GROUP_ORDER = ["do_now", "needs_content", "needs_developer", "needs_platform", "do_later", "low_impact"];
+const GROUP_KEY = {do_now:"ga_do_now", needs_content:"ga_needs_content", needs_developer:"ga_needs_developer",
+                   needs_platform:"ga_needs_platform", do_later:"ga_do_later", low_impact:"ga_low_impact"};
+function groupLabel(g) { return T(GROUP_KEY[g] || g, g); }
+
+async function load() {
+  const res = await fetch('/api/jobs/' + jobId + '/priority');
+  if (!res.ok) { document.getElementById('msg').textContent = T('board_none', 'No priority data (run an audit with issues).'); return; }
+  const data = await res.json();
+  allRows = data.pages || [];
+  document.getElementById('countBadge').textContent = allRows.length;
+  // عمار قوائم التصفية من البيانات
+  const groups = GROUP_ORDER.filter(g => allRows.some(r => r.action_group === g));
+  const types = [...new Set(allRows.map(r => r.page_type).filter(Boolean))];
+  const fg = document.getElementById('f_group'); const ft = document.getElementById('f_type');
+  groups.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = groupLabel(g); fg.appendChild(o); });
+  types.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; ft.appendChild(o); });
+  // شرائح ملخّص المجموعات
+  const counts = (data.summary || {}).by_action_group || {};
+  document.getElementById('chips').textContent =
+    GROUP_ORDER.filter(g => counts[g]).map(g => groupLabel(g) + ': ' + counts[g]).join('  ·  ');
+  render();
+}
+
+function filtered() {
+  const fg = document.getElementById('f_group').value;
+  const ft = document.getElementById('f_type').value;
+  const fb = document.getElementById('f_band').value;
+  const fu = document.getElementById('f_url').value.trim().toLowerCase();
+  let rows = allRows.filter(r => {
+    if (fg && r.action_group !== fg) return false;
+    if (ft && r.page_type !== ft) return false;
+    if (fb && r.priority_band !== fb) return false;
+    if (fu && !String(r.url || '').toLowerCase().includes(fu)) return false;
+    return true;
+  });
+  const order = Object.fromEntries(GROUP_ORDER.map((g, i) => [g, i]));
+  rows.sort((a, b) => {
+    if (sortKey) {
+      let x = a[sortKey], y = b[sortKey];
+      if (typeof x === 'string' || typeof y === 'string') return String(x||'').localeCompare(String(y||'')) * sortDir;
+      return ((Number(x)||0) - (Number(y)||0)) * sortDir;
+    }
+    const go = (order[a.action_group] ?? 99) - (order[b.action_group] ?? 99);
+    return go !== 0 ? go : (Number(b.priority_score)||0) - (Number(a.priority_score)||0);
+  });
+  return rows;
+}
+
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function render() {
+  const rows = filtered();
+  const tb = document.getElementById('tbody'); tb.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><b>' + esc(groupLabel(r.action_group)) + '</b></td>' +
+      '<td class="ctr">' + esc(T('band_' + r.priority_band, r.priority_band)) + '</td>' +
+      '<td style="word-break:break-all">' + esc(r.url) + '</td>' +
+      '<td class="ctr muted sm">' + esc(r.page_type) + '</td>' +
+      '<td class="ctr"><b>' + esc(r.priority_score) + '</b></td>' +
+      '<td class="ctr muted sm">' + esc(r.owner) + '</td>' +
+      '<td class="ctr muted sm">' + esc(r.ease) + '</td>' +
+      '<td class="muted sm">' + esc(r.top_fix) + '</td>' +
+      '<td class="muted sm">' + esc(r.technical_issues) + '</td>';
+    frag.appendChild(tr);
+  }
+  tb.appendChild(frag);
+  document.getElementById('renderNote').textContent = T('exp_showing', 'Showing') + ' ' + rows.length + ' / ' + allRows.length;
+  buildCsv(rows);
+}
+
+function buildCsv(rows) {
+  const cols = ['action_group','priority_band','url','page_type','priority_score','owner','ease','top_fix','technical_issues'];
+  const lines = [cols.join(',')];
+  for (const r of rows) lines.push(cols.map(c => '"' + String(r[c] == null ? '' : r[c]).replace(/"/g,'""') + '"').join(','));
+  const blob = new Blob(['﻿' + lines.join('\n')], {type:'text/csv'});
+  document.getElementById('csvBtn').href = URL.createObjectURL(blob);
+}
+
+['f_group','f_type','f_band','f_url'].forEach(id => document.getElementById(id).addEventListener('input', render));
+document.getElementById('resetBtn').addEventListener('click', () => {
+  ['f_group','f_type','f_band','f_url'].forEach(id => document.getElementById(id).value = '');
+  sortKey = null; render();
+});
+document.querySelectorAll('#tbl th[data-sort]').forEach(th => {
+  th.style.cursor = 'pointer';
+  th.addEventListener('click', () => {
+    const k = th.getAttribute('data-sort');
+    if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+    render();
+  });
+});
+document.addEventListener('sct:langchange', () => { if (allRows.length) render(); });
+load();
+</script>
+</body>
+</html>

@@ -879,3 +879,40 @@ async def job_pages(job_id: str):
     for p in audit.get("pages", []):
         rows.append({k: p.get(k) for k in _PAGE_FIELDS})
     return JSONResponse({"pages": rows, "count": len(rows)})
+
+
+@app.get("/jobs/{job_id}/board", response_class=HTMLResponse)
+async def board_page(request: Request, job_id: str):
+    """لوحة العمل التفاعلية (Action Board) — تعرض أولويات الإصلاح مجمّعةً وقابلةً للتصفية."""
+    return templates.TemplateResponse(
+        "board.html", {"request": request, "job_id": job_id}
+    )
+
+
+@app.get("/api/jobs/{job_id}/priority")
+async def job_priority(job_id: str):
+    """إرجاع بيانات محرّك الأولويات (الصفحات + ملخّص لوحة العمل) للعرض في المتصفح."""
+    import json as _json
+    meta = runner.meta(job_id)
+    json_path = meta.get("result", {}).get("json")
+    if not json_path or not Path(json_path).exists():
+        return JSONResponse({"pages": [], "error": "no audit json"}, status_code=404)
+    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
+    if size_mb > MAX_AUDIT_JSON_MB:
+        return JSONResponse({
+            "pages": [],
+            "error": f"audit JSON too large ({size_mb:.0f} MB); "
+                     f"open output/csv/page_priority.csv instead",
+        }, status_code=413)
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            audit = _json.load(f)
+    except (OSError, ValueError):
+        return JSONResponse({"pages": [], "error": "read error"}, status_code=500)
+    prio = audit.get("priority", {}) or {}
+    pages = prio.get("pages", []) or []
+    return JSONResponse({
+        "pages": pages,
+        "summary": prio.get("summary", {}) or {},
+        "count": len(pages),
+    })

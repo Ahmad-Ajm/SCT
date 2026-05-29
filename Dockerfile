@@ -1,0 +1,27 @@
+# SCT — أداة الزحف وتدقيق SEO
+# صورة جاهزة للتشغيل: تحوي Python + Chromium (لتصيير JS وتقارير PDF).
+# نبني على صورة Playwright الرسمية كي يكون المتصفّح ومكتباته جاهزة.
+FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
+
+# إعدادات بايثون أنظف داخل الحاوية
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# 1) المتطلبات أولاً للاستفادة من طبقات الكاش
+COPY requirements.txt ./
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r requirements.txt \
+    # المتصفّح مضمّن في الصورة الأساسية، لكن نضمنه (idempotent)
+    && python -m playwright install chromium
+
+# 2) كود المصدر (تستبعد .dockerignore البيانات/الأسرار)
+COPY . .
+
+# الواجهة المرئية
+EXPOSE 8000
+
+# لا تُضمّن أي مفاتيح في الصورة — تُمرَّر وقت التشغيل عبر -e أو env_file/.env
+CMD ["python", "webapp/run.py", "--host", "0.0.0.0", "--port", "8000"]

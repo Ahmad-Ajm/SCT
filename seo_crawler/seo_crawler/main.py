@@ -1109,6 +1109,16 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
             if js_diff:
                 csv_files["js_diff"] = csv_exporter._export("js_diff.csv", js_diff)
 
+            # فحص الوصولية (axe-core) — ملخّص لكل صفحة + قائمة المخالفات
+            a11y = getattr(crawler, "get_accessibility", lambda: [])()
+            if a11y:
+                csv_files["accessibility"] = csv_exporter._export(
+                    "accessibility.csv", _flatten_accessibility(a11y))
+                a11y_issues = _flatten_accessibility_issues(a11y)
+                if a11y_issues:
+                    csv_files["accessibility_issues"] = csv_exporter._export(
+                        "accessibility_issues.csv", a11y_issues)
+
             # === التقرير الموحّد: GSC / GA4 / الأولويات ===
             if (integrations or {}).get("gsc_pages"):
                 csv_files["gsc_pages"] = csv_exporter._export(
@@ -1260,6 +1270,7 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
                 resource_status=analysis.get("resource_status", []),
                 custom_extraction=getattr(crawler, "get_custom_extraction", lambda: [])(),
                 js_diff=getattr(crawler, "get_js_diff", lambda: [])(),
+                accessibility=getattr(crawler, "get_accessibility", lambda: [])(),
                 opportunities=analysis.get("opportunities", {}),
                 priority=analysis.get("priority", {}),
                 cannibalization=analysis.get("cannibalization", {}),
@@ -1506,6 +1517,34 @@ def _export_pagespeed_tables(ps_data, exporter, files: dict, log_each: bool = Fa
             "pagespeed_failed_audits.csv", failed)
         if log_each:
             log.info(f"  ✓ pagespeed_failed_audits.csv ({len(failed)} صفوف)")
+
+
+def _flatten_accessibility(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """ملخّص الوصولية لكل صفحة: عدد المخالفات + توزيعها حسب الأثر."""
+    rows: list[dict[str, Any]] = []
+    for s in items or []:
+        if not isinstance(s, dict):
+            continue
+        bi = s.get("by_impact", {}) or {}
+        rows.append({
+            "url": s.get("url"),
+            "violations": s.get("violations_count", 0),
+            "nodes": s.get("nodes_total", 0),
+            "critical": bi.get("critical", 0),
+            "serious": bi.get("serious", 0),
+            "moderate": bi.get("moderate", 0),
+            "minor": bi.get("minor", 0),
+        })
+    return rows
+
+
+def _flatten_accessibility_issues(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """كل مخالفة وصولية على حدة (صف لكل قاعدة axe فاشلة لكل صفحة)."""
+    rows: list[dict[str, Any]] = []
+    for s in items or []:
+        if isinstance(s, dict):
+            rows.extend(s.get("violations", []) or [])
+    return rows
 
 
 def _flatten_cannibalization(cann: dict[str, Any]) -> list[dict[str, Any]]:

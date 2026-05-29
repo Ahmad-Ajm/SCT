@@ -972,6 +972,16 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(s["violations"][0]["rule_id"], "image-alt")  # critical أولاً
         self.assertEqual(s["by_impact"]["serious"], 1)
 
+    def test_accessibility_axe_source_loader(self):
+        # IMP-7 (live): تحميل مصدر axe من ملف محلي؛ والتدرّج بسلاسة عند غيابه
+        from analyzers.accessibility import load_axe_source
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "axe.min.js"
+            p.write_text("/* axe-core */ var axe = { run: 1 };", encoding="utf-8")
+            self.assertIn("axe", load_axe_source(str(p)))
+        # غير موجود وبلا CDN ⇒ فارغ (يُعطَّل الفحص بسلاسة)
+        self.assertEqual(load_axe_source("does_not_exist.js", allow_cdn=False), "")
+
 
     def test_job_config_maps_new_ui_options(self):
         # توصيلات الواجهة: الخيارات المشحونة حديثاً تُكتب في إعداد المهمة بشكل صحيح

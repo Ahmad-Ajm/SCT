@@ -44,6 +44,14 @@ javascript:
   browser: "chromium"
   headless: true
 
+# فحص الوصولية (axe-core) — اختياري، يتطلّب javascript.enabled (يعمل داخل المتصفّح المُصيّر)
+accessibility:
+  enabled: false
+  max_pages: 50            # سقف عدد الصفحات التي يُفحَص فيها axe
+  axe_source: ""           # مسار محلي لـ axe.min.js (موصى به للعمل دون إنترنت)
+  cdn_url: ""              # رابط CDN بديل (يُستعمل عند allow_cdn فقط؛ الافتراضي jsdelivr)
+  allow_cdn: false         # السماح بجلب axe-core من CDN عند غياب الملف المحلي
+
 extraction:
   extract_meta: true
   extract_headings: true

@@ -116,6 +116,8 @@ main.py (root launcher) ──► seo_crawler/seo_crawler/main.py (التنسي�
   (`enabled`/`min_delay`/`max_delay`/`step_up`/`step_down`/`slow_ms` — تحكّم تكيّفي بالسرعة).
 - `javascript`: `enabled`، `mode` (all/sample/on_empty_content)، `max_pages`،
   `concurrency`، `block_resource_types`، `wait_until`، `timeout`، `browser`، `headless`.
+- `accessibility` (اختياري، يتطلّب `javascript.enabled`): `enabled`، `max_pages`،
+  `axe_source` (مسار محلي لـ axe.min.js)، `cdn_url`، `allow_cdn` — يشغّل axe-core في الصفحة المُصيَّرة.
 - `extraction`: `extract_*` لكل عنصر (meta/headings/links/images/schema/hreflang/og/
   canonical/pagination/headers/content/mixed_content/resources)، و`check_resource_status`
   (فحص حالة HTTP لكل مورد — مكلف، مطفأ افتراضياً ويتطلّب `extract_resources`).
@@ -165,7 +167,10 @@ main.py (root launcher) ──► seo_crawler/seo_crawler/main.py (التنسي�
 - `sitemap.xml` (عند تفعيل `output.generate_sitemap`): من الصفحات القابلة للفهرسة.
 - محرّك الأولويات v2: `page_priority.csv` (درجة لكل صفحة + نوعها + المالك + سهولة الإصلاح +
   تفكيك العوامل) و`action_board.csv` (لوحة عمل مرتّبة: افعل الآن / يحتاج محتوى / يحتاج مطوّراً /
-  يحتاج دعم المنصّة / لاحقاً / منخفض الأثر)، وقسم «لوحة العمل» في تقرير الخبير.
+  يحتاج دعم المنصّة / لاحقاً / منخفض الأثر)، وقسم «لوحة العمل» في تقرير الخبير، ولوحة تفاعلية
+  في الواجهة على `/jobs/<id>/board`.
+- الوصولية (عند تفعيل `accessibility`): `accessibility.csv` (ملخّص لكل صفحة) و
+  `accessibility_issues.csv` (كل مخالفة axe على حدة).
 - كل مشكلة في `seo_issues` تحمل الآن: `impact`/`effort`/`why_it_matters`/`how_to_fix`/`priority_score`.
 - `metrics.json`: عدّادات/توقيتات/أحداث + ملخّص أبطأ المراحل.
 
