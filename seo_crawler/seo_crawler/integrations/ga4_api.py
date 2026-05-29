@@ -30,7 +30,12 @@ class GA4Client:
         self.date_range_days = int(date_range_days or 90)
         self._client = None
 
-    def authenticate(self) -> bool:
+    def authenticate(self, allow_interactive: bool | None = None) -> bool:
+        """يصادق مع GA4.
+
+        allow_interactive: هل يُسمح بفتح متصفّح موافقة OAuth عند غياب token صالح؟
+        تمرّره اختبارات الاتصال في الواجهة بـFalse كي لا تتعلّق بانتظار الموافقة.
+        """
         if not self.property_id:
             log.warning("GA4: property_id غير محدّد — تخطّي")
             return False
@@ -53,6 +58,7 @@ class GA4Client:
                     self.credentials_file,
                     ["https://www.googleapis.com/auth/analytics.readonly"],
                     token_path,
+                    allow_interactive=allow_interactive,
                 )
                 if not creds:
                     return False

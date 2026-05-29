@@ -134,6 +134,15 @@
 - Regression test suite covering the fixes below.
 
 ### Fixed
+- **Connection-test endpoints could hang the server** (`/api/test/gsc`, `/api/test/ga4`): they
+  ran the client's `authenticate()` which, with OAuth client-secret credentials and no valid
+  token, opened an interactive `run_local_server` browser-consent flow and **blocked the
+  executor thread indefinitely** (the `analytics.readonly` OAuth URL + `CancelledError` on
+  shutdown). The tests are now **non-interactive** (`authenticate(allow_interactive=False)` —
+  consent only happens via the dedicated "Connect/Authorize" button) and **time-bounded** (a
+  shared `_run_conn_test` wraps the executor call in `asyncio.wait_for`, returning a friendly
+  timeout message instead of hanging). `GA4Client.authenticate` / `GSCClient.authenticate` now
+  accept `allow_interactive`.
 - Full‑application audit pass (correctness, security, performance) — applied across all parts:
   - **Duplicate detector**: title/meta‑description now coerced via `str(...)` before
     `.strip().lower()` so non‑string values from the DB (e.g. numeric titles) can’t crash

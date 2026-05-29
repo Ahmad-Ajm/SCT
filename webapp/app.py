@@ -721,6 +721,18 @@ def _run_setup_bg(tool: str) -> None:
         _setup_state[tool] = {"running": False, "ok": ok, "message": msg[-600:]}
 
 
+async def _run_conn_test(fn, timeout: float = 45.0) -> dict:
+    """يشغّل اختبار اتصال محجوب (شبكة) في خيط مع مهلة قصوى.
+
+    اختبارات الاتصال غير تفاعلية (لا تفتح متصفّح OAuth) ومحدودة بمهلة، كي لا يتعلّق
+    الطلب إلى ما لا نهاية (كان اختبار GA4 يفتح تدفّق OAuth ويتعلّق حتى إيقاف الخادم)."""
+    loop = asyncio.get_event_loop()
+    try:
+        return await asyncio.wait_for(loop.run_in_executor(None, fn), timeout=timeout)
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": f"انتهت مهلة الاختبار ({int(timeout)}ث) — تحقّق من الشبكة/الصلاحيات."}
+
+
 @app.post("/api/test/gsc")
 async def test_gsc(site_url: str = Form("")):
     """اختبار اتصال GSC: يصادق ويسرد المواقع التي يملك الحساب صلاحيتها — يكشف فوراً
@@ -733,8 +745,9 @@ async def test_gsc(site_url: str = Form("")):
     def _run():
         from integrations.gsc_api import GSCClient
         c = GSCClient(credentials_path=str(cs), site_url=site_url or "https://example.com/")
-        if not c.authenticate():
-            return {"ok": False, "error": "فشل المصادقة — تأكّد من إتمام «وافق بحسابي»."}
+        # غير تفاعلي: لا نفتح متصفّح موافقة هنا — التفويض يتم عبر زرّ «وافق» فقط
+        if not c.authenticate(allow_interactive=False):
+            return {"ok": False, "error": "لم يُكمَل التفويض بعد — اضغط «وافق بحسابي» أولاً."}
         try:
             resp = c.service.sites().list().execute()
             sites = [s.get("siteUrl", "") for s in resp.get("siteEntry", [])]
@@ -742,7 +755,7 @@ async def test_gsc(site_url: str = Form("")):
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)[:300]}
 
-    res = await asyncio.get_event_loop().run_in_executor(None, _run)
+    res = await _run_conn_test(_run)
     if res.get("ok") and site_url:
         target = site_url.rstrip("/")
         res["site_accessible"] = any(
@@ -765,16 +778,17 @@ async def test_ga4(property_id: str = Form("")):
     def _run():
         from integrations.ga4_api import GA4Client
         c = GA4Client(property_id=property_id.strip(), credentials_file=str(cs))
-        if not c.authenticate():
-            return {"ok": False, "error": "فشل المصادقة — تأكّد من تثبيت مكتبة GA4 وربط Google "
-                                          "وأن الحساب مُضاف للـProperty."}
+        # غير تفاعلي: لا نفتح متصفّح موافقة هنا (كان يتعلّق الطلب) — التفويض عبر زرّ «وافق»
+        if not c.authenticate(allow_interactive=False):
+            return {"ok": False, "error": "لم يُكمَل التفويض بعد — اضغط «وافق بحسابي»، وتأكّد من "
+                                          "تثبيت مكتبة GA4 وأن الحساب مُضاف للـProperty."}
         try:
             c._run(dimensions=["date"], metrics=["sessions"], limit=1)
             return {"ok": True}
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)[:300]}
 
-    return JSONResponse(await asyncio.get_event_loop().run_in_executor(None, _run))
+    return JSONResponse(await _run_conn_test(_run))
 
 
 @app.post("/api/test/pagespeed")
@@ -789,7 +803,7 @@ async def test_pagespeed(api_key: str = Form("")):
         r = c.audit("https://www.google.com/", strategy="mobile", categories=["performance"])
         return {"ok": False, "error": r["error"]} if r.get("error") else {"ok": True}
 
-    return JSONResponse(await asyncio.get_event_loop().run_in_executor(None, _run))
+    return JSONResponse(await _run_conn_test(_run, timeout=75.0))
 
 
 @app.post("/api/setup/{tool}")

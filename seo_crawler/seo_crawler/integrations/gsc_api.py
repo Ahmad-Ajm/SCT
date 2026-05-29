@@ -63,9 +63,13 @@ class GSCClient:
         self.service = None
         self._authenticated = False
 
-    def authenticate(self) -> bool:
+    def authenticate(self, allow_interactive: bool | None = None) -> bool:
         """
         المصادقة مع Google API.
+
+        Args:
+            allow_interactive: هل يُسمح بفتح متصفّح موافقة OAuth عند غياب token صالح؟
+                اختبارات الاتصال في الواجهة تمرّره False كي لا تتعلّق بانتظار الموافقة.
 
         Returns:
             bool: نجاح المصادقة
@@ -82,7 +86,8 @@ class GSCClient:
             # يدعم تلقائياً حساب الخدمة أو OAuth (راجع google_auth.py)
             token_path = self.credentials_path.parent / "gsc_token.json"
             creds = load_google_credentials(
-                str(self.credentials_path), self.SCOPES, str(token_path)
+                str(self.credentials_path), self.SCOPES, str(token_path),
+                allow_interactive=allow_interactive,
             )
             if not creds:
                 return False

@@ -973,5 +973,24 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(s["by_impact"]["serious"], 1)
 
 
+    def test_connection_test_helper_times_out(self):
+        # اختبارات الاتصال محدودة بمهلة كي لا يتعلّق الطلب (سبب CancelledError عند الإيقاف)
+        import asyncio as _asyncio
+        sys.path.insert(0, str(ROOT / "webapp"))
+        try:
+            import app as webapp_app
+        except Exception:  # noqa: BLE001
+            self.skipTest("webapp app import unavailable in this environment")
+
+        def _slow():
+            import time
+            time.sleep(0.5)
+            return {"ok": True}
+
+        res = _asyncio.run(webapp_app._run_conn_test(_slow, timeout=0.1))
+        self.assertFalse(res["ok"])
+        self.assertIn("مهلة", res["error"])  # رسالة انتهاء المهلة
+
+
 if __name__ == "__main__":
     unittest.main()

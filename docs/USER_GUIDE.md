@@ -341,6 +341,10 @@ If the key/library is missing or the call fails, the crawl still completes norma
 - **PDF not generated** — run `playwright install chromium`.
 - **GA4 not working** — `pip install google-analytics-data`, then provide property ID and a
   valid service‑account file.
+- **GSC/GA4 "Test connection" says "authorization not completed"** — click **"Connect/Authorize"**
+  first. The connection tests are intentionally **non-interactive** (they never open a browser
+  consent, so the request can't hang); consent happens once via the Connect button. Tests are
+  also time-bounded and return a "timed out" message instead of hanging if the connection fails.
 - **AI says unavailable** — missing API key, or an internal `base_url` was blocked (enable
   "allow local/private endpoint" only for trusted local models).
 - **Slow crawl** — reduce max pages or raise the speed slider (the target site itself may be
