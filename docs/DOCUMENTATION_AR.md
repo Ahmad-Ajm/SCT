@@ -107,11 +107,13 @@ main.py (root launcher) ──► seo_crawler/seo_crawler/main.py (التنسي�
 
 ## 6) مرجع الإعدادات الكامل (`config.yaml`)
 
-- `site`: `start_url`، `domain`، `additional_internal_domains`.
+- `site`: `start_url`، `domain`، `additional_internal_domains`، `platform_preset`
+  (`zid`/`salla`/`shopify`/`woocommerce` — يضيف أنماط استبعاد موصى بها).
 - `crawl`: `max_pages` (0=بلا حد)، `max_depth`، `delay_seconds`، `concurrent_requests`،
   `timeout_seconds`، `retry_attempts`، `respect_robots`، `robots_failure_policy`،
   `seed_strategy`، `verify_ssl`، `allow_private_hosts`، `max_page_size_mb`،
-  `follow_redirects`، `max_redirect_hops`، `user_agent`.
+  `follow_redirects`، `max_redirect_hops`، `user_agent`، و`adaptive_throttle`
+  (`enabled`/`min_delay`/`max_delay`/`step_up`/`step_down`/`slow_ms` — تحكّم تكيّفي بالسرعة).
 - `javascript`: `enabled`، `mode` (all/sample/on_empty_content)، `max_pages`،
   `concurrency`، `block_resource_types`، `wait_until`، `timeout`، `browser`، `headless`.
 - `extraction`: `extract_*` لكل عنصر (meta/headings/links/images/schema/hreflang/og/
@@ -124,13 +126,16 @@ main.py (root launcher) ──► seo_crawler/seo_crawler/main.py (التنسي�
   `url_flag_non_ascii`...).
 - `output`: `output_dir`، `formats` (csv/json/excel/html/pdf/xml)، `encoding`،
   `timestamped_folder`، `json_full` (افتراضي false — لا يُضمّن المصفوفات الخام الضخمة في JSON؛
-  متوفّرة في CSV/Excel/XML)، `xml_max_rows` (سقف صفوف XML لكل مجموعة، 0 = بلا حد).
+  متوفّرة في CSV/Excel/XML)، `xml_max_rows` (سقف صفوف XML لكل مجموعة، 0 = بلا حد)،
+  `generate_sitemap` (توليد `sitemap.xml` من الصفحات القابلة للفهرسة).
 - `report`: `language` (ar/en)، `audience` (`expert` تفصيلي | `client` مختصر مبسّط |
   `both` تقريران)، `client_name`، `logo_url`، `max_rows`، `unified`.
 - `state`: `state_dir`، `save_interval`، `resume_if_exists`، `use_database`، `cache_ttl_days`.
 - `external_check`: `enabled`، `timeout`، `concurrent`، `retry_attempts`، `verify_ssl`.
-- `integrations`: `gsc`، `pagespeed`، `awt`، `lighthouse`، `ga4`، و`ai` (مستشار الذكاء
-  الاصطناعي: `enabled`/`provider`/`model`/`base_url`/`api_key`/`timeout`/`max_opportunities`)
+- `integrations`: `gsc` (+`url_inspection`/`inspect_max_urls` لحالة الفهرسة الحقيقية)،
+  `pagespeed` (+`save_raw_json` للجداول العميقة، +`crux_history` لاتجاه CWV)، `awt`،
+  `lighthouse`، `ga4`، و`ai` (مستشار الذكاء الاصطناعي:
+  `enabled`/`provider`/`model`/`base_url`/`api_key`/`timeout`/`max_opportunities`)
   — كلها معطّلة افتراضياً.
 - `logging`: `level`، `log_dir`، `console_output`، `file_output`، `max_log_size_mb`، `backup_count`.
 - `observability`: `enabled`، `log_function_calls`، `log_url_events`، `slow_call_ms`، `slow_call_summary`.
@@ -171,6 +176,12 @@ main.py (root launcher) ──► seo_crawler/seo_crawler/main.py (التنسي�
 - **schema_validator / hreflang_validator / sitemap_diff**: JSON-LD+microdata، تبادلية hreflang (روابط الإرجاع)، تغطية sitemap.
 - **pagination_analyzer**: تسلسل rel=next/prev، تبادلية مكسورة، أهداف 4xx/noindex، canonical غير ذاتي على صفحات مرقّمة.
 - **url_issues / security_analyzer / resources_analyzer**: نظافة URL، ترويسات الأمان، جرد الموارد (وحالتها عبر `check_resource_status`).
+- **link_score / near_duplicate**: PageRank داخلي لكل صفحة، وكشف الصفحات شبه‑المكرّرة (SimHash + LSH).
+- **gsc_insights**: تكلّس الكلمات (صفحات تتنافس على نفس الاستعلام) وفُرَص الروابط الداخلية
+  (ظهور عالٍ + روابط واردة قليلة) من بيانات GSC.
+- **hints**: يُثري كل مشكلة بـ`impact`/`effort`/`why_it_matters`/`how_to_fix`/`priority_score`.
+- **crawl_compare**: مقارنة زمنية بين زحفتين لنفس الموقع (مُصلَح/جديد/باقٍ + فروق الصفحات).
+- **accessibility**: تلخيص نتائج axe-core (اختياري عبر متصفّح التصيير).
 
 ## 9) التكاملات والتقرير الموحّد
 - **GSC**: نقرات/ظهور/CTR/ترتيب per-page وper-query (OAuth بمفتاحك).

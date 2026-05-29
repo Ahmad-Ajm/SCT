@@ -27,6 +27,10 @@ Notes:
 - GA4 integration additionally needs `google-analytics-data` (commented in requirements —
   install it only if you use GA4).
 - The AI advisor needs **no extra packages** (it uses `requests`).
+- **Auto-install of requirements:** when the tool needs an optional library that isn't
+  installed (e.g. `openpyxl`, `playwright`, Google libs) it installs it **automatically
+  (notifying, no prompt)**, restricted to a known allowlist of the tool's optional deps (no
+  arbitrary packages). Set `SCT_NO_AUTO_INSTALL=1` to disable and install manually.
 
 ---
 
@@ -114,7 +118,11 @@ configured output directory.
   `security_issues`, `pagination` / `pagination_issues`, `hreflang_issues`, `resources`
   (+ `resource_issues`, `resource_status`), `custom_extraction`, `excluded_urls`,
   `gsc_pages/gsc_queries`, `ga4_landing_pages/ga4_channels`, `priority_opportunities`,
-  `ai_recommendations`, `lighthouse_import`, `js_diff`.
+  `ai_recommendations`, `lighthouse_import`, `js_diff`, and (when integrations are enabled)
+  `pagespeed_audits` / `pagespeed_network_requests` / `pagespeed_js_treemap` /
+  `pagespeed_failed_audits` (deep Lighthouse tables), `keyword_cannibalization`,
+  `internal_link_opportunities`, `gsc_index_status` (URL Inspection), `crux_history`.
+- **`sitemap.xml`** — generated from indexable pages when `output.generate_sitemap` is on.
 - **`metrics.json`** — counters, timings, and a "slowest phases" summary.
 
 **How outputs are organized (and why they stay reasonably sized):**
@@ -192,7 +200,15 @@ and download the filtered set as CSV.
 | File | Contents |
 |------|----------|
 | `gsc_pages.csv` / `gsc_queries.csv` | Search Console clicks / impressions / CTR / position per page and per query. |
+| `gsc_index_status.csv` | Real per-URL index status from URL Inspection (verdict/coverage/canonical) — when `gsc.url_inspection` is on. |
+| `keyword_cannibalization.csv` | Queries where multiple pages compete (rank-splitting) — derived from GSC. |
+| `internal_link_opportunities.csv` | Pages with high search impressions but few internal inlinks (link-building candidates). |
 | `ga4_landing_pages.csv` / `ga4_channels.csv` | GA4 sessions / users / engagement for landing pages and channels. |
+| `pagespeed_audits.csv` | Every Lighthouse audit (score/value/type) per page×strategy. |
+| `pagespeed_failed_audits.csv` | Only failing audits (real problems) — safely filtered. |
+| `pagespeed_network_requests.csv` | Every network request (size/status/protocol/priority/entity). |
+| `pagespeed_js_treemap.csv` | Per-script JS bytes + computed unused-code %. |
+| `crux_history.csv` | Core Web Vitals trend over time (p75) from CrUX History — when enabled. |
 | `priority_opportunities.csv` | Pages ranked by impact × severity, with the top fix for each. |
 | `ai_recommendations.csv` | AI advisor recommendations — title, why, action, priority. |
 | `lighthouse_import.csv` | Imported performance / accessibility / best-practices / SEO scores (0–100). |
@@ -231,15 +247,27 @@ process via environment variables, not saved to disk.
 
 | Integration | What it adds | What you provide |
 |-------------|--------------|------------------|
-| **Google Search Console** | Clicks / impressions / CTR / position per page & query | OAuth credentials file + verified site URL |
+| **Google Search Console** | Clicks / impressions / CTR / position per page & query + keyword cannibalization & internal-link opportunities | OAuth credentials file + verified site URL |
+| **GSC — URL Inspection** (optional) | Real per-URL index status (`gsc.url_inspection`) — quota-capped by `inspect_max_urls` | Same GSC credentials |
 | **Google Analytics 4** | Sessions / users / engagement for landing pages + channels | Service‑account JSON + property ID (needs `google-analytics-data`) |
-| **PageSpeed API** | Performance/SEO scores via Google PageSpeed | API key (or `PAGESPEED_API_KEY` in `.env`) |
+| **PageSpeed API** | Performance/SEO scores + **deep Lighthouse tables** (audits/network/JS treemap/failed) | API key (or `PAGESPEED_API_KEY` in `.env`) |
+| **CrUX History** (optional) | Core Web Vitals trend over time (`pagespeed.crux_history`) | Same PageSpeed key |
 | **Lighthouse import** | Reads local Lighthouse JSON (no keys/internet) | A folder of Lighthouse `.json` files |
-| **Ahrefs Webmaster (AWT)** | Imports AWT CSV exports | A folder of CSV files |
+| **Ahrefs Webmaster (AWT)** | Imports AWT CSV exports (free backlinks/keywords for site owners) | A folder of CSV files |
 
 When GSC/GA4 are enabled, the **Unified report** cross‑references technical issues with
 traffic to produce **Priority Opportunities**
-(`priority_score = traffic impact × issue severity`).
+(`priority_score = traffic impact × issue severity`). Every issue also carries
+**impact / effort / why-it-matters / how-to-fix / priority_score** to make it actionable.
+
+### Extra run options (in `config.yaml`)
+- **`site.platform_preset`** (`zid` | `salla` | `shopify` | `woocommerce`): adds recommended
+  exclude patterns (cart/checkout/account) without clearing yours.
+- **`crawl.adaptive_throttle.enabled`**: slows the crawl automatically on 429/5xx/slow
+  responses and recovers (server-friendly, avoids blocks).
+- **`output.generate_sitemap`**: generates a clean `sitemap.xml` from indexable pages.
+- **`pagespeed.save_raw_json`**: saves the full raw Lighthouse report per page (source of the
+  deep tables).
 
 ### Using a `.env` file for secrets (recommended)
 

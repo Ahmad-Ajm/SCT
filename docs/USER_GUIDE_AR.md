@@ -26,6 +26,10 @@ playwright install chromium
   `requirements.txt`).
 - تكامل GA4 يحتاج إضافياً `google-analytics-data` (معلّق في الملف — ثبّته فقط إن استخدمت GA4).
 - مستشار الذكاء الاصطناعي **لا يحتاج أي مكتبات إضافية** (يستخدم `requests`).
+- **التثبيت التلقائي للمتطلبات:** عند حاجة الأداة لمكتبة اختيارية غير مثبّتة (مثل `openpyxl`
+  للإكسل أو `playwright` أو مكتبات Google) تُثبّتها **تلقائياً مع إعلامك** ودون طلب موافقة،
+  محصورةً في قائمة مكتبات الأداة المعروفة فقط (لا حزم عشوائية). لتعطيل ذلك والتثبيت يدوياً
+  ضع متغيّر البيئة `SCT_NO_AUTO_INSTALL=1`.
 
 ---
 
@@ -112,7 +116,11 @@ python main.py --url https://example.com --mode audit
   `security_issues`، `pagination` / `pagination_issues`، `hreflang_issues`، `resources`
   (+ `resource_issues`، `resource_status`)، `custom_extraction`، `excluded_urls`،
   `gsc_pages/gsc_queries`، `ga4_landing_pages/ga4_channels`، `priority_opportunities`،
-  `ai_recommendations`، `lighthouse_import`، `js_diff`.
+  `ai_recommendations`، `lighthouse_import`، `js_diff`، وعند تفعيل التكاملات أيضاً:
+  `pagespeed_audits` / `pagespeed_network_requests` / `pagespeed_js_treemap` /
+  `pagespeed_failed_audits` (جداول Lighthouse العميقة)، `keyword_cannibalization`،
+  `internal_link_opportunities`، `gsc_index_status` (URL Inspection)، `crux_history`.
+- **`sitemap.xml`** — يُولَّد من الصفحات القابلة للفهرسة عند تفعيل `output.generate_sitemap`.
 - **`metrics.json`** — عدّادات وتوقيتات وملخّص «أبطأ المراحل».
 
 **كيف تُنظَّم المخرجات (ولماذا تبقى بحجم معقول):**
@@ -188,7 +196,15 @@ python main.py --url https://example.com --mode audit
 | الملف | المحتوى |
 |------|---------|
 | `gsc_pages.csv` / `gsc_queries.csv` | نقرات/ظهور/CTR/ترتيب Search Console لكل صفحة واستعلام. |
+| `gsc_index_status.csv` | حالة الفهرسة الحقيقية لكل رابط من URL Inspection (verdict/coverage/canonical) — عند تفعيل `gsc.url_inspection`. |
+| `keyword_cannibalization.csv` | استعلامات يتنافس عليها أكثر من صفحة (تشتيت الترتيب) — من بيانات GSC. |
+| `internal_link_opportunities.csv` | صفحات بظهور بحث عالٍ وروابط داخلية واردة قليلة (مرشّحة لتقوية الربط). |
 | `ga4_landing_pages.csv` / `ga4_channels.csv` | جلسات/مستخدمون/تفاعل GA4 لصفحات الهبوط والقنوات. |
+| `pagespeed_audits.csv` | كل تدقيقات Lighthouse (الدرجة/القيمة/النوع) لكل صفحة×استراتيجية. |
+| `pagespeed_failed_audits.csv` | التدقيقات الفاشلة فقط (المشاكل الحقيقية) — مرشّحة بأمان. |
+| `pagespeed_network_requests.csv` | كل طلبات الشبكة (الحجم/الحالة/البروتوكول/الأولوية/الكيان). |
+| `pagespeed_js_treemap.csv` | حجم كل سكربت JS + نسبة الكود غير المستخدَم (محسوبة). |
+| `crux_history.csv` | اتجاه Core Web Vitals (p75) عبر الزمن من CrUX History — عند تفعيله. |
 | `priority_opportunities.csv` | الصفحات مرتّبة بالأثر × الخطورة، مع أهم إصلاح لكل صفحة. |
 | `ai_recommendations.csv` | توصيات مستشار الذكاء الاصطناعي — العنوان، السبب، الإجراء، الأولوية. |
 | `lighthouse_import.csv` | درجات الأداء/الوصولية/أفضل الممارسات/SEO المستوردة (0–100). |
@@ -226,14 +242,25 @@ python main.py --url https://example.com --mode audit
 
 | التكامل | ما يضيفه | ما تُقدّمه |
 |---------|----------|-----------|
-| **Google Search Console** | نقرات/ظهور/CTR/ترتيب لكل صفحة واستعلام | ملف اعتماد OAuth + رابط موقع موثّق |
+| **Google Search Console** | نقرات/ظهور/CTR/ترتيب لكل صفحة واستعلام + تحليلات تكلّس الكلمات وفُرَص الروابط الداخلية | ملف اعتماد OAuth + رابط موقع موثّق |
+| **GSC — URL Inspection** (اختياري) | حالة الفهرسة الحقيقية لكل رابط (`gsc.url_inspection`) — يحترم الحصّة عبر `inspect_max_urls` | نفس اعتماد GSC |
 | **Google Analytics 4** | جلسات/مستخدمون/تفاعل لصفحات الهبوط + القنوات | JSON لحساب خدمة + property ID (يحتاج `google-analytics-data`) |
-| **PageSpeed API** | درجات أداء/SEO عبر Google PageSpeed | مفتاح API (أو `PAGESPEED_API_KEY` في `.env`) |
+| **PageSpeed API** | درجات أداء/SEO + **جداول Lighthouse العميقة** (تدقيقات/طلبات شبكة/خريطة JS/فاشلة) | مفتاح API (أو `PAGESPEED_API_KEY` في `.env`) |
+| **CrUX History** (اختياري) | اتجاه Core Web Vitals عبر الزمن (`pagespeed.crux_history`) | نفس مفتاح PageSpeed |
 | **استيراد Lighthouse** | يقرأ ملفات Lighthouse JSON محلياً (بلا مفاتيح/إنترنت) | مجلد ملفات Lighthouse `.json` |
-| **Ahrefs Webmaster (AWT)** | استيراد تصديرات AWT بصيغة CSV | مجلد ملفات CSV |
+| **Ahrefs Webmaster (AWT)** | استيراد تصديرات AWT بصيغة CSV (باك‑لينك/كلمات مجاناً لمالك الموقع) | مجلد ملفات CSV |
 
 عند تفعيل GSC/GA4 يربط **التقرير الموحّد** المشاكل التقنية بحركة المرور لإنتاج **أولويات
-الإصلاح** (`درجة الأولوية = أثر الزيارات × شدّة المشكلة`).
+الإصلاح** (`درجة الأولوية = أثر الزيارات × شدّة المشكلة`). كما تحمل كل مشكلة في التقرير حقول
+**الأثر/الجهد/«لماذا تهم»/«كيف تُصلَح»/درجة الأولوية** لجعلها قابلة للتنفيذ.
+
+### خيارات تشغيل إضافية (في `config.yaml`)
+- **`site.platform_preset`** (`zid` | `salla` | `shopify` | `woocommerce`): يضيف أنماط استبعاد
+  موصى بها (السلّة/الدفع/الحساب) دون مسح ما تضعه أنت.
+- **`crawl.adaptive_throttle.enabled`**: تحكّم تكيّفي بالسرعة — يبطئ تلقائياً عند 429/5xx/البطء
+  ويتعافى (احترام الخادم وتفادي الحظر).
+- **`output.generate_sitemap`**: توليد `sitemap.xml` نظيف من الصفحات القابلة للفهرسة.
+- **`pagespeed.save_raw_json`**: حفظ تقرير Lighthouse الخام الكامل لكل صفحة (مصدر الجداول العميقة).
 
 ### استخدام ملف `.env` للأسرار (مُوصى به)
 

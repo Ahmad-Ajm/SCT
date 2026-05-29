@@ -32,6 +32,15 @@ Arabic documentation is available in [README_ar.md](README_ar.md).
 - Optional Lighthouse/PageSpeed JSON import (no keys).
 - Optional GSC + GA4 connectors with a unified report (Technical + Search + Behavior) and a
   cross-referenced "Priority Opportunities" section.
+- Internal link score (PageRank), near-duplicate detection (SimHash + LSH), and orphan finder.
+- Optional PageSpeed connector with **deep Lighthouse tables** (all audits / network requests /
+  JS treemap / failed audits), plus optional **GSC URL Inspection** and **CrUX History**.
+- GSC-derived insights: keyword cannibalization and internal-link opportunities.
+- Crawl-over-time comparison (fixed / new / persisting issues) and actionable issue hints
+  (impact / effort / why / how / priority score).
+- Sitemap generator, adaptive crawl throttle, and e-commerce platform presets
+  (Zid / Salla / Shopify / WooCommerce).
+- Auto-install of optional requirements (allowlisted; disable with `SCT_NO_AUTO_INSTALL=1`).
 - Results explorer (filter/sort/search) and full settings editable from the UI.
 - CSV, JSON, optional Excel, and HTML/PDF report exports.
 - Integrated local Web UI (FastAPI + HTMX + SSE) with live crawl monitoring.
