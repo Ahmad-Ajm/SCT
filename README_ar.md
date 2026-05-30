@@ -72,6 +72,15 @@ docker compose up --build       # ثم افتح http://127.0.0.1:8000
 في `./webapp_jobs`. الأسرار تُقرأ وقت التشغيل من `.env` (لا تُخبز في الصورة)، ويمكن وصل
 اعتماد Google تحت `./credentials`.
 
+### مُثبِّت Windows (بلا Docker، بلا صلاحيات admin)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\install.ps1
+```
+
+يُنشئ venv معزولاً، يُثبّت كل المتطلبات + Chromium لـ Playwright، ويُضيف اختصارات
+سطح المكتب وقائمة ابدأ تُشغّل الواجهة المرئية. التفاصيل في `installer/README.md`.
+
 الواجهة تتيح تخصيص الإعدادات، إدخال الرابط، اختيار الوضع، تشغيل/إيقاف الزحف ومتابعته
 مباشرة (SSE)، وتنزيل تقارير HTML/PDF/Excel/JSON. مخرجات كل مهمة تُحفظ تحت
 `webapp_jobs/<job_id>/`.

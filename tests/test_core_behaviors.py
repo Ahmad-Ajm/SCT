@@ -1009,6 +1009,40 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(cfg["integrations"]["gsc"]["inspect_max_urls"], 30)
         self.assertTrue(cfg["integrations"]["pagespeed"]["crux_history"])
 
+    def test_log_analyzer_parses_clf_and_finds_orphans(self):
+        # IMP-13: تحليل لوغ Apache/Nginx — استخراج زحف Googlebot وحالاته
+        from analyzers.log_analyzer import (
+            parse_log_line, analyze_log, detect_bot, find_orphan_bot_urls)
+        gb = ('66.249.66.1 - - [29/May/2026:10:00:00 +0000] "GET /a HTTP/1.1" '
+              '200 1234 "-" "Mozilla/5.0 (compatible; Googlebot/2.1; +http://google.com/bot.html)"')
+        usr = ('1.2.3.4 - - [29/May/2026:10:01:00 +0000] "GET /b HTTP/1.1" '
+               '200 500 "-" "Mozilla/5.0 (Windows NT 10.0)"')
+        gb_404 = ('66.249.66.2 - - [29/May/2026:10:02:00 +0000] "GET /missing HTTP/1.1" '
+                  '404 0 "-" "Googlebot/2.1"')
+        r = parse_log_line(gb)
+        self.assertIsNotNone(r)
+        self.assertTrue(r["is_bot"])
+        self.assertEqual(r["bot"], "Googlebot")
+        self.assertEqual(r["status"], 200)
+        self.assertEqual(r["path"], "/a")
+        self.assertEqual(detect_bot("Mozilla/5.0 (compatible; Bingbot/2.0)"), "Bingbot")
+        self.assertEqual(detect_bot("plain browser"), "")
+        # تحليل تدفّق
+        res = analyze_log([gb, usr, gb_404, gb], bot_only=True)
+        # المستخدم العادي مُستبعَد، Googlebot يظهر مرّتين على /a و404 على /missing
+        paths = {r["path"]: r for r in res["per_url"]}
+        self.assertEqual(paths["/a"]["hits"], 2)
+        self.assertEqual(paths["/missing"]["status_404"], 1)
+        self.assertEqual(res["summary"]["bot_lines"], 3)
+        self.assertEqual(res["summary"]["total_404"], 1)
+        self.assertGreaterEqual(res["summary"]["top_bots"][0]["hits"], 3)
+        # يتامى مزحوفون: زحفها البوت لكن الزاحف لم يرَها
+        crawl = ["https://x.com/a"]  # فقط /a معروف
+        orph = find_orphan_bot_urls(res["per_url"], crawl)
+        orph_paths = {r["path"] for r in orph}
+        self.assertIn("/missing", orph_paths)
+        self.assertNotIn("/a", orph_paths)
+
     def test_url_detail_joins_all_sources(self):
         # درج URL: يدمج الزحف + GSC + GA4 + PageSpeed + الأولوية + الوصولية لرابط واحد
         from reporting.url_detail import build_url_detail

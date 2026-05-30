@@ -24,7 +24,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -1007,6 +1007,104 @@ async def board_page(request: Request, job_id: str):
     return templates.TemplateResponse(
         "board.html", {"request": request, "job_id": job_id}
     )
+
+
+@app.get("/logs", response_class=HTMLResponse)
+async def logs_page(request: Request):
+    """صفحة تحليل ملفات سجلّ الخادم (Apache/Nginx) لاستخراج زحف Googlebot."""
+    return templates.TemplateResponse("logs.html", {"request": request})
+
+
+# سقف رفع ملف اللوغ (يُقرأ كاملاً للذاكرة بعد الـupload — الـstreaming بداخل التحليل)
+_MAX_LOG_UPLOAD_MB = 500
+
+
+@app.post("/api/logs/analyze")
+async def logs_analyze(file: UploadFile = File(...), bot_only: int = 1):
+    """يستقبل ملف log (CLF/Combined) ويُرجع ملخّص زحف البوتات + قائمة per-URL."""
+    # نقرأ كاملاً (FastAPI/Starlette لا يدعم streaming قراءة سهلاً من UploadFile)؛
+    # نطبّق سقف الحجم حتى لا تستنزف الذاكرة على ملفات هائلة.
+    raw = await file.read()
+    if len(raw) > _MAX_LOG_UPLOAD_MB * 1024 * 1024:
+        return JSONResponse(
+            {"error": f"الملف أكبر من الحدّ ({_MAX_LOG_UPLOAD_MB}MB) — قسّمه أو رفع الحدّ."},
+            status_code=413,
+        )
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "تعذّر فكّ ترميز الملف"}, status_code=400)
+    try:
+        from analyzers.log_analyzer import analyze_log
+        res = analyze_log(text.splitlines(), bot_only=bool(bot_only))
+        return JSONResponse(res)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)[:300]}, status_code=500)
+
+
+@app.get("/api/jobs/list")
+async def jobs_list_with_audit():
+    """قائمة المهام السابقة التي لديها audit JSON — لاختيار «المقارنة مع»."""
+    out = []
+    for m in runner.list_jobs() or []:
+        if not isinstance(m, dict):
+            continue
+        jid = m.get("job_id") or ""
+        json_path = ((m.get("result") or {}) or {}).get("json") or ""
+        if not jid or not json_path or not Path(json_path).exists():
+            continue
+        out.append({
+            "job_id": jid,
+            "url": m.get("url", ""),
+            "mode": m.get("mode", ""),
+            "started_at": m.get("started_at", ""),
+            "status": m.get("status", ""),
+        })
+    return JSONResponse({"jobs": out, "count": len(out)})
+
+
+@app.get("/jobs/{job_id}/compare", response_class=HTMLResponse)
+async def compare_page(request: Request, job_id: str):
+    """صفحة مقارنة زمنية: تختار مهمّة أخرى وتعرض المُصلَح/الجديد/الباقي."""
+    return templates.TemplateResponse(
+        "compare.html", {"request": request, "job_id": job_id}
+    )
+
+
+@app.get("/api/jobs/{job_id}/compare")
+async def jobs_compare(
+    job_id: str,
+    with_: str = Query("", alias="with"),
+):
+    """مقارنة زمنية بين زحفتين لنفس الموقع (compare_crawls)."""
+    other = (with_ or "").strip()
+    if not other:
+        return JSONResponse({"error": "missing 'with' job id"}, status_code=400)
+    meta_a = runner.meta(job_id)
+    meta_b = runner.meta(other)
+    if not meta_a or not meta_b:
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    path_a = (meta_a.get("result") or {}).get("json")
+    path_b = (meta_b.get("result") or {}).get("json")
+    if not path_a or not Path(path_a).exists() or not path_b or not Path(path_b).exists():
+        return JSONResponse({"error": "audit json missing for one of the jobs"},
+                            status_code=404)
+    # حارس الحجم: لا نحمّل ملفات ضخمة
+    for p in (path_a, path_b):
+        size_mb = Path(p).stat().st_size / (1024 * 1024)
+        if size_mb > MAX_AUDIT_JSON_MB:
+            return JSONResponse({
+                "error": f"audit JSON too large ({size_mb:.0f} MB) — set "
+                         f"output.json_full=false to keep it light",
+            }, status_code=413)
+    try:
+        from analyzers.crawl_compare import compare_audit_files
+        res = compare_audit_files(path_a, path_b)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)[:300]}, status_code=500)
+    res["old"] = {"job_id": job_id, "url": meta_a.get("url", "")}
+    res["new"] = {"job_id": other, "url": meta_b.get("url", "")}
+    return JSONResponse(res)
 
 
 @app.get("/api/jobs/{job_id}/url-detail")

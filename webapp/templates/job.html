@@ -180,6 +180,11 @@ function renderDownloads(result) {
     bd.href = '/jobs/' + jobId + '/board';
     bd.textContent = (window.sctT ? window.sctT('board_link') : '🗂️ لوحة العمل');
     box.appendChild(bd);
+    const cmp = document.createElement('a');
+    cmp.className = 'btn sm';
+    cmp.href = '/jobs/' + jobId + '/compare';
+    cmp.textContent = (window.sctT ? window.sctT('cmp_link') : '🆚 مقارنة قبل/بعد');
+    box.appendChild(cmp);
   }
   // تنزيل كل الملفات كـ ZIP واحد
   const all = document.createElement('a');

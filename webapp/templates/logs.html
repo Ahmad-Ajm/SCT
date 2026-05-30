@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Log Analyzer — SCT</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/i18n.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="logs_title">📜 تحليل سجلّات الخادم (Googlebot)</h1>
+  <span>
+    <button id="langToggle" class="btn sm" type="button">English</button>
+    <a href="/" class="btn sm" data-i18n="back_home">⟵ الرئيسية</a>
+  </span>
+</header>
+
+<main class="container">
+  <section class="panel">
+    <h2 data-i18n="logs_upload_h">ارفع ملف سجلّ (Apache/Nginx — Combined Log Format)</h2>
+    <p class="muted sm" data-i18n="logs_upload_p">يكشف ميزانية زحف Googlebot لكل رابط وحالاتها (200/3xx/404/5xx)، وأبرز البوتات. الحدّ الأقصى للحجم 500MB. لا يُرفع شيء إلى الخارج — التحليل محلي.</p>
+    <div class="grid">
+      <label class="full"><span data-i18n="logs_file">ملف اللوغ</span>
+        <input type="file" id="logFile" accept=".log,.txt,.gz">
+      </label>
+      <label class="chk"><input type="checkbox" id="botOnly" checked> <span data-i18n="logs_bot_only">حصر التحليل في طلبات البوتات فقط (مُوصى به للـSEO)</span></label>
+    </div>
+    <div class="actions">
+      <button id="analyzeBtn" type="button" class="btn primary" data-i18n="logs_run">📜 حلّل</button>
+      <a id="csvBtn" class="btn sm" download="log_analysis.csv" style="display:none" data-i18n="logs_csv">⬇️ تنزيل CSV</a>
+      <span id="msg" class="muted sm"></span>
+    </div>
+  </section>
+
+  <section class="panel" id="resultPanel" style="display:none">
+    <h2 data-i18n="logs_summary">الملخّص</h2>
+    <p id="chips" class="muted sm"></p>
+    <h3 data-i18n="logs_top_urls">أكثر الروابط زحفاً</h3>
+    <div style="overflow:auto; max-height:60vh">
+      <table class="tbl"><thead><tr>
+        <th data-i18n="logs_path">المسار</th>
+        <th data-i18n="logs_hits">زيارات</th>
+        <th data-i18n="logs_last">آخر زيارة</th>
+        <th data-i18n="logs_bot">البوت الأعلى</th>
+        <th>200</th><th>3xx</th><th>404</th><th data-i18n="logs_4xx_other">4xx آخر</th><th>5xx</th>
+      </tr></thead><tbody id="tbBody"></tbody></table>
+    </div>
+  </section>
+</main>
+
+<script>
+const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
+let lastRows = [];
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function analyze() {
+  const f = document.getElementById('logFile').files[0];
+  const msg = document.getElementById('msg');
+  if (!f) { msg.textContent = T('logs_pick', 'اختر ملف اللوغ أولاً.'); return; }
+  msg.textContent = '… ' + T('logs_running', 'يُحلّل');
+  const fd = new FormData(); fd.set('file', f);
+  fd.set('bot_only', document.getElementById('botOnly').checked ? 1 : 0);
+  try {
+    const r = await fetch('/api/logs/analyze', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok || j.error) { msg.textContent = '✗ ' + (j.error || 'error'); return; }
+    msg.textContent = '';
+    document.getElementById('resultPanel').style.display = '';
+    const s = j.summary || {};
+    const chip = (k, v) => '<span class="speed-tag">' + esc(T(k, k)) + ': ' + esc(v) + '</span>';
+    const topBots = (s.top_bots || []).slice(0, 5).map((b) => b.bot + '(' + b.hits + ')').join(', ');
+    document.getElementById('chips').innerHTML = [
+      chip('logs_total', s.total_lines),
+      chip('logs_parsed', s.parsed_lines),
+      chip('logs_bot_lines', s.bot_lines),
+      chip('logs_unique', s.unique_urls),
+      chip('logs_404', s.total_404),
+      chip('logs_5xx', s.total_5xx),
+    ].join(' · ') + (topBots ? '<br><small>' + T('logs_top_bots', 'أعلى البوتات') + ': ' + esc(topBots) + '</small>' : '')
+    + (s.truncated ? '<br><small class="err">' + T('logs_truncated', 'تم قطع المعالجة عند سقف الأسطر.') + '</small>' : '');
+    lastRows = j.per_url || [];
+    const tb = document.getElementById('tbBody'); tb.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    lastRows.slice(0, 1000).forEach((r) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td style="word-break:break-all">' + esc(r.path) + '</td>' +
+        '<td class="ctr"><b>' + esc(r.hits) + '</b></td>' +
+        '<td class="muted sm">' + esc(r.last_seen) + '</td>' +
+        '<td class="muted sm">' + esc(r.top_bot) + '</td>' +
+        '<td class="ctr">' + esc(r.status_200) + '</td>' +
+        '<td class="ctr">' + esc(r.status_3xx) + '</td>' +
+        '<td class="ctr">' + esc(r.status_404) + '</td>' +
+        '<td class="ctr">' + esc(r.status_4xx_other) + '</td>' +
+        '<td class="ctr">' + esc(r.status_5xx) + '</td>';
+      frag.appendChild(tr);
+    });
+    tb.appendChild(frag);
+    buildCsv(lastRows);
+  } catch (e) { msg.textContent = '✗ ' + e; }
+}
+
+function buildCsv(rows) {
+  const cols = ['path','hits','last_seen','top_bot','status_200','status_3xx','status_404','status_4xx_other','status_5xx'];
+  const lines = [cols.join(',')];
+  for (const r of rows) lines.push(cols.map((c) => '"' + String(r[c] == null ? '' : r[c]).replace(/"/g, '""') + '"').join(','));
+  const blob = new Blob(['﻿' + lines.join('\n')], {type: 'text/csv'});
+  const a = document.getElementById('csvBtn'); a.href = URL.createObjectURL(blob); a.style.display = '';
+}
+
+document.getElementById('analyzeBtn').addEventListener('click', analyze);
+</script>
+</body>
+</html>

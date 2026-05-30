@@ -84,6 +84,15 @@ Built on the official Playwright image, so JavaScript rendering and PDF reports 
 the box. Outputs persist in `./webapp_jobs`. Secrets are read at runtime from `.env` (never
 baked into the image); optional Google credentials can be mounted under `./credentials`.
 
+### Windows installer (no Docker, no admin)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\install.ps1
+```
+
+Sets up an isolated `.venv`, installs all requirements + Chromium for Playwright, and adds
+Desktop + Start Menu shortcuts that launch the local web UI. See `installer/README.md`.
+
 The UI lets you configure settings, set the target URL, choose a mode, start/stop
 crawls with live progress (SSE), and download HTML/PDF/Excel/JSON reports. Each job's
 artifacts are stored under `webapp_jobs/<job_id>/`.

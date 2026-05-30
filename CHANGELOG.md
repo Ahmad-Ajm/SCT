@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **Crawl comparison surfaced in the UI** (`/jobs/<id>/compare`): pick another previous run
+  from a dropdown and see fixed / new / persisting issue types, totals delta, "improved"
+  flag, and page-set changes — all backed by the existing `analyzers/crawl_compare`. New
+  endpoints `/api/jobs/list` (jobs that have an audit JSON) and
+  `/api/jobs/<id>/compare?with=<other>`. Linked from the job page next to Action Board.
+- **Server log analyzer** (`/logs`): upload an Apache/Nginx Combined Log Format file and get
+  per-URL Googlebot crawl-budget (200/3xx/404/5xx breakdown), top bots, and a downloadable
+  CSV — all processed locally, capped at 500 MB upload. New pure module
+  `analyzers/log_analyzer` (`parse_log_line`, `analyze_log`, `detect_bot`,
+  `find_orphan_bot_urls`) and endpoint `POST /api/logs/analyze`.
+- **Windows installer scripts** (`installer/`): `install.ps1` (no admin needed; creates a
+  local venv, installs requirements, installs Chromium for Playwright, and adds Desktop +
+  Start Menu shortcuts), `run.bat` (double-click launcher that opens
+  <http://127.0.0.1:8000>), `uninstall.ps1`, and a README. Concrete non-Docker path for
+  Windows users.
 - **URL drill-down detail panel** in the Action Board (`/jobs/<id>/board`): clicking a row
   slides out a panel with all of SCT's data joined for that one URL — crawl page data, GSC
   (clicks/impressions/CTR/position), URL Inspection (verdict/coverage), GA4 (sessions/users/

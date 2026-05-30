@@ -7,11 +7,10 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 
 | Priority | Feature | Importance | Notes |
 | --- | --- | --- | --- |
-| P2 | Crawl comparison surfaced in the UI/report | Medium | `analyzers/crawl_compare.py` (fixed/new/persisting) is ready and tested; add a UI action to pick two runs and a report section. |
-| P3 | Log file analysis | Medium | Parse server logs for Googlebot crawl budget and bot-crawled orphans (Botify/OnCrawl style). Large, needs log access. |
 | P3 | Crawl visualizations | Low | Force-directed crawl map / directory tree. Needs a rendering lib (matplotlib not installed here); consider exporting a JSON graph the UI renders instead. |
-| P3 | Windows installer | Low | Docker packaging now ships (`docker compose up`); a native one-click installer (PyInstaller/Inno Setup) for non-Docker Windows users is still open. |
+| P3 | Single-file Windows `.exe` (PyInstaller) | Low | The PowerShell installer (`installer/`) is the supported non-Docker Windows path. A true bundled `.exe` is the next step — needs a Windows build host. |
 | P3 | Live third-party backlink APIs | Low | Backlink data via CSV is already supported through the AWT importer (`integrations/awt_importer.py`). A live Ahrefs/Majestic/Moz API integration (paid keys, off by default) is the remaining step. |
+| P3 | Log analysis report section | Low | The log analyzer (`analyzers/log_analyzer`, `/logs`) is shipped; a report section that joins log-derived crawl budget with the Action Board is the natural next step. |
 
 ## Recently shipped (highlights)
 
@@ -33,6 +32,9 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
   for headless machines, full disconnect, in-UI 3-step setup guide. URL drill-down detail
   panel in the Action Board joining crawl + GSC + GA4 + PageSpeed + priority + accessibility
   per URL (`/api/jobs/<id>/url-detail`, `reporting/url_detail`).
+- Crawl-over-time comparison surfaced in the UI (`/jobs/<id>/compare` + `/api/jobs/list` +
+  `/api/jobs/<id>/compare`). Server log analyzer (`/logs`, `analyzers/log_analyzer`).
+  Windows installer scripts (`installer/install.ps1` + `run.bat` + `uninstall.ps1`).
 - Custom extraction (CSS/XPath/regex) and rendered-vs-raw JS diff (already implemented).
 - Internal link score (PageRank); near-duplicate (SimHash+LSH); orphan finder; JavaScript
   rendering wired into the async crawler with a page cap.
@@ -40,6 +42,6 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 
 ## Current top targets
 
-1. Crawl comparison surfaced in the UI/report.
-2. Log file analysis (crawl budget / bot-crawled orphans).
-3. Windows installer (PyInstaller/Inno Setup) for non-Docker users.
+1. Single-file Windows `.exe` (PyInstaller) — packages everything in one click.
+2. Log analysis report section — join log-derived crawl budget with the Action Board.
+3. Crawl visualizations (graph/tree of the link map).

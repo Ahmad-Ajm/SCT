@@ -160,7 +160,11 @@ individually, grab **everything as one ZIP** ("Download all"), or tick a subset 
 and download the filtered set as CSV. The **Action Board** (`/jobs/<id>/board`) shows fix
 priorities grouped (Do now / Needs developer / …), filterable by group/page-type/priority.
 **Click any row** to open a slide-out detail panel joining the URL's crawl data + GSC +
-URL Inspection + GA4 + PageSpeed + priority + accessibility in one view.
+URL Inspection + GA4 + PageSpeed + priority + accessibility in one view. Two more links
+on the job page: **🆚 Compare before/after** (`/jobs/<id>/compare`) — pick another run and
+see fixed / new / persisting issues, and **📜 Log analyzer** (`/logs`) — upload an
+Apache/Nginx log to see Googlebot crawl budget per URL (200/3xx/404/5xx). Everything is
+processed locally, nothing is uploaded externally.
 
 ### What each file contains
 

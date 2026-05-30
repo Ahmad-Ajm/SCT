@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crawl Compare — SCT</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/i18n.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="cmp_title">🆚 مقارنة زحفتين (قبل/بعد)</h1>
+  <span>
+    <button id="langToggle" class="btn sm" type="button">English</button>
+    <a href="/jobs/{{ job_id }}" class="btn sm" data-i18n="back_job">⟵ المهمة</a>
+  </span>
+</header>
+
+<main class="container">
+  <section class="panel">
+    <h2 data-i18n="cmp_pick_h">اختر المهمّة الأخرى</h2>
+    <p class="muted sm" data-i18n="cmp_pick_p">المهمة الحالية تُعتبر «القديمة»؛ التي تختارها هنا «الجديدة». التغيّرات تُحسب من القديمة إلى الجديدة.</p>
+    <div class="grid">
+      <label class="full"><span data-i18n="cmp_other">المهمّة الأخرى (الجديدة)</span>
+        <select id="otherJob">
+          <option value="" data-i18n="cmp_loading">… جارٍ التحميل</option>
+        </select>
+      </label>
+    </div>
+    <div class="actions">
+      <button id="runBtn" type="button" class="btn primary" data-i18n="cmp_run">🆚 قارِن</button>
+      <a id="csvBtn" class="btn sm" download="crawl_compare.csv" style="display:none" data-i18n="cmp_csv">⬇️ تنزيل CSV للمشاكل</a>
+      <span id="msg" class="muted sm"></span>
+    </div>
+  </section>
+
+  <section class="panel" id="resultPanel" style="display:none">
+    <h2 data-i18n="cmp_summary_h">الملخّص</h2>
+    <p id="chips" class="muted sm"></p>
+    <div class="grid">
+      <div class="card">
+        <h3 data-i18n="cmp_fixed">✅ مُصلَحة (في القديمة فقط)</h3>
+        <table class="tbl"><thead><tr>
+          <th data-i18n="cmp_issue_type">نوع المشكلة</th><th data-i18n="cmp_old_count">العدد سابقاً</th>
+        </tr></thead><tbody id="tbFixed"></tbody></table>
+      </div>
+      <div class="card">
+        <h3 data-i18n="cmp_new">🆕 جديدة (في الجديدة فقط)</h3>
+        <table class="tbl"><thead><tr>
+          <th data-i18n="cmp_issue_type">نوع المشكلة</th><th data-i18n="cmp_new_count">العدد حالياً</th>
+        </tr></thead><tbody id="tbNew"></tbody></table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:8px">
+      <h3 data-i18n="cmp_persist">⏳ باقية (في الاثنتين)</h3>
+      <table class="tbl"><thead><tr>
+        <th data-i18n="cmp_issue_type">نوع المشكلة</th>
+        <th data-i18n="cmp_old_count">سابقاً</th>
+        <th data-i18n="cmp_new_count">حالياً</th>
+        <th data-i18n="cmp_delta">التغيّر</th>
+      </tr></thead><tbody id="tbPersist"></tbody></table>
+    </div>
+    <div class="card" style="margin-top:8px">
+      <h3 data-i18n="cmp_pages">📄 الصفحات</h3>
+      <p id="pagesChips" class="muted sm"></p>
+    </div>
+  </section>
+</main>
+
+<script>
+const jobId = "{{ job_id }}";
+const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
+let lastResult = null;
+
+async function loadJobs() {
+  const sel = document.getElementById('otherJob');
+  try {
+    const r = await fetch('/api/jobs/list');
+    const j = await r.json();
+    const others = (j.jobs || []).filter((x) => x.job_id !== jobId);
+    sel.innerHTML = '<option value="">' + T('cmp_pick_default', '— اختر مهمّة —') + '</option>';
+    others.forEach((x) => {
+      const o = document.createElement('option'); o.value = x.job_id;
+      o.textContent = x.job_id + (x.url ? ' — ' + x.url : '') + (x.started_at ? ' [' + x.started_at.slice(0, 10) + ']' : '');
+      sel.appendChild(o);
+    });
+    if (!others.length) sel.innerHTML = '<option value="">' + T('cmp_none', 'لا توجد مهام أخرى ذات audit JSON.') + '</option>';
+  } catch (e) { document.getElementById('msg').textContent = '✗ ' + e; }
+}
+
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function renderResult(d) {
+  document.getElementById('resultPanel').style.display = '';
+  const s = d.summary || {};
+  const chip = (k, v, cls) => '<span class="speed-tag ' + (cls || '') + '">' + esc(T(k, k)) + ': ' + esc(v) + '</span>';
+  document.getElementById('chips').innerHTML = [
+    chip('cmp_fixed_count', s.fixed_count),
+    chip('cmp_new_count', s.new_count),
+    chip('cmp_persist_count', s.persisting_count),
+    chip('cmp_delta', (s.issues_delta > 0 ? '+' : '') + s.issues_delta),
+    chip('cmp_improved', s.improved ? T('yes', 'نعم') : T('no', 'لا')),
+  ].join(' · ');
+  document.getElementById('tbFixed').innerHTML =
+    (d.fixed_issue_types || []).map((r) => '<tr><td>' + esc(r.issue_type) + '</td><td class="ctr">' + esc(r.old_count) + '</td></tr>').join('') || '<tr><td colspan="2" class="muted">—</td></tr>';
+  document.getElementById('tbNew').innerHTML =
+    (d.new_issue_types || []).map((r) => '<tr><td>' + esc(r.issue_type) + '</td><td class="ctr">' + esc(r.new_count) + '</td></tr>').join('') || '<tr><td colspan="2" class="muted">—</td></tr>';
+  document.getElementById('tbPersist').innerHTML =
+    (d.persisting_issue_types || []).map((r) => {
+      const cls = r.delta < 0 ? 'ok' : (r.delta > 0 ? 'err' : '');
+      return '<tr><td>' + esc(r.issue_type) + '</td><td class="ctr">' + esc(r.old_count) + '</td><td class="ctr">' + esc(r.new_count) + '</td><td class="ctr ' + cls + '">' + (r.delta > 0 ? '+' : '') + esc(r.delta) + '</td></tr>';
+    }).join('') || '<tr><td colspan="4" class="muted">—</td></tr>';
+  document.getElementById('pagesChips').textContent =
+    T('cmp_pages_added', 'صفحات مضافة') + ': ' + (s.pages_added_count || 0)
+    + '  ·  ' + T('cmp_pages_removed', 'صفحات محذوفة') + ': ' + (s.pages_removed_count || 0)
+    + '  ·  ' + T('cmp_total_old', 'كلّي قديم') + ': ' + (s.old_pages || 0)
+    + '  ·  ' + T('cmp_total_new', 'كلّي جديد') + ': ' + (s.new_pages || 0);
+  buildCsv(d);
+}
+
+function buildCsv(d) {
+  const lines = [['kind', 'issue_type', 'old_count', 'new_count', 'delta'].join(',')];
+  (d.fixed_issue_types || []).forEach((r) => lines.push(['fixed', r.issue_type, r.old_count, '', ''].join(',')));
+  (d.new_issue_types || []).forEach((r) => lines.push(['new', r.issue_type, '', r.new_count, ''].join(',')));
+  (d.persisting_issue_types || []).forEach((r) => lines.push(['persisting', r.issue_type, r.old_count, r.new_count, r.delta].join(',')));
+  const blob = new Blob(['﻿' + lines.join('\n')], {type: 'text/csv'});
+  const a = document.getElementById('csvBtn'); a.href = URL.createObjectURL(blob); a.style.display = '';
+}
+
+document.getElementById('runBtn').addEventListener('click', async () => {
+  const other = document.getElementById('otherJob').value;
+  const msg = document.getElementById('msg');
+  if (!other) { msg.textContent = T('cmp_pick_first', 'اختر مهمّة أولاً.'); return; }
+  msg.textContent = '… ' + T('cmp_running', 'يُقارن');
+  try {
+    const r = await fetch('/api/jobs/' + jobId + '/compare?with=' + encodeURIComponent(other));
+    const j = await r.json();
+    if (!r.ok || j.error) { msg.textContent = '✗ ' + (j.error || 'error'); return; }
+    lastResult = j; msg.textContent = ''; renderResult(j);
+  } catch (e) { msg.textContent = '✗ ' + e; }
+});
+document.addEventListener('sct:langchange', () => { if (lastResult) renderResult(lastResult); });
+loadJobs();
+</script>
+</body>
+</html>
