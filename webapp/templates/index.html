@@ -13,21 +13,61 @@
   .tab.active{background:#1F4E79;color:#fff;font-weight:700}
   .tabpane{display:none}
   .tabpane.active{display:block}
+  /* شريط الجاهزية (Phase B) */
+  .readiness{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0;align-items:center}
+  .r-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+    font-size:.85rem;border:1px solid #e5e7eb;background:#f8fafc;color:#475569}
+  .r-chip.ok{background:#dcfce7;border-color:#86efac;color:#166534}
+  .r-chip.off{background:#f1f5f9;border-color:#cbd5e1;color:#64748b}
+  .r-chip.err{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
+  /* حقل URL بارز في أول الفورم (Phase D) */
+  input[name="url"]{font-size:1.05rem;padding:10px 12px}
+  /* راديو اختيار وضع البدء (Phase C) */
+  .start-mode{display:inline-flex;gap:12px;margin:0 12px;align-items:center}
+  .start-mode label{display:inline-flex;gap:4px;align-items:center;cursor:pointer}
+  .start-summary{font-size:.9rem;color:#64748b;margin:6px 0}
+  /* بطاقة الترحيب لأوّل تشغيل (Phase E) */
+  .welcome{background:linear-gradient(135deg,#1F4E79,#3b82f6);color:#fff;padding:18px 22px;
+    border-radius:12px;margin:14px 0}
+  .welcome h2{color:#fff;margin:0 0 8px}
+  .welcome ol{margin:6px 0 0 18px;padding:0}
+  /* وسم الإصدار + المؤلّف */
+  .version-tag{font-size:.7rem;font-weight:400;opacity:.7;margin-inline-start:8px}
 </style>
 </head>
 <body>
 <header class="topbar">
-  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO</h1>
-  <button id="langToggle" class="btn sm" type="button">English</button>
+  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO <small class="version-tag">v1.00 · by Ahmad-Ajm</small></h1>
+  <span>
+    <a href="/logs" class="btn sm" data-i18n="logs_link">📜 تحليل اللوغ</a>
+    <button id="langToggle" class="btn sm" type="button">English</button>
+  </span>
 </header>
 
 <main class="container">
+  <!-- شريط الجاهزية (Phase B) — حالة الإعداد بنظرة واحدة -->
+  <div id="readinessBar" class="readiness" aria-label="Setup readiness">
+    <span class="r-chip off" id="rGoogle" title="Google">🔐 Google</span>
+    <span class="r-chip off" id="rChromium" title="Chromium">🌐 Chromium</span>
+    <span class="r-chip off" id="rReady" title="Ready">🚦 <span data-i18n="r_ready">جاهز</span></span>
+  </div>
+
+  {% if not jobs and not active_job %}
+  <!-- بطاقة ترحيب لأوّل تشغيل (Phase E) — تظهر فقط عندما لا توجد مهام سابقة -->
+  <div class="welcome">
+    <h2 data-i18n="welcome_h">👋 مرحباً في SCT</h2>
+    <ol>
+      <li data-i18n="welcome_1">أدخل رابط موقعك في تبويب «الزحف».</li>
+      <li data-i18n="welcome_2">(اختياري) اربط Google من تبويب «التكاملات والذكاء» لبيانات أعمق.</li>
+      <li data-i18n="welcome_3">اضغط «▶️ ابدأ» — وراقب التقدّم لحظةً بلحظة.</li>
+    </ol>
+  </div>
+  {% endif %}
+
   <nav class="tabs" id="tabbar">
     <button type="button" class="tab active" data-tab="crawl" data-i18n="tab_crawl">🕷️ الزحف</button>
-    <button type="button" class="tab" data-tab="integ" data-i18n="tab_integ">🔌 احضار التكامل</button>
-    <button type="button" class="tab" data-tab="ai" data-i18n="tab_ai">🤖 الذكاء</button>
-    <button type="button" class="tab" data-tab="report" data-i18n="tab_report">📄 إعدادات التقارير</button>
-    <button type="button" class="tab" data-tab="settings" data-i18n="tab_settings">⚙️ الإعدادات</button>
+    <button type="button" class="tab" data-tab="integ" data-i18n="tab_integ_ai">🔌 التكاملات والذكاء</button>
+    <button type="button" class="tab" data-tab="advanced" data-i18n="tab_advanced">⚙️ المتقدّم</button>
   </nav>
 
   <form id="crawlForm">
@@ -68,12 +108,17 @@
           <input type="range" id="speedSlider" min="1" max="5" step="1" value="3">
           <span class="muted sm" data-i18n="speed_hint">كلما زادت السرعة قلّ التأخير وزاد التزامن. هناك حدّ أدنى للتأخير لحماية الموقع.</span>
         </label>
-        <label><span data-i18n="delay">التأخير بين الطلبات (ث)</span>
-          <input type="number" step="0.1" name="delay_seconds" value="0.5" min="0.1">
-        </label>
-        <label><span data-i18n="concurrency">الطلبات المتزامنة</span>
-          <input type="number" name="concurrent_requests" value="5" min="1" max="20">
-        </label>
+        <details class="adv full">
+          <summary data-i18n="speed_advanced">ضبط دقيق للسرعة (يدوياً)</summary>
+          <div class="grid">
+            <label><span data-i18n="delay">التأخير بين الطلبات (ث)</span>
+              <input type="number" step="0.1" name="delay_seconds" value="0.5" min="0.1">
+            </label>
+            <label><span data-i18n="concurrency">الطلبات المتزامنة</span>
+              <input type="number" name="concurrent_requests" value="5" min="1" max="20">
+            </label>
+          </div>
+        </details>
       </div>
       <div class="checks">
         <label class="chk"><input type="checkbox" name="respect_robots" checked> <span data-i18n="respect_robots">احترام robots.txt</span></label>
@@ -104,26 +149,89 @@
     </section>
 
     <section class="panel">
-      <div class="sec-head">
-        <h2 data-i18n="sec2">ما الذي تريد جمعه؟</h2>
-        <label class="chk"><input type="checkbox" id="selectAllGroups" checked> <span data-i18n="select_all_groups">تحديد كل المجموعات</span></label>
-      </div>
-      <div class="groups">
-        {% for g in groups %}
-        <fieldset class="group" data-group="{{ g.id }}">
-          <legend>
-            <label class="chk strong"><input type="checkbox" class="group-all" checked> <span data-i18n="grpcat_{{ g.id }}">{{ g.label }}</span></label>
-          </legend>
-          {% for it in g['items'] %}
-          <label class="chk"><input type="checkbox" name="extraction" value="{{ it.key }}" class="item" checked> <span data-i18n="grp_{{ it.key }}">{{ it.label }}</span></label>
+      <details class="adv">
+        <summary>
+          <span data-i18n="sec2_summary">ما الذي تريد جمعه؟ (الافتراضي: الكل — اضغط للتخصيص)</span>
+        </summary>
+        <div class="sec-head" style="margin-top:8px">
+          <h3 data-i18n="sec2">ما الذي تريد جمعه؟</h3>
+          <label class="chk"><input type="checkbox" id="selectAllGroups" checked> <span data-i18n="select_all_groups">تحديد كل المجموعات</span></label>
+        </div>
+        <div class="groups">
+          {% for g in groups %}
+          <fieldset class="group" data-group="{{ g.id }}">
+            <legend>
+              <label class="chk strong"><input type="checkbox" class="group-all" checked> <span data-i18n="grpcat_{{ g.id }}">{{ g.label }}</span></label>
+            </legend>
+            {% for it in g['items'] %}
+            <label class="chk"><input type="checkbox" name="extraction" value="{{ it.key }}" class="item" checked> <span data-i18n="grp_{{ it.key }}">{{ it.label }}</span></label>
+            {% endfor %}
+          </fieldset>
           {% endfor %}
-        </fieldset>
-        {% endfor %}
-      </div>
+        </div>
+      </details>
     </section>
 
+    <!-- ===== المخرجات والتقرير (Phase A: دمج تبويب «التقارير» السابق هنا كقسم) ===== -->
+    <section class="panel">
+      <h2 data-i18n="sec3">نوع الملفات الناتجة</h2>
+      <div class="checks">
+        {% for f in formats %}
+        <label class="chk"><input type="checkbox" name="formats" value="{{ f.key }}" {% if f.default %}checked{% endif %} {% if f.key == 'pdf' %}id="fmtPdf"{% endif %}> {{ f.label }}</label>
+        {% endfor %}
+      </div>
+      <details class="adv" id="pdfOptionsDetails" style="margin-top:8px">
+        <summary data-i18n="report_customize">📄 تخصيص تقرير HTML/PDF (اللغة، الجمهور، الأقسام)</summary>
+        <div id="pdfOptions" class="subpanel">
+          <div class="grid">
+            <label><span data-i18n="report_lang">لغة التقرير</span>
+              <select name="language" data-i18n-followlang>
+                <option value="ar" data-i18n="lang_ar">العربية</option>
+                <option value="en" data-i18n="lang_en">English</option>
+              </select>
+            </label>
+            <label><span data-i18n="report_type">نوع التقرير</span>
+              <select name="audience">
+                <option value="expert" data-i18n="aud_expert">خبير SEO (تفصيلي)</option>
+                <option value="client" data-i18n="aud_client">عميل (مختصر ومبسّط)</option>
+                <option value="both" data-i18n="aud_both">كلاهما (تقريران)</option>
+              </select>
+            </label>
+            <label><span data-i18n="client_name">اسم العميل</span>
+              <input type="text" name="client_name" data-i18n-ph="optional" placeholder="اختياري">
+            </label>
+            <label class="full"><span data-i18n="logo_url">رابط الشعار (اختياري)</span>
+              <input type="url" name="logo_url" placeholder="https://.../logo.png">
+            </label>
+            <label><span data-i18n="max_rows">حد صفوف الجداول</span>
+              <input type="number" name="max_rows" value="100" min="10">
+            </label>
+          </div>
+          <p class="muted sm" data-i18n="sections_label">الأقسام المضمّنة:</p>
+          <div class="checks">
+            {% for s in sections %}
+            <label class="chk"><input type="checkbox" name="sections" value="{{ s.key }}" checked> <span data-i18n="sec_{{ s.key }}">{{ s.label }}</span></label>
+            {% endfor %}
+          </div>
+          <p class="muted sm" data-i18n="severity_label">مستويات الخطورة المضمّنة:</p>
+          <div class="checks">
+            {% for sev in severities %}
+            <label class="chk"><input type="checkbox" name="severity_filter" value="{{ sev }}" checked> {{ sev }}</label>
+            {% endfor %}
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- ===== شريط البدء الموحّد (Phase C) ===== -->
     <div class="submit-bar">
-      <button type="submit" class="btn primary" data-i18n="start_btn">▶️ ابدأ الزحف</button>
+      <p class="start-summary muted sm" id="startSummary"></p>
+      <span class="start-mode">
+        <label><input type="radio" name="start_mode" value="full" checked> <span data-i18n="start_full">زحف كامل</span></label>
+        <label><input type="radio" name="start_mode" value="integrations"> <span data-i18n="start_integ_only">تكاملات فقط (بلا زحف)</span></label>
+      </span>
+      <button type="submit" class="btn primary" data-i18n="start_btn">▶️ ابدأ</button>
+      <button type="button" id="resetDefaultsBtn" class="btn sm" data-i18n="reset_defaults">↺ إعادة الافتراضي</button>
       <span id="formMsg" class="muted"></span>
     </div>
     </div>
@@ -131,12 +239,65 @@
     <!-- ============ تبويب 2: احضار التكامل ============ -->
     <div class="tabpane" data-pane="integ">
     <section class="panel">
-      <h2 data-i18n="integ_h">احضار معلومات التكامل (بلا زحف)</h2>
-      <ol class="steps">
-        <li><span data-i18n="step1">1) اضبط الربط/المفاتيح في «الإعدادات»</span></li>
-        <li><span data-i18n="step2">2) فعّل المصادر واختبر الاتصال</span></li>
-        <li><span data-i18n="step3">3) اضغط «احضر»</span></li>
-      </ol>
+      <h2 data-i18n="integ_ai_h">🔌 التكاملات والذكاء (مصادر البيانات والأذونات)</h2>
+      <p class="muted sm" data-i18n="integ_ai_p">اربط Google مرّة واحدة، فعّل ما تحتاج من مصادر، وضع مفاتيح الذكاء — كل شيء في مكان واحد. التشغيل من زرّ «ابدأ» في تبويب «الزحف» (مع اختيار «تكاملات فقط» لجلبها دون زحف).</p>
+
+      <!-- ربط Google (مُنقَل من «الإعدادات» السابقة) -->
+      <div class="subpanel">
+        <h3 data-i18n="g_connect_h">🔐 ربط Google (GA4 + GSC) بنقرة من المتصفّح</h3>
+        <p class="muted sm" data-i18n="g_connect_p">ارفع ملف OAuth client secret (Desktop app) من Google Cloud، ثم اضغط «وافق» — يفتح المتصفّح للموافقة بحسابك مرّة واحدة وتُحفظ الـtokens محلياً. بعدها تُستعمل تلقائياً.</p>
+        <div class="grid">
+          <label class="full"><span data-i18n="g_client_file">ملف client_secret.json</span>
+            <input type="file" id="gClientFile" accept=".json">
+          </label>
+        </div>
+        <div class="actions" style="margin-top:6px">
+          <button type="button" id="gUploadBtn" class="btn sm" data-i18n="g_upload">📤 رفع الملف</button>
+          <button type="button" id="gAuthBtn" class="btn sm primary" data-i18n="g_auth">🔐 وافق بحسابي (يفتح المتصفّح)</button>
+          <button type="button" id="gStatusBtn" class="btn sm" data-i18n="g_status_btn">🔄 تحقّق</button>
+          <button type="button" id="gDisconnectBtn" class="btn sm" data-i18n="g_disconnect">🚪 قطع الربط</button>
+        </div>
+        <p id="gStatus" class="muted sm" style="margin-top:6px"></p>
+        <details class="adv" style="margin-top:8px">
+          <summary data-i18n="g_paste_h">🔗 تعذّر فتح المتصفح؟ استخدم «لصق الرمز» (للأجهزة البعيدة/بدون متصفّح)</summary>
+          <p class="muted sm" data-i18n="g_paste_p">يعطيك رابطاً تفتحه في أي متصفّح، توافق، فتُعاد إلى صفحة فاشلة عنوانها يحوي ?code=… انسخ الرابط أو الرمز والصقه هنا.</p>
+          <div class="actions">
+            <button type="button" id="gPasteUrlBtn" class="btn sm" data-i18n="g_paste_get">🔗 احصل على رابط الموافقة</button>
+            <a id="gPasteLink" class="btn sm" target="_blank" rel="noopener" style="display:none">↗ افتح الرابط</a>
+          </div>
+          <label class="full" style="margin-top:6px"><span data-i18n="g_paste_code">ألصق الرمز أو رابط callback</span>
+            <input type="text" id="gPasteCode" placeholder="4/0A… أو http://127.0.0.1:1/?code=…">
+          </label>
+          <div class="actions">
+            <button type="button" id="gPasteSubmitBtn" class="btn sm primary" data-i18n="g_paste_submit">🔓 إكمال التفويض</button>
+          </div>
+          <p id="gPasteMsg" class="muted sm"></p>
+        </details>
+        <details class="adv" style="margin-top:8px">
+          <summary data-i18n="g_setup_h">📘 إعداد OAuth client لأوّل مرّة (دليل من 3 خطوات)</summary>
+          <ol class="steps">
+            <li><span data-i18n="g_setup_1">في </span>
+                <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>
+                <span data-i18n="g_setup_1b"> أنشئ مشروعاً (أو استخدم مشروعك)، ثم فعّل APIs: «Search Console API» و«Google Analytics Admin API» و«Google Analytics Data API».</span></li>
+            <li><span data-i18n="g_setup_2">من «OAuth consent screen» اختر نوع External، أضِف نفسك (وزملاءك) كـ Test users، واحفظ. (وضع Testing كافٍ — بلا حاجة لتحقّق Google.)</span></li>
+            <li><span data-i18n="g_setup_3">من «Credentials» أنشئ «OAuth client ID» نوع «Desktop app»، نزّل ملف JSON، وارفعه هنا أعلاه. ثم اضغط «وافق بحسابي».</span></li>
+          </ol>
+          <p class="muted sm" data-i18n="g_setup_note">ملاحظة: في وضع Testing تنتهي refresh tokens كل 7 أيام (موافقة أسبوعية). للإنتاج بلا تحذير تحتاج OAuth verification (الـ scopes حسّاسة).</p>
+        </details>
+      </div>
+
+      <!-- تثبيت متطلبات (مُنقَل من «الإعدادات» السابقة) -->
+      <div class="subpanel">
+        <h3 data-i18n="setup_h">🧩 تثبيت المتطلبات (مرّة واحدة)</h3>
+        <div class="actions">
+          <button type="button" id="pwInstallBtn" class="btn sm" data-i18n="pw_install">⬇️ ثبّت Chromium (لتقارير PDF)</button>
+          <span id="pwStatus" class="muted sm"></span>
+        </div>
+        <div class="actions" style="margin-top:6px">
+          <button type="button" id="ga4InstallBtn" class="btn sm" data-i18n="ga4_install">⬇️ ثبّت مكتبة GA4</button>
+          <span id="ga4Status" class="muted sm"></span>
+        </div>
+      </div>
 
       <div class="card">
         <label class="chk"><input type="checkbox" name="gsc_enabled"> <span data-i18n="gsc_enable">تفعيل Google Search Console</span></label>
@@ -198,155 +359,11 @@
         <label><span data-i18n="awt_folder">مجلد AWT</span><input type="text" name="awt_csv_folder" placeholder="./external_data/awt"></label>
       </div>
 
-      <div class="submit-bar">
-        <button type="button" id="fetchIntegBtn" class="btn primary" data-i18n="fetch_integ_btn">📥 احضر بيانات التكامل (بلا زحف)</button>
-        <span id="integMsg" class="muted"></span>
-      </div>
-    </section>
-    </div>
-
-    <!-- ============ تبويب 3: الذكاء ============ -->
-    <div class="tabpane" data-pane="ai">
-    <section class="panel">
-      <h2 data-i18n="ai_h">مستشار الذكاء الاصطناعي</h2>
-      <label class="chk"><input type="checkbox" name="ai_enabled"> <span data-i18n="ai_enable">تفعيل تحليل الذكاء الاصطناعي وتوصياته</span></label>
-      <div class="grid">
-        <label><span data-i18n="ai_max_opps">عدد الفرص المُرسلة للنموذج</span><input type="number" name="ai_max_opportunities" placeholder="15" min="1" max="50"></label>
-      </div>
-      <p class="muted sm" data-i18n="ai_page_note">يعمل تلقائياً أثناء الزحف عند التفعيل: يقرأ ملخّص التدقيق وأهم الفرص ويُرجع ملخّصاً تنفيذياً وتوصيات مرتّبة (تظهر في التقرير وملف ai_recommendations.csv). إعدادات المزوّد والمفتاح في تبويب «الإعدادات». لا تُرسَل بيانات مستخدمين — فقط روابط وأنواع مشاكل وأرقام مجمّعة.</p>
-    </section>
-    </div>
-
-    <!-- ============ تبويب 4: إعدادات التقارير ============ -->
-    <div class="tabpane" data-pane="report">
-    <section class="panel">
-      <h2 data-i18n="sec3">نوع الملفات الناتجة</h2>
-      <div class="checks">
-        {% for f in formats %}
-        <label class="chk"><input type="checkbox" name="formats" value="{{ f.key }}" {% if f.default %}checked{% endif %} {% if f.key == 'pdf' %}id="fmtPdf"{% endif %}> {{ f.label }}</label>
-        {% endfor %}
-      </div>
-
-      <div id="pdfOptions" class="subpanel">
-        <h3 data-i18n="pdf_format">تنسيق تقرير PDF/HTML</h3>
-        <div class="grid">
-          <label><span data-i18n="report_lang">لغة التقرير</span>
-            <select name="language" data-i18n-followlang>
-              <option value="ar" data-i18n="lang_ar">العربية</option>
-              <option value="en" data-i18n="lang_en">English</option>
-            </select>
-          </label>
-          <label><span data-i18n="report_type">نوع التقرير</span>
-            <select name="audience">
-              <option value="expert" data-i18n="aud_expert">خبير SEO (تفصيلي)</option>
-              <option value="client" data-i18n="aud_client">عميل (مختصر ومبسّط)</option>
-              <option value="both" data-i18n="aud_both">كلاهما (تقريران)</option>
-            </select>
-          </label>
-          <label><span data-i18n="client_name">اسم العميل</span>
-            <input type="text" name="client_name" data-i18n-ph="optional" placeholder="اختياري">
-          </label>
-          <label class="full"><span data-i18n="logo_url">رابط الشعار (اختياري)</span>
-            <input type="url" name="logo_url" placeholder="https://.../logo.png">
-          </label>
-          <label><span data-i18n="max_rows">حد صفوف الجداول</span>
-            <input type="number" name="max_rows" value="100" min="10">
-          </label>
-        </div>
-        <p class="muted sm" data-i18n="sections_label">الأقسام المضمّنة:</p>
-        <div class="checks">
-          {% for s in sections %}
-          <label class="chk"><input type="checkbox" name="sections" value="{{ s.key }}" checked> <span data-i18n="sec_{{ s.key }}">{{ s.label }}</span></label>
-          {% endfor %}
-        </div>
-        <p class="muted sm" data-i18n="severity_label">مستويات الخطورة المضمّنة:</p>
-        <div class="checks">
-          {% for sev in severities %}
-          <label class="chk"><input type="checkbox" name="severity_filter" value="{{ sev }}" checked> {{ sev }}</label>
-          {% endfor %}
-        </div>
-      </div>
-    </section>
-    </div>
-
-    <!-- ============ تبويب 5: الإعدادات (تكامل + ذكاء) ============ -->
-    <div class="tabpane" data-pane="settings">
-    <section class="panel">
-      <h2 data-i18n="settings_h">إعدادات التكامل والذكاء (تُضبط مرّة واحدة)</h2>
-
-      <!-- ربط Google من المتصفّح -->
+      <!-- مستشار الذكاء الاصطناعي (دُمج من تبويبَي «الذكاء» و«الإعدادات» السابقَين) -->
       <div class="subpanel">
-        <h3 data-i18n="g_connect_h">🔐 ربط Google (GA4 + GSC) بنقرة من المتصفّح</h3>
-        <p class="muted sm" data-i18n="g_connect_p">ارفع ملف OAuth client secret (Desktop app) من Google Cloud، ثم اضغط «وافق» — يفتح المتصفّح للموافقة بحسابك مرّة واحدة وتُحفظ الـtokens محلياً. بعدها تُستعمل تلقائياً.</p>
-        <div class="grid">
-          <label class="full"><span data-i18n="g_client_file">ملف client_secret.json</span>
-            <input type="file" id="gClientFile" accept=".json">
-          </label>
-        </div>
-        <div class="actions" style="margin-top:6px">
-          <button type="button" id="gUploadBtn" class="btn sm" data-i18n="g_upload">📤 رفع الملف</button>
-          <button type="button" id="gAuthBtn" class="btn sm primary" data-i18n="g_auth">🔐 وافق بحسابي (يفتح المتصفّح)</button>
-          <button type="button" id="gStatusBtn" class="btn sm" data-i18n="g_status_btn">🔄 تحقّق</button>
-          <button type="button" id="gDisconnectBtn" class="btn sm" data-i18n="g_disconnect">🚪 قطع الربط</button>
-        </div>
-        <p id="gStatus" class="muted sm" style="margin-top:6px"></p>
-
-        <details class="adv" style="margin-top:8px">
-          <summary data-i18n="g_paste_h">🔗 تعذّر فتح المتصفح؟ استخدم «لصق الرمز» (للأجهزة البعيدة/بدون متصفّح)</summary>
-          <p class="muted sm" data-i18n="g_paste_p">يعطيك رابطاً تفتحه في أي متصفّح، توافق، فتُعاد إلى صفحة فاشلة عنوانها يحوي ?code=… انسخ الرابط أو الرمز والصقه هنا.</p>
-          <div class="actions">
-            <button type="button" id="gPasteUrlBtn" class="btn sm" data-i18n="g_paste_get">🔗 احصل على رابط الموافقة</button>
-            <a id="gPasteLink" class="btn sm" target="_blank" rel="noopener" style="display:none">↗ افتح الرابط</a>
-          </div>
-          <label class="full" style="margin-top:6px"><span data-i18n="g_paste_code">ألصق الرمز أو رابط callback</span>
-            <input type="text" id="gPasteCode" placeholder="4/0A… أو http://127.0.0.1:1/?code=…">
-          </label>
-          <div class="actions">
-            <button type="button" id="gPasteSubmitBtn" class="btn sm primary" data-i18n="g_paste_submit">🔓 إكمال التفويض</button>
-          </div>
-          <p id="gPasteMsg" class="muted sm"></p>
-        </details>
-
-        <details class="adv" style="margin-top:8px">
-          <summary data-i18n="g_setup_h">📘 إعداد OAuth client لأوّل مرّة (دليل من 3 خطوات)</summary>
-          <ol class="steps">
-            <li><span data-i18n="g_setup_1">في </span>
-                <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>
-                <span data-i18n="g_setup_1b"> أنشئ مشروعاً (أو استخدم مشروعك)، ثم فعّل APIs: «Search Console API» و«Google Analytics Admin API» و«Google Analytics Data API».</span></li>
-            <li><span data-i18n="g_setup_2">من «OAuth consent screen» اختر نوع External، أضِف نفسك (وزملاءك) كـ Test users، واحفظ. (وضع Testing كافٍ — بلا حاجة لتحقّق Google.)</span></li>
-            <li><span data-i18n="g_setup_3">من «Credentials» أنشئ «OAuth client ID» نوع «Desktop app»، نزّل ملف JSON، وارفعه هنا أعلاه. ثم اضغط «وافق بحسابي».</span></li>
-          </ol>
-          <p class="muted sm" data-i18n="g_setup_note">ملاحظة: في وضع Testing تنتهي refresh tokens كل 7 أيام (موافقة أسبوعية). للإنتاج بلا تحذير تحتاج OAuth verification (الـ scopes حسّاسة).</p>
-        </details>
-      </div>
-
-      <!-- تثبيت متطلبات -->
-      <div class="subpanel">
-        <h3 data-i18n="setup_h">🧩 تثبيت المتطلبات (مرّة واحدة)</h3>
-        <div class="actions">
-          <button type="button" id="pwInstallBtn" class="btn sm" data-i18n="pw_install">⬇️ ثبّت Chromium (لتقارير PDF)</button>
-          <span id="pwStatus" class="muted sm"></span>
-        </div>
-        <div class="actions" style="margin-top:6px">
-          <button type="button" id="ga4InstallBtn" class="btn sm" data-i18n="ga4_install">⬇️ ثبّت مكتبة GA4</button>
-          <span id="ga4Status" class="muted sm"></span>
-        </div>
-      </div>
-
-      <!-- مسارات الاعتماد والمفاتيح -->
-      <div class="subpanel">
-        <h3 data-i18n="creds_h">مسارات الاعتماد والمفاتيح</h3>
-        <div class="grid">
-          <label><span data-i18n="gsc_cred">ملف اعتماد GSC</span><input type="text" name="gsc_credentials_file" placeholder="(يُعبّأ تلقائياً بعد ربط Google)"></label>
-          <label><span data-i18n="ga4_cred">ملف اعتماد GA4</span><input type="text" name="ga4_credentials_file" placeholder="(يُعبّأ تلقائياً بعد ربط Google)"></label>
-          <label class="full"><span data-i18n="pagespeed_key">PageSpeed API key</span><input type="text" name="pagespeed_api_key" data-i18n-ph="pagespeed_key_ph" placeholder="مفتاحك الخاص"></label>
-        </div>
-        <p class="muted sm" data-i18n="integrations_note">المفاتيح/المسارات تُحفظ محلياً فقط ولا تُرفع إلى Git.</p>
-      </div>
-
-      <!-- إعدادات الذكاء الاصطناعي -->
-      <div class="subpanel">
-        <h3 data-i18n="ai_settings_h">🤖 إعدادات مزوّد الذكاء الاصطناعي</h3>
+        <h3 data-i18n="ai_h">🤖 مستشار الذكاء الاصطناعي</h3>
+        <label class="chk"><input type="checkbox" name="ai_enabled"> <span data-i18n="ai_enable">تفعيل تحليل الذكاء الاصطناعي وتوصياته</span></label>
+        <p class="muted sm" data-i18n="ai_page_note">يعمل تلقائياً أثناء الزحف عند التفعيل: يقرأ ملخّص التدقيق وأهم الفرص ويُرجع ملخّصاً تنفيذياً وتوصيات مرتّبة (تظهر في التقرير وملف ai_recommendations.csv). لا تُرسَل بيانات مستخدمين — فقط روابط وأنواع مشاكل وأرقام مجمّعة.</p>
         <div class="grid">
           <label><span data-i18n="ai_provider">المزوّد</span>
             <select name="ai_provider">
@@ -367,8 +384,31 @@
           <label><span data-i18n="ai_base_url">عنوان الخدمة base_url (اختياري)</span>
             <input type="url" name="ai_base_url" data-i18n-ph="ai_base_url_ph" placeholder="مطلوب فقط للنقطة المخصّصة">
           </label>
+          <label><span data-i18n="ai_max_opps">عدد الفرص المُرسلة للنموذج</span><input type="number" name="ai_max_opportunities" placeholder="15" min="1" max="50"></label>
         </div>
         <label class="chk"><input type="checkbox" name="ai_allow_private"> <span data-i18n="ai_allow_private">السماح بنقطة محلية/خاصة (للنماذج المحلية مثل Ollama على 127.0.0.1)</span></label>
+      </div>
+    </section>
+    </div>
+
+    <!-- (تبويب «الذكاء» السابق دُمج داخل تبويب «التكاملات والذكاء») -->
+
+    <!-- (تبويب «إعدادات التقارير» السابق دُمج داخل تبويب «الزحف» كقسم قابل للطيّ) -->
+    <!-- ============ تبويب «المتقدّم» (سابقاً «الإعدادات») ============ -->
+    <div class="tabpane" data-pane="advanced">
+    <section class="panel">
+      <h2 data-i18n="advanced_h">⚙️ المتقدّم (إعدادات تقنية نادرة)</h2>
+      <p class="muted sm" data-i18n="advanced_p">إعدادات يحتاجها مستخدمون متقدّمون: مسارات اعتماد يدوية، قواعد استخراج مخصّصة، وعتبات تحليل. الإعدادات الأساسية (ربط Google، تثبيت، AI) في تبويب «التكاملات والذكاء».</p>
+
+      <!-- مسارات الاعتماد والمفاتيح (تُعبّأ تلقائياً عند ربط Google) -->
+      <div class="subpanel">
+        <h3 data-i18n="creds_h">مسارات الاعتماد والمفاتيح</h3>
+        <div class="grid">
+          <label><span data-i18n="gsc_cred">ملف اعتماد GSC</span><input type="text" name="gsc_credentials_file" placeholder="(يُعبّأ تلقائياً بعد ربط Google)"></label>
+          <label><span data-i18n="ga4_cred">ملف اعتماد GA4</span><input type="text" name="ga4_credentials_file" placeholder="(يُعبّأ تلقائياً بعد ربط Google)"></label>
+          <label class="full"><span data-i18n="pagespeed_key">PageSpeed API key</span><input type="text" name="pagespeed_api_key" data-i18n-ph="pagespeed_key_ph" placeholder="مفتاحك الخاص"></label>
+        </div>
+        <p class="muted sm" data-i18n="integrations_note">المفاتيح/المسارات تُحفظ محلياً فقط ولا تُرفع إلى Git.</p>
       </div>
 
       <!-- الاستخراج المخصّص -->
@@ -583,11 +623,22 @@ async function startJob(opts, msgEl) {
   }
 }
 
-// زحف كامل
+// زرّ بدء موحّد: يقرأ راديو start_mode ويختار الوضع المناسب
 document.getElementById('crawlForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = document.getElementById('formMsg');
   const form = e.target;
+  if (!form.querySelector('[name="url"]').value) {
+    msg.textContent = T('msg_need_url', 'أدخل رابط الموقع أولاً'); return;
+  }
+  const mode = (form.querySelector('input[name="start_mode"]:checked') || {}).value || 'full';
+  if (mode === 'integrations') {
+    const anyOn = ['gsc_enabled','ga4_enabled','pagespeed_enabled','lighthouse_enabled','awt_enabled']
+      .some((n) => { const el = form.querySelector('[name="'+n+'"]'); return el && el.checked; });
+    if (!anyOn) { msg.textContent = T('msg_pick_integ', 'فعّل مصدر تكامل واحداً على الأقل'); return; }
+    await startJob({ integrations_only: 'true' }, msg);
+    return;
+  }
   if (form.querySelectorAll('input[name="extraction"]:checked').length === 0) {
     msg.textContent = T('msg_pick_extraction'); return;
   }
@@ -595,19 +646,6 @@ document.getElementById('crawlForm').addEventListener('submit', async (e) => {
     msg.textContent = T('msg_pick_format'); return;
   }
   await startJob({ integrations_only: 'false' }, msg);
-});
-
-// احضار التكامل فقط
-document.getElementById('fetchIntegBtn').addEventListener('click', async () => {
-  const msg = document.getElementById('integMsg');
-  const form = document.getElementById('crawlForm');
-  if (!form.querySelector('[name="url"]').value) {
-    msg.textContent = T('msg_need_url', 'أدخل رابط الموقع في تبويب «الزحف» أولاً'); return;
-  }
-  const anyOn = ['gsc_enabled','ga4_enabled','pagespeed_enabled','lighthouse_enabled','awt_enabled']
-    .some(n => { const el = form.querySelector('[name="'+n+'"]'); return el && el.checked; });
-  if (!anyOn) { msg.textContent = T('msg_pick_integ', 'فعّل مصدر تكامل واحداً على الأقل'); return; }
-  await startJob({ integrations_only: 'true' }, msg);
 });
 
 // ===== ربط Google من المتصفّح =====
@@ -818,6 +856,57 @@ document.addEventListener('click', (e) => {
   if (t.id === 'gPasteUrlBtn')    { e.preventDefault(); gPasteGetUrl(); }
   if (t.id === 'gPasteSubmitBtn') { e.preventDefault(); gPasteSubmit(); }
 });
+// ===== شريط الجاهزية (Phase B) =====
+function _setChip(id, ok, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('ok', !!ok);
+  el.classList.toggle('off', !ok);
+  if (text) {
+    const tx = el.querySelector('span[data-i18n]'); if (tx) tx.textContent = text; else el.title = text;
+  }
+}
+async function refreshReadiness() {
+  try {
+    const r = await fetch('/api/google/status');
+    if (r.ok) { const j = await r.json(); _setChip('rGoogle', !!j.connected); }
+  } catch (e) {}
+  try {
+    const r = await fetch('/api/setup/playwright/status');
+    if (r.ok) { const j = await r.json(); _setChip('rChromium', j.status === 'done' || j.installed === true); }
+  } catch (e) {}
+  // جاهز للبدء: عند وجود URL ولا توجد مهمة نشطة
+  const hasUrl = !!(document.querySelector('input[name="url"]') || {}).value;
+  _setChip('rReady', hasUrl);
+}
+
+// ===== سطر ملخّص ما سيُشغَّل (Phase D) =====
+function updateStartSummary() {
+  const f = document.getElementById('crawlForm'); if (!f) return;
+  const mode = (f.querySelector('input[name="start_mode"]:checked') || {}).value || 'full';
+  const fmts = [...f.querySelectorAll('input[name="formats"]:checked')].map((c) => c.value);
+  const integs = ['gsc_enabled','ga4_enabled','pagespeed_enabled','lighthouse_enabled','awt_enabled']
+    .filter((n) => { const el = f.querySelector('[name="'+n+'"]'); return el && el.checked; })
+    .map((n) => n.replace('_enabled', ''));
+  const mp = f.querySelector('[name="max_pages"]'); const all = document.getElementById('allPages');
+  const pages = (all && all.checked) ? T('all_pages_short', 'كل الصفحات') : ((mp && mp.value) || 0) + ' ' + T('pages', 'صفحة');
+  let txt;
+  if (mode === 'integrations') {
+    txt = T('summary_integ', 'جلب التكاملات فقط') + (integs.length ? ' [' + integs.join(', ') + ']' : '');
+  } else {
+    txt = T('summary_full_prefix', 'سيُزحف') + ' ' + pages + (integs.length ? ' · ' + T('summary_with', 'مع') + ' ' + integs.join(', ') : '');
+    if (fmts.length) txt += ' · ' + T('summary_out', 'مخرجات') + ' ' + fmts.join('/');
+  }
+  const el = document.getElementById('startSummary'); if (el) el.textContent = txt;
+}
+
+// ===== إعادة الافتراضي (Phase G) =====
+function resetToDefaults() {
+  if (!confirm(T('reset_confirm', 'إعادة كل الإعدادات إلى الافتراضي؟'))) return;
+  try { localStorage.removeItem('sct_form_v1'); } catch (e) {}
+  window.location.reload();
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   setTimeout(gStatus, 200);
   // استعادة آخر تبويب
@@ -825,6 +914,20 @@ window.addEventListener('DOMContentLoaded', () => {
     const last = localStorage.getItem('sct_tab');
     if (last) { const b = document.querySelector('#tabbar .tab[data-tab="'+last+'"]'); if (b) b.click(); }
   } catch (e) {}
+  // شريط الجاهزية + سطر الملخّص
+  refreshReadiness();
+  updateStartSummary();
+  const f = document.getElementById('crawlForm');
+  if (f) {
+    f.addEventListener('input', updateStartSummary);
+    f.addEventListener('change', updateStartSummary);
+  }
+  // تركيز تلقائي على حقل URL إن كان فارغاً (Phase D)
+  const url = document.querySelector('input[name="url"]');
+  if (url && !url.value) url.focus();
+  // زرّ «إعادة الافتراضي»
+  const rb = document.getElementById('resetDefaultsBtn');
+  if (rb) rb.addEventListener('click', resetToDefaults);
 });
 
 // ===== حفظ/استعادة قيم النموذج =====

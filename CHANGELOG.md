@@ -1,8 +1,27 @@
 # Changelog
 
-## Unreleased
+> **Versioning convention:** SCT uses a simple two-digit decimal scheme — the integer part
+> marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
+> (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
-### Added
+## v1.00 — 2026-05-30
+
+First numbered release. Marks the feature-complete baseline of the local web UI + crawler
+pipeline. Highlights of this milestone:
+
+- **UI redesign (5 tabs → 3):** Crawl + Integrations & AI + Advanced. Integrates Report
+  settings as a collapsible inside Crawl; adds readiness chips (Google / Chromium / Ready)
+  at the top; unified Start button with mode radio (Full crawl / Integrations only);
+  first-run welcome card; dynamic settings summary above Start; collapsible "What to
+  collect" and "Manual speed controls"; auto-focused URL field; Reset-to-defaults button;
+  persistent top-bar link to the Log analyzer; promoted Explore / Board / Compare links to
+  primary on the job page. Every UI label is bilingual (AR + EN) with 365 i18n keys
+  perfectly aligned across both dicts.
+- **Authorship & versioning:** LICENSE switched to "Copyright (c) 2026 Ahmad-Ajm"; the
+  audit JSON `_meta` now carries `version: "1.00"` and `author: "Ahmad-Ajm"`; topbar shows
+  `v1.00 · by Ahmad-Ajm`.
+
+### Added (in this milestone)
 - **Crawl comparison surfaced in the UI** (`/jobs/<id>/compare`): pick another previous run
   from a dropdown and see fixed / new / persisting issue types, totals delta, "improved"
   flag, and page-set changes — all backed by the existing `analyzers/crawl_compare`. New

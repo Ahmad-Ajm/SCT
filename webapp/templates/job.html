@@ -11,6 +11,7 @@
 <header class="topbar">
   <h1 data-i18n="monitor_title">🕷️ متابعة الزحف</h1>
   <span>
+    <a href="/logs" class="btn sm" data-i18n="logs_link">📜 تحليل اللوغ</a>
     <button id="langToggle" class="btn sm" type="button">English</button>
     <a href="/" class="btn sm" data-i18n="back_home">⟵ الرئيسية</a>
   </span>
@@ -170,18 +171,19 @@ function renderDownloads(result) {
     box.appendChild(v);
   }
   if (result && result.json) {
+    // أزرار التحليل بحجم أكبر وأكثر بروزاً (Phase F)
     const ex = document.createElement('a');
-    ex.className = 'btn sm';
+    ex.className = 'btn primary';
     ex.href = '/jobs/' + jobId + '/explore';
     ex.textContent = (window.sctT ? window.sctT('explore_results') : '🔎 استكشاف النتائج');
     box.appendChild(ex);
     const bd = document.createElement('a');
-    bd.className = 'btn sm';
+    bd.className = 'btn primary';
     bd.href = '/jobs/' + jobId + '/board';
     bd.textContent = (window.sctT ? window.sctT('board_link') : '🗂️ لوحة العمل');
     box.appendChild(bd);
     const cmp = document.createElement('a');
-    cmp.className = 'btn sm';
+    cmp.className = 'btn primary';
     cmp.href = '/jobs/' + jobId + '/compare';
     cmp.textContent = (window.sctT ? window.sctT('cmp_link') : '🆚 مقارنة قبل/بعد');
     box.appendChild(cmp);
