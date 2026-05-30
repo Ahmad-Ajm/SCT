@@ -1009,6 +1009,57 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(cfg["integrations"]["gsc"]["inspect_max_urls"], 30)
         self.assertTrue(cfg["integrations"]["pagespeed"]["crux_history"])
 
+    def test_url_detail_joins_all_sources(self):
+        # درج URL: يدمج الزحف + GSC + GA4 + PageSpeed + الأولوية + الوصولية لرابط واحد
+        from reporting.url_detail import build_url_detail
+        audit = {
+            "pages": [
+                {"url": "https://x.com/p", "status_code": 200, "title": "P", "h1_count": 1,
+                 "word_count": 500, "is_indexable": True},
+                {"url": "https://x.com/other", "status_code": 200},
+            ],
+            "integrations": {
+                "gsc_pages": [
+                    {"page": "https://x.com/p", "clicks": 12, "impressions": 800,
+                     "ctr": 0.015, "position": 7.2}],
+                "ga4_landing_pages": [{"path": "/p", "sessions": 60, "users": 50,
+                                       "engagement_rate": 55.0}],
+                "pagespeed": [
+                    {"url": "https://x.com/p", "strategy": "mobile", "performance_score": 55,
+                     "lcp_lab_ms": 4500},
+                    {"url": "https://x.com/p", "strategy": "desktop", "performance_score": 80,
+                     "lcp_lab_ms": 2100},
+                    {"url": "https://x.com/other", "strategy": "mobile"}],
+                "gsc_index_status": [
+                    {"url": "https://x.com/p", "verdict": "PASS",
+                     "coverage_state": "Submitted and indexed"}],
+            },
+            "priority": {"pages": [
+                {"url": "https://x.com/p", "page_type": "product", "priority_score": 12.3,
+                 "priority_band": "high", "action_group": "do_now", "owner": "content",
+                 "ease": "easy", "tech_issue_count": 1, "technical_issues": "missing_meta",
+                 "top_fix": "أضف وصفاً"}]},
+            "accessibility": [
+                {"url": "https://x.com/p", "violations_count": 2, "nodes_total": 5,
+                 "by_impact": {"serious": 2}}],
+        }
+        d = build_url_detail(audit, "https://x.com/p")
+        self.assertTrue(d["found"])
+        self.assertEqual(d["page"]["status_code"], 200)
+        self.assertEqual(d["gsc"]["clicks"], 12)
+        self.assertEqual(d["ga4"]["sessions"], 60)
+        self.assertEqual(len(d["pagespeed"]), 2)  # mobile + desktop
+        self.assertEqual({r["strategy"] for r in d["pagespeed"]}, {"mobile", "desktop"})
+        self.assertEqual(d["priority"]["action_group"], "do_now")
+        self.assertEqual(d["accessibility"]["violations_count"], 2)
+        self.assertEqual(d["index_status"]["verdict"], "PASS")
+        # رابط غير معروف ⇒ found=False بدون أعطال
+        d2 = build_url_detail(audit, "https://x.com/unknown")
+        self.assertFalse(d2["found"])
+        # رابط فارغ ⇒ خطأ واضح
+        d3 = build_url_detail(audit, "")
+        self.assertEqual(d3.get("error"), "missing_url")
+
     def test_google_listing_parsers_and_code_extractor(self):
         # المُحلّلات النقية: مواقع GSC، خصائص GA4، واستخراج code من رابط callback
         from integrations.gsc_api import parse_gsc_sites

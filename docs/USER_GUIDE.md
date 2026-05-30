@@ -159,6 +159,8 @@ individually, grab **everything as one ZIP** ("Download all"), or tick a subset 
 **Explore results** (`/jobs/<id>/explore`) lets you filter/sort/search pages in the browser
 and download the filtered set as CSV. The **Action Board** (`/jobs/<id>/board`) shows fix
 priorities grouped (Do now / Needs developer / …), filterable by group/page-type/priority.
+**Click any row** to open a slide-out detail panel joining the URL's crawl data + GSC +
+URL Inspection + GA4 + PageSpeed + priority + accessibility in one view.
 
 ### What each file contains
 

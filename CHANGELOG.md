@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **URL drill-down detail panel** in the Action Board (`/jobs/<id>/board`): clicking a row
+  slides out a panel with all of SCT's data joined for that one URL — crawl page data, GSC
+  (clicks/impressions/CTR/position), URL Inspection (verdict/coverage), GA4 (sessions/users/
+  engagement), PageSpeed scores (mobile + desktop with lab CWV + CrUX overall), Priority
+  Engine output (page type, band, action group, owner, ease, factor breakdown), and
+  accessibility (axe violations). New `/api/jobs/<id>/url-detail?url=…` endpoint backed by
+  the pure `reporting/url_detail.build_url_detail(audit, url)` helper. URL matching uses
+  the project's `normalize_url`; GA4 matches by path.
 - **Easier Google sign-in (own-credentials model)**: each user/agency uses their own Desktop
   OAuth client (fully isolates quota from the project owner; needs no shared secret in the
   repo). The UI now adds:

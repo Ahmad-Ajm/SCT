@@ -1009,6 +1009,30 @@ async def board_page(request: Request, job_id: str):
     )
 
 
+@app.get("/api/jobs/{job_id}/url-detail")
+async def job_url_detail(job_id: str, url: str = ""):
+    """تفاصيل شاملة لرابط واحد (الزحف + GSC + GA4 + PageSpeed + الأولوية + الوصولية)."""
+    import json as _json
+    if not url.strip():
+        return JSONResponse({"error": "missing url"}, status_code=400)
+    meta = runner.meta(job_id)
+    json_path = meta.get("result", {}).get("json")
+    if not json_path or not Path(json_path).exists():
+        return JSONResponse({"error": "no audit json"}, status_code=404)
+    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
+    if size_mb > MAX_AUDIT_JSON_MB:
+        return JSONResponse({
+            "error": f"audit JSON too large ({size_mb:.0f} MB); open output/csv/pages.csv instead",
+        }, status_code=413)
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            audit = _json.load(f)
+    except (OSError, ValueError):
+        return JSONResponse({"error": "read error"}, status_code=500)
+    from reporting.url_detail import build_url_detail
+    return JSONResponse(build_url_detail(audit, url.strip()))
+
+
 @app.get("/api/jobs/{job_id}/priority")
 async def job_priority(job_id: str):
     """إرجاع بيانات محرّك الأولويات (الصفحات + ملخّص لوحة العمل) للعرض في المتصفح."""

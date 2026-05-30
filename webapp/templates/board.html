@@ -48,7 +48,7 @@
 
   <section class="panel">
     <div style="overflow:auto; max-height:65vh">
-      <table class="tbl" id="tbl">
+      <table class="tbl" id="tbl" data-clickable="1">
         <thead><tr>
           <th data-sort="action_group" data-i18n="board_group">المجموعة</th>
           <th data-sort="priority_band" data-i18n="t_band">الأولوية</th>
@@ -65,6 +65,15 @@
     </div>
     <p class="muted sm" id="renderNote"></p>
   </section>
+
+  <!-- لوحة تفاصيل الرابط (drill-down) — تظهر عند النقر على صف -->
+  <aside id="detailPanel" class="panel" style="display:none; position:fixed; top:60px; inset-inline-end:12px; width:min(520px, 95vw); max-height:85vh; overflow:auto; box-shadow:0 4px 24px rgba(0,0,0,.18); z-index:50">
+    <div class="sec-head">
+      <h3 id="detailTitle" data-i18n="detail_title" style="margin:0">تفاصيل الرابط</h3>
+      <button type="button" id="detailClose" class="btn sm" aria-label="close">✕</button>
+    </div>
+    <div id="detailBody" class="muted sm" style="margin-top:8px"></div>
+  </aside>
 </main>
 
 <script>
@@ -153,6 +162,52 @@ function buildCsv(rows) {
   const blob = new Blob(['﻿' + lines.join('\n')], {type:'text/csv'});
   document.getElementById('csvBtn').href = URL.createObjectURL(blob);
 }
+
+// ===== لوحة تفاصيل الرابط =====
+function _esc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function _row(k, v) { return '<div><b>' + _esc(k) + ':</b> ' + _esc(v) + '</div>'; }
+function _kvBlock(title, obj, fmt) {
+  if (!obj) return '';
+  const body = Object.entries(obj).map(([k, v]) => fmt ? fmt(k, v) : _row(k, v)).join('');
+  return '<section style="margin-top:10px"><h4 style="margin:6px 0">' + _esc(title) + '</h4>' + body + '</section>';
+}
+async function openDetail(url) {
+  const panel = document.getElementById('detailPanel');
+  const body = document.getElementById('detailBody');
+  const title = document.getElementById('detailTitle');
+  title.textContent = url;
+  body.innerHTML = '<p>… ' + T('detail_loading', 'Loading…') + '</p>';
+  panel.style.display = '';
+  try {
+    const r = await fetch('/api/jobs/' + jobId + '/url-detail?url=' + encodeURIComponent(url));
+    const d = await r.json();
+    if (!r.ok || d.error) { body.innerHTML = '<p>✗ ' + _esc(d.error || 'error') + '</p>'; return; }
+    if (!d.found) { body.innerHTML = '<p>' + T('detail_not_found', 'No data joined for this URL.') + '</p>'; return; }
+    const parts = [];
+    if (d.priority) parts.push(_kvBlock(T('detail_priority', 'Priority'), d.priority));
+    if (d.page) parts.push(_kvBlock(T('detail_page', 'Page (crawl)'), d.page));
+    if (d.gsc) parts.push(_kvBlock(T('detail_gsc', 'Search Console'), d.gsc));
+    if (d.index_status) parts.push(_kvBlock(T('detail_index', 'Index Status'), d.index_status));
+    if (d.ga4) parts.push(_kvBlock(T('detail_ga4', 'Analytics 4'), d.ga4));
+    if (d.pagespeed && d.pagespeed.length) {
+      const ps = d.pagespeed.map(r => '<div style="border-top:1px solid #ddd; padding-top:4px; margin-top:4px">'
+        + Object.entries(r).map(([k, v]) => _row(k, v)).join('') + '</div>').join('');
+      parts.push('<section style="margin-top:10px"><h4 style="margin:6px 0">' + _esc(T('detail_pagespeed', 'PageSpeed')) + '</h4>' + ps + '</section>');
+    }
+    if (d.accessibility) parts.push(_kvBlock(T('detail_a11y', 'Accessibility (axe)'), d.accessibility));
+    body.innerHTML = parts.join('') || '<p class="muted">—</p>';
+  } catch (e) { body.innerHTML = '<p>✗ ' + _esc(e) + '</p>'; }
+}
+document.getElementById('detailClose').addEventListener('click', () => {
+  document.getElementById('detailPanel').style.display = 'none';
+});
+document.getElementById('tbody').addEventListener('click', (e) => {
+  const tr = e.target && e.target.closest('tr');
+  if (!tr) return;
+  const td = tr.children[2];  // عمود الرابط في لوحة العمل
+  const url = td && td.textContent && td.textContent.trim();
+  if (url) openDetail(url);
+});
 
 ['f_group','f_type','f_band','f_url'].forEach(id => document.getElementById(id).addEventListener('input', render));
 document.getElementById('resetBtn').addEventListener('click', () => {
