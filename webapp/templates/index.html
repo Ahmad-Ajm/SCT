@@ -37,7 +37,7 @@
 </head>
 <body>
 <header class="topbar">
-  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO <small class="version-tag">v1.00 · by Ahmad-Ajm</small></h1>
+  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO <small class="version-tag">v1.01 · by Ahmad-Ajm</small></h1>
   <span>
     <a href="/logs" class="btn sm" data-i18n="logs_link">📜 تحليل اللوغ</a>
     <button id="langToggle" class="btn sm" type="button">English</button>
@@ -440,21 +440,46 @@
   </form>
 
   <section class="panel">
-    <h2 data-i18n="recent_jobs">المهام الأخيرة</h2>
+    <div class="sec-head">
+      <h2 data-i18n="recent_jobs">المهام الأخيرة</h2>
+      {% if jobs %}
+      <span class="actions">
+        <button type="button" id="deleteSelectedBtn" class="btn sm" data-i18n="jobs_delete_selected">🗑️ حذف المختار</button>
+        <button type="button" id="deleteAllBtn" class="btn sm" data-i18n="jobs_delete_all">🧹 حذف الكل (عدا النشطة)</button>
+      </span>
+      {% endif %}
+    </div>
     {% if active_job %}
       <p class="muted"><span data-i18n="active_job">⏳ مهمة نشطة حالياً:</span> <a href="/jobs/{{ active_job }}">{{ active_job }}</a></p>
     {% endif %}
     {% if jobs %}
-    <table class="tbl">
-      <thead><tr><th data-i18n="th_job">المهمة</th><th data-i18n="th_site">الموقع</th><th data-i18n="th_mode">الوضع</th><th data-i18n="th_status">الحالة</th><th></th></tr></thead>
+    <table class="tbl" id="jobsTable">
+      <thead><tr>
+        <th><input type="checkbox" id="jobsSelectAll" title="select all"></th>
+        <th data-i18n="th_job">المهمة</th>
+        <th data-i18n="th_site">الموقع</th>
+        <th data-i18n="th_mode">الوضع</th>
+        <th data-i18n="th_status">الحالة</th>
+        <th></th>
+      </tr></thead>
       <tbody>
       {% for j in jobs %}
-        <tr>
+        <tr data-job-id="{{ j.job_id }}" data-running="{% if j.job_id == active_job %}1{% else %}0{% endif %}">
+          <td>
+            {% if j.job_id != active_job %}
+            <input type="checkbox" class="job-pick" value="{{ j.job_id }}">
+            {% endif %}
+          </td>
           <td class="mono">{{ j.job_id }}</td>
           <td>{{ j.url }}</td>
           <td>{{ j.mode }}</td>
           <td><span class="status {{ j.status }}">{{ j.status }}</span></td>
-          <td><a class="btn sm" href="/jobs/{{ j.job_id }}" data-i18n="view">عرض</a></td>
+          <td>
+            <a class="btn sm" href="/jobs/{{ j.job_id }}" data-i18n="view">عرض</a>
+            {% if j.job_id != active_job %}
+            <button type="button" class="btn sm jobDeleteBtn" data-job-id="{{ j.job_id }}" data-i18n="jobs_delete_one">🗑️ حذف</button>
+            {% endif %}
+          </td>
         </tr>
       {% endfor %}
       </tbody>
@@ -928,7 +953,53 @@ window.addEventListener('DOMContentLoaded', () => {
   // زرّ «إعادة الافتراضي»
   const rb = document.getElementById('resetDefaultsBtn');
   if (rb) rb.addEventListener('click', resetToDefaults);
+  // إدارة المهام: تحديد الكل + حذف فردي + حذف جماعي + حذف الكل
+  wireJobsManagement();
 });
+
+// ===== حذف المهام (v1.01) =====
+function _pickedJobIds() {
+  return [...document.querySelectorAll('.job-pick:checked')].map((c) => c.value);
+}
+async function _deleteOne(jid) {
+  const r = await fetch('/api/jobs/' + encodeURIComponent(jid) + '/delete', { method: 'POST' });
+  return r.ok ? await r.json() : { ok: false, error: 'HTTP ' + r.status };
+}
+async function _refreshAfterDelete() { window.location.reload(); }
+function wireJobsManagement() {
+  const sel = document.getElementById('jobsSelectAll');
+  if (sel) sel.addEventListener('change', () => {
+    document.querySelectorAll('.job-pick').forEach((c) => { c.checked = sel.checked; });
+  });
+  document.querySelectorAll('.jobDeleteBtn').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const jid = b.getAttribute('data-job-id');
+      if (!confirm(T('jobs_confirm_one', 'حذف المهمة ' + jid + ' نهائياً (مع اللوغ والمخرجات)؟').replace('{jid}', jid))) return;
+      const res = await _deleteOne(jid);
+      if (!res.ok) { alert('✗ ' + (res.error || 'failed')); return; }
+      _refreshAfterDelete();
+    });
+  });
+  const dSel = document.getElementById('deleteSelectedBtn');
+  if (dSel) dSel.addEventListener('click', async () => {
+    const ids = _pickedJobIds();
+    if (!ids.length) { alert(T('jobs_pick_first', 'حدّد مهمّةً واحدة على الأقل أولاً.')); return; }
+    if (!confirm(T('jobs_confirm_n', 'حذف ' + ids.length + ' مهمّة نهائياً (مع اللوغ والمخرجات)؟').replace('{n}', ids.length))) return;
+    let ok = 0, fail = 0;
+    for (const jid of ids) { const r = await _deleteOne(jid); if (r.ok) ok++; else fail++; }
+    alert(T('jobs_deleted_msg', 'حُذفت {ok} مهمّة (فشل {fail})').replace('{ok}', ok).replace('{fail}', fail));
+    _refreshAfterDelete();
+  });
+  const dAll = document.getElementById('deleteAllBtn');
+  if (dAll) dAll.addEventListener('click', async () => {
+    if (!confirm(T('jobs_confirm_all', 'حذف كل المهام السابقة من القرص (عدا النشطة)؟ هذه عملية لا رجعة فيها.'))) return;
+    const r = await fetch('/api/jobs/delete-all', { method: 'POST' });
+    const j = r.ok ? await r.json() : { deleted: [], failed: [] };
+    alert(T('jobs_deleted_msg', 'حُذفت {ok} مهمّة (فشل {fail})')
+      .replace('{ok}', (j.deleted || []).length).replace('{fail}', (j.failed || []).length));
+    _refreshAfterDelete();
+  });
+}
 
 // ===== حفظ/استعادة قيم النموذج =====
 (function () {

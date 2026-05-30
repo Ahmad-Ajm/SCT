@@ -4,6 +4,19 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.01 — 2026-05-30
+
+### Added
+- **Job management from the UI:** the Recent jobs table now has a checkbox per row,
+  a select-all checkbox in the header, **🗑️ Delete selected**, and
+  **🧹 Delete all (except active)**. Each row also has its own **🗑️ Delete** button.
+  Two new endpoints — `POST /api/jobs/<id>/delete` and `POST /api/jobs/delete-all` —
+  back the UI; each delete removes the job's entire folder (log + outputs + state).
+  Safety: the currently-running job cannot be deleted (must be stopped first); invalid
+  job IDs are rejected; path is resolved-and-checked to never escape `webapp_jobs/`.
+  AR + EN i18n keys for the new strings. Regression test covers the safety branches
+  (invalid id, running job, valid delete, empty `delete_all`).
+
 ## v1.00 — 2026-05-30
 
 First numbered release. Marks the feature-complete baseline of the local web UI + crawler

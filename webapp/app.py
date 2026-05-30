@@ -401,6 +401,20 @@ async def job_kill(job_id: str):
     return JSONResponse({"killed": ok})
 
 
+@app.post("/api/jobs/{job_id}/delete")
+async def job_delete(job_id: str):
+    """يحذف مهمّة من القرص (اللوغ + المخرجات + الحالة). يرفض المهام قيد التشغيل."""
+    res = runner.delete_job(job_id)
+    status = 200 if res.get("ok") else 400
+    return JSONResponse(res, status_code=status)
+
+
+@app.post("/api/jobs/delete-all")
+async def jobs_delete_all():
+    """يحذف كل المهام السابقة من القرص باستثناء المهمة النشطة حالياً."""
+    return JSONResponse(runner.delete_all_jobs())
+
+
 @app.post("/api/jobs/{job_id}/report")
 async def job_report(
     job_id: str,

@@ -983,6 +983,42 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(load_axe_source("does_not_exist.js", allow_cdn=False), "")
 
 
+    def test_job_delete_safely_removes_folder(self):
+        # v1.01: حذف المهمة من القرص — مع رفض المهام قيد التشغيل ومعرّفات غير صالحة
+        import json as _json
+        sys.path.insert(0, str(ROOT / "webapp"))
+        import job_runner as jr_mod
+        # نوجّه JOBS_DIR إلى مجلد مؤقت كي لا نلمس بيانات حقيقية
+        with tempfile.TemporaryDirectory() as tmp:
+            jobs_dir = Path(tmp) / "webapp_jobs"; jobs_dir.mkdir()
+            original = jr_mod.JOBS_DIR
+            jr_mod.JOBS_DIR = jobs_dir
+            try:
+                runner = jr_mod.JobRunner()
+                # مهمّة وهمية بمعرّف صالح
+                jid = "20260530_120000_abc123"
+                (jobs_dir / jid).mkdir()
+                (jobs_dir / jid / "run.log").write_text("log\n", encoding="utf-8")
+                (jobs_dir / jid / "meta.json").write_text(
+                    _json.dumps({"job_id": jid, "status": "done"}), encoding="utf-8")
+                # معرّف غير صالح ⇒ يُرفض
+                self.assertFalse(runner.delete_job("../etc/passwd").get("ok"))
+                self.assertFalse(runner.delete_job("not_a_valid_id").get("ok"))
+                # مهمّة قيد التشغيل ⇒ يُرفض
+                class _Fake:
+                    def poll(self): return None  # لا يزال يعمل
+                runner._procs[jid] = _Fake()
+                self.assertFalse(runner.delete_job(jid).get("ok"))
+                # نوقف، ثم نحذف بنجاح
+                runner._procs.clear()
+                self.assertTrue(runner.delete_job(jid).get("ok"))
+                self.assertFalse((jobs_dir / jid).exists())
+                # delete_all على مجلد فارغ يعيد قائمة فارغة
+                res = runner.delete_all_jobs()
+                self.assertEqual(res["deleted"], [])
+            finally:
+                jr_mod.JOBS_DIR = original
+
     def test_job_config_maps_new_ui_options(self):
         # توصيلات الواجهة: الخيارات المشحونة حديثاً تُكتب في إعداد المهمة بشكل صحيح
         import yaml as _yaml

@@ -377,6 +377,52 @@ class JobRunner:
                     jobs.append(m)
         return jobs
 
+    def delete_job(self, job_id: str) -> dict[str, Any]:
+        """يحذف مجلد المهمة كاملاً (اللوغ + المخرجات + الحالة).
+
+        يرفض حذف مهمة قيد التشغيل (يجب إيقافها أوّلاً). يرفض أيضاً معرّفاً غير صالح
+        أو مساراً يحاول الخروج من JOBS_DIR (حماية مسار).
+        """
+        if not _valid_job_id(job_id):
+            return {"ok": False, "error": "invalid job_id"}
+        with self._lock:
+            self._sweep_finished()
+            if job_id in self._procs:
+                return {"ok": False, "error": "job is running — stop it first"}
+        job_dir = JOBS_DIR / job_id
+        # حماية مسار: نتأكّد أنّه فعلاً تحت JOBS_DIR وليس symlink خارجها.
+        try:
+            resolved = job_dir.resolve(strict=False)
+            jobs_root = JOBS_DIR.resolve(strict=False)
+            if jobs_root not in resolved.parents and resolved != jobs_root:
+                return {"ok": False, "error": "path escapes jobs root"}
+        except OSError:
+            return {"ok": False, "error": "path resolution failed"}
+        if not job_dir.exists():
+            return {"ok": False, "error": "job not found"}
+        try:
+            import shutil
+            shutil.rmtree(str(job_dir))
+        except OSError as e:
+            return {"ok": False, "error": f"delete failed: {e}"}
+        return {"ok": True, "job_id": job_id}
+
+    def delete_all_jobs(self) -> dict[str, Any]:
+        """يحذف كل المهام من القرص باستثناء المهمة النشطة حالياً."""
+        active = self.active_job()
+        deleted, failed = [], []
+        for m in self.list_jobs():
+            jid = m.get("job_id") or ""
+            if not jid or jid == active:
+                continue
+            res = self.delete_job(jid)
+            if res.get("ok"):
+                deleted.append(jid)
+            else:
+                failed.append({"job_id": jid, "error": res.get("error")})
+        return {"ok": True, "deleted": deleted, "failed": failed,
+                "skipped_active": active}
+
     def _discover_result(self, job_dir: Path, mode: str) -> dict[str, str]:
         out = job_dir / "output"
         result: dict[str, str] = {}

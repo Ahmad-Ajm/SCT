@@ -353,6 +353,15 @@ const I18N = {
     summary_integ: "جلب التكاملات فقط",
     all_pages_short: "كل الصفحات",
     pages: "صفحة",
+    // إدارة المهام (v1.01)
+    jobs_delete_selected: "🗑️ حذف المختار",
+    jobs_delete_all: "🧹 حذف الكل (عدا النشطة)",
+    jobs_delete_one: "🗑️ حذف",
+    jobs_pick_first: "حدّد مهمّةً واحدة على الأقل أولاً.",
+    jobs_confirm_one: "حذف المهمة {jid} نهائياً (مع اللوغ والمخرجات)؟",
+    jobs_confirm_n: "حذف {n} مهمّة نهائياً (مع اللوغ والمخرجات)؟",
+    jobs_confirm_all: "حذف كل المهام السابقة من القرص (عدا النشطة)؟ هذه عملية لا رجعة فيها.",
+    jobs_deleted_msg: "حُذفت {ok} مهمّة (فشل {fail})",
   },
   en: {
     app_title: "🕷️ SCT — Crawler & SEO Audit",
@@ -704,6 +713,15 @@ const I18N = {
     summary_integ: "Fetch integrations only",
     all_pages_short: "all pages",
     pages: "pages",
+    // Job management (v1.01)
+    jobs_delete_selected: "🗑️ Delete selected",
+    jobs_delete_all: "🧹 Delete all (except active)",
+    jobs_delete_one: "🗑️ Delete",
+    jobs_pick_first: "Select at least one job first.",
+    jobs_confirm_one: "Permanently delete job {jid} (including its log and outputs)?",
+    jobs_confirm_n: "Permanently delete {n} jobs (including logs and outputs)?",
+    jobs_confirm_all: "Delete every past job from disk (except the active one)? This cannot be undone.",
+    jobs_deleted_msg: "Deleted {ok} job(s) (failed: {fail})",
   },
 };
 
