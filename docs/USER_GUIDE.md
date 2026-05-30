@@ -5,7 +5,9 @@ extracts on‑page SEO data, runs technical analyzers, optionally joins Google S
 / Google Analytics 4 data, and produces downloadable reports (HTML/PDF/Excel/CSV/JSON) — all
 on your own machine. No data leaves your computer unless you explicitly enable an integration.
 
-This guide is task‑oriented. For architecture and internals, see `docs/DOCUMENTATION_AR.md`.
+This guide is task-oriented. For architecture and internals, see `docs/ARCHITECTURE.md`
+(or `docs/ARCHITECTURE_AR.md` in Arabic). For all CLI flags see `docs/CLI.md`. To
+contribute or extend the tool see `CONTRIBUTING.md`.
 
 ---
 

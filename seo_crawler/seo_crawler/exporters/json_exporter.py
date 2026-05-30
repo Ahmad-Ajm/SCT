@@ -38,7 +38,7 @@ class JSONExporter:
         serializable = {
             "_meta": {
                 "generated_at": datetime.now().isoformat(),
-                "version": "1.01",
+                "version": "1.02",
                 "author": "Ahmad-Ajm",
             }
         }

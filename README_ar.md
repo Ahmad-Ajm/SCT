@@ -166,6 +166,23 @@ python -B -m unittest discover -s tests
 - JavaScript rendering اختياري ويجب تفعيله بشكل انتقائي لأنه مكلف.
 - إذا لم تكن `openpyxl` مثبتة يتم تخطي Excel مع استمرار CSV/JSON/metrics.
 
+## الوثائق
+
+| لمن… | اقرأ |
+|---|---|
+| المستخدم النهائي (جولة الواجهة، التكاملات، استكشاف الأخطاء) | [`docs/USER_GUIDE_AR.md`](docs/USER_GUIDE_AR.md) · [English](docs/USER_GUIDE.md) |
+| أعلام سطر الأوامر + سيناريوهات | [`docs/CLI_AR.md`](docs/CLI_AR.md) · [English](docs/CLI.md) |
+| البنية، خريطة الوحدات، القرارات المعمارية | [`docs/ARCHITECTURE_AR.md`](docs/ARCHITECTURE_AR.md) · [English](docs/ARCHITECTURE.md) |
+| المساهمة / توسعة الأداة | [`CONTRIBUTING_AR.md`](CONTRIBUTING_AR.md) · [English](CONTRIBUTING.md) |
+| ميثاق السلوك | [`CODE_OF_CONDUCT_AR.md`](CODE_OF_CONDUCT_AR.md) · [English](CODE_OF_CONDUCT.md) |
+| سياسة الأمان | [`SECURITY.md`](SECURITY.md) |
+| سجلّ الإصدارات | [`CHANGELOG.md`](CHANGELOG.md) |
+| ما هو مخطّط | [`ROADMAP.md`](ROADMAP.md) |
+| تكاملات الأدوات الخارجية (Lighthouse, ZAP) | [`docs/EXTERNAL_TOOLS_GUIDE_AR.md`](docs/EXTERNAL_TOOLS_GUIDE_AR.md) · [English](docs/EXTERNAL_TOOLS_GUIDE.md) |
+| مُثبِّت Windows | [`installer/README.md`](installer/README.md) |
+
 ## الترخيص
 
-MIT License. راجع [LICENSE](LICENSE).
+ترخيص MIT — Copyright (c) 2026 Ahmad-Ajm. يحقّ لك النسخ والتعديل والتوزيع والاستخدام
+التجاري لهذه الأداة. راجع [LICENSE](LICENSE). المساهمات تُقبَل بنفس الترخيص (راجع
+[`CONTRIBUTING_AR.md`](CONTRIBUTING_AR.md)).

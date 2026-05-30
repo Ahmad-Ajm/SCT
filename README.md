@@ -191,6 +191,23 @@ python -B -m unittest discover -s tests
 - JavaScript rendering is optional and should be enabled selectively.
 - Excel export is skipped gracefully if `openpyxl` is not installed.
 
+## Documentation
+
+| For… | Read |
+|---|---|
+| End-users (UI walkthrough, integrations, troubleshooting) | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) · [العربية](docs/USER_GUIDE_AR.md) |
+| Command-line flags + scenarios | [`docs/CLI.md`](docs/CLI.md) · [العربية](docs/CLI_AR.md) |
+| Architecture, module map, design decisions | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [العربية](docs/ARCHITECTURE_AR.md) |
+| Contributing / extending the tool | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [العربية](CONTRIBUTING_AR.md) |
+| Code of Conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) · [العربية](CODE_OF_CONDUCT_AR.md) |
+| Security policy | [`SECURITY.md`](SECURITY.md) |
+| Release history | [`CHANGELOG.md`](CHANGELOG.md) |
+| What's planned | [`ROADMAP.md`](ROADMAP.md) |
+| External tool integrations (Lighthouse, ZAP) | [`docs/EXTERNAL_TOOLS_GUIDE.md`](docs/EXTERNAL_TOOLS_GUIDE.md) · [العربية](docs/EXTERNAL_TOOLS_GUIDE_AR.md) |
+| Windows installer | [`installer/README.md`](installer/README.md) |
+
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License — Copyright (c) 2026 Ahmad-Ajm. You may copy, modify, distribute, and use
+this software commercially. See [LICENSE](LICENSE). Contributions are accepted under
+the same licence (see [`CONTRIBUTING.md`](CONTRIBUTING.md)).

@@ -4,6 +4,33 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.02 — 2026-05-30
+
+### Added (docs for a real open-source project)
+- **Expanded `CONTRIBUTING.md`** (and **new `CONTRIBUTING_AR.md`**): local setup, code
+  style, hard safety rules, bilingual i18n discipline, concrete "how to add an
+  analyzer / integration / UI tab" recipes, branching + PR workflow, the release process
+  (bump `_meta.version`, topbar tag, CHANGELOG), and bug/feature reporting.
+- **`CODE_OF_CONDUCT.md` + `CODE_OF_CONDUCT_AR.md`**: Contributor Covenant 2.1 in both
+  languages.
+- **`docs/ARCHITECTURE.md` + `docs/ARCHITECTURE_AR.md`** (developer-focused):
+  bird's-eye diagram, complete module map, full data flow, the 10 key design decisions
+  (local-only, async + sync fallback, SQLite per job, deterministic prioritization,
+  off-by-default integrations, no-secrets-in-repo, own-OAuth-per-user, bilingual i18n,
+  streaming size caps, defense-in-depth security), extension points, and a
+  "where to look for X" reference.
+- **`docs/CLI.md` + `docs/CLI_AR.md`**: full reference for `main.py` and
+  `webapp/run.py` flags, every relevant environment variable, and worked scenarios.
+- **READMEs**: new "Documentation" table linking every doc with its language
+  counterpart; LICENSE blurb spells out the MIT permissions (copy / modify /
+  distribute / commercial use) under "Copyright (c) 2026 Ahmad-Ajm".
+
+### Changed
+- `docs/DOCUMENTATION_AR.md` (the older 19 KB Arabic reference that overlapped with
+  `USER_GUIDE_AR.md`) was retired and moved to the local `_review/` folder; its
+  developer-facing content lives in the new `ARCHITECTURE_AR.md`, its end-user content
+  is already in `USER_GUIDE_AR.md`. Cross-references in both USER_GUIDE files updated.
+
 ## v1.01 — 2026-05-30
 
 ### Added
