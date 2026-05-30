@@ -201,6 +201,19 @@
 - Regression test suite covering the fixes below.
 
 ### Fixed
+- **English translation gap closed**: 24 UI strings that were Arabic-only (fell back to inline
+  HTML text when the user toggled to English) now have proper English translations in
+  `i18n.js`. Audit shows both `ar` and `en` dicts now cover 365 keys, with **no key used in
+  any template/JS missing from either language** (except 2 dynamic-prefix false positives —
+  `band_` and `ph_` — that are concatenated at runtime). A small audit script is kept locally
+  in `_review/` (gitignored) for re-running the check.
+
+### Changed
+- **Repo cleanup:** archived `AUDIT_NOTES.md` (closed since 2026-05-21; content fully covered
+  by this CHANGELOG) is moved out of the repo into a local gitignored `_review/` folder. The
+  test docstring that referenced it now points to the CHANGELOG.
+
+### Fixed
 - **Connection-test endpoints could hang the server** (`/api/test/gsc`, `/api/test/ga4`): they
   ran the client's `authenticate()` which, with OAuth client-secret credentials and no valid
   token, opened an interactive `run_local_server` browser-consent flow and **blocked the

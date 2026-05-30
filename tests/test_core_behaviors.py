@@ -169,7 +169,7 @@ class CoreBehaviorTests(unittest.TestCase):
 
 
 class RegressionTests(unittest.TestCase):
-    """اختبارات تحمي الإصلاحات الموثّقة في AUDIT_NOTES."""
+    """اختبارات انحدار تحمي الإصلاحات الموثّقة في CHANGELOG."""
 
     def test_c3_no_duplicate_child_rows_on_recrawl(self):
         with tempfile.TemporaryDirectory() as tmp:

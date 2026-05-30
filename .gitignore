@@ -33,3 +33,6 @@ external_data/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local review folder (files moved out of the repo for review before final deletion)
+_review/
