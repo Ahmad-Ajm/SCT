@@ -287,6 +287,23 @@ traffic to produce **Priority Opportunities**
 - **`pagespeed.save_raw_json`**: saves the full raw Lighthouse report per page (source of the
   deep tables).
 
+### Easier Google sign-in
+- **Dropdowns after connecting:** "📋 Fetch my GSC sites" and "📋 Fetch GA4 properties"
+  populate dropdowns from the connected account (the Analytics Admin API is used for GA4
+  properties) so you can pick instead of pasting IDs.
+- **Paste-the-code fallback** for headless/remote machines: click "Get authorization URL",
+  open it in any browser, then paste the resulting URL (or just the code) back.
+- **Full disconnect:** the "Disconnect" button removes the tokens; pass `?full=1` to also
+  remove `client_secret.json` (to switch to a different one).
+- **First-time setup guide** (3 collapsible steps inside the UI) with direct links to Cloud
+  Console + APIs + OAuth consent (Testing mode), plus notes on the 7-day refresh-token
+  expiry in Testing mode and the sensitive-scope verification needed for Production.
+
+> **About "consuming the developer's account":** reading GSC/GA4 data does **not** consume
+> any shared quota — the quotas are per-site/per-property the user owns. The only shared
+> resource is the PageSpeed API key (which is off by default). With each user/agency using
+> their own Desktop OAuth client, everything is fully isolated.
+
 ### Using a `.env` file for secrets (recommended)
 
 Create a `.env` in the project root:

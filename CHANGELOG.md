@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **Easier Google sign-in (own-credentials model)**: each user/agency uses their own Desktop
+  OAuth client (fully isolates quota from the project owner; needs no shared secret in the
+  repo). The UI now adds:
+  - **Site/property pickers** — "Fetch my GSC sites" and "Fetch GA4 properties" buttons
+    populate dropdowns from the connected account (`/api/google/gsc-sites`,
+    `/api/google/ga4-properties` — using the Analytics Admin API for properties).
+  - **Paste-the-code fallback** for headless/remote machines: `/api/google/authorize-url`
+    returns the consent URL; the user opens it in any browser, then pastes back the code or
+    the full callback URL into `/api/google/authorize-code` (`_extract_oauth_code` parses
+    either form).
+  - **Full disconnect** option: `?full=1` on `/api/google/disconnect` also removes the saved
+    `client_secret.json` (so you can switch to a different one).
+  - **3-step guided setup** (collapsible help in the UI) explaining Cloud Console → APIs →
+    OAuth consent (Testing mode) → Desktop client, with the 7-day refresh-token caveat for
+    Testing mode and the sensitive-scope verification note for Production.
 - **Accessibility checks (axe-core)** (optional, `accessibility.enabled`, off by default;
   requires JS rendering): runs axe-core in the rendered Playwright page (capped by
   `accessibility.max_pages`), with the axe source from a local file (`accessibility.axe_source`)

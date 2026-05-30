@@ -146,6 +146,12 @@
           <label><span data-i18n="gsc_months">عدد الأشهر (GSC)</span><input type="number" name="gsc_months_back" placeholder="16" min="1"></label>
           <label><span data-i18n="gsc_inspect_max">سقف فحص الفهرسة (URL Inspection)</span><input type="number" name="gsc_inspect_max_urls" placeholder="50" min="1"></label>
         </div>
+        <div class="actions">
+          <button type="button" id="gscFetchBtn" class="btn sm" data-i18n="g_fetch_sites">📋 جلب مواقعي من GSC</button>
+          <select id="gscSiteChoice" style="display:none; min-width:240px">
+            <option value="" data-i18n="g_pick_site">— اختر موقعاً —</option>
+          </select>
+        </div>
         <label class="chk"><input type="checkbox" name="gsc_url_inspection"> <span data-i18n="gsc_url_inspection">فحص حالة الفهرسة الحقيقية لكل رابط (URL Inspection — يحترم الحصّة عبر السقف)</span></label>
         <button type="button" id="testGscBtn" class="btn sm" data-i18n="test_conn">🔎 اختبار الاتصال</button>
         <p id="gscTestMsg" class="muted sm"></p>
@@ -157,6 +163,12 @@
         <div class="grid">
           <label><span data-i18n="ga4_prop">GA4 property_id</span><input type="text" name="ga4_property_id" placeholder="123456789"></label>
           <label><span data-i18n="ga4_range">نطاق التاريخ (أيام)</span><input type="number" name="ga4_date_range_days" placeholder="90" min="1"></label>
+        </div>
+        <div class="actions">
+          <button type="button" id="ga4FetchBtn" class="btn sm" data-i18n="g_fetch_props">📋 جلب خصائص GA4</button>
+          <select id="ga4PropChoice" style="display:none; min-width:300px">
+            <option value="" data-i18n="g_pick_prop">— اختر خاصية —</option>
+          </select>
         </div>
         <button type="button" id="testGa4Btn" class="btn sm" data-i18n="test_conn">🔎 اختبار الاتصال</button>
         <p id="ga4TestMsg" class="muted sm"></p>
@@ -278,6 +290,34 @@
           <button type="button" id="gDisconnectBtn" class="btn sm" data-i18n="g_disconnect">🚪 قطع الربط</button>
         </div>
         <p id="gStatus" class="muted sm" style="margin-top:6px"></p>
+
+        <details class="adv" style="margin-top:8px">
+          <summary data-i18n="g_paste_h">🔗 تعذّر فتح المتصفح؟ استخدم «لصق الرمز» (للأجهزة البعيدة/بدون متصفّح)</summary>
+          <p class="muted sm" data-i18n="g_paste_p">يعطيك رابطاً تفتحه في أي متصفّح، توافق، فتُعاد إلى صفحة فاشلة عنوانها يحوي ?code=… انسخ الرابط أو الرمز والصقه هنا.</p>
+          <div class="actions">
+            <button type="button" id="gPasteUrlBtn" class="btn sm" data-i18n="g_paste_get">🔗 احصل على رابط الموافقة</button>
+            <a id="gPasteLink" class="btn sm" target="_blank" rel="noopener" style="display:none">↗ افتح الرابط</a>
+          </div>
+          <label class="full" style="margin-top:6px"><span data-i18n="g_paste_code">ألصق الرمز أو رابط callback</span>
+            <input type="text" id="gPasteCode" placeholder="4/0A… أو http://127.0.0.1:1/?code=…">
+          </label>
+          <div class="actions">
+            <button type="button" id="gPasteSubmitBtn" class="btn sm primary" data-i18n="g_paste_submit">🔓 إكمال التفويض</button>
+          </div>
+          <p id="gPasteMsg" class="muted sm"></p>
+        </details>
+
+        <details class="adv" style="margin-top:8px">
+          <summary data-i18n="g_setup_h">📘 إعداد OAuth client لأوّل مرّة (دليل من 3 خطوات)</summary>
+          <ol class="steps">
+            <li><span data-i18n="g_setup_1">في </span>
+                <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>
+                <span data-i18n="g_setup_1b"> أنشئ مشروعاً (أو استخدم مشروعك)، ثم فعّل APIs: «Search Console API» و«Google Analytics Admin API» و«Google Analytics Data API».</span></li>
+            <li><span data-i18n="g_setup_2">من «OAuth consent screen» اختر نوع External، أضِف نفسك (وزملاءك) كـ Test users، واحفظ. (وضع Testing كافٍ — بلا حاجة لتحقّق Google.)</span></li>
+            <li><span data-i18n="g_setup_3">من «Credentials» أنشئ «OAuth client ID» نوع «Desktop app»، نزّل ملف JSON، وارفعه هنا أعلاه. ثم اضغط «وافق بحسابي».</span></li>
+          </ol>
+          <p class="muted sm" data-i18n="g_setup_note">ملاحظة: في وضع Testing تنتهي refresh tokens كل 7 أيام (موافقة أسبوعية). للإنتاج بلا تحذير تحتاج OAuth verification (الـ scopes حسّاسة).</p>
+        </details>
       </div>
 
       <!-- تثبيت متطلبات -->
@@ -622,6 +662,70 @@ async function gDisconnect() {
     _setG(r.ok ? ('تم قطع الربط (' + (j.removed || []).join(', ') + ')') : ('✗ ' + j.error));
   } catch (e) { _setG('✗ ' + e); }
 }
+
+// ===== جلب مواقع GSC وخصائص GA4 لتعبئة قوائم منسدلة =====
+async function gscFetchSites() {
+  const sel = document.getElementById('gscSiteChoice');
+  const inp = document.querySelector('[name=gsc_site_url]');
+  try {
+    const r = await fetch('/api/google/gsc-sites');
+    const j = await r.json();
+    if (!r.ok || j.error) { _setG('✗ ' + (j.error === 'not_connected' ? 'اربط Google أولاً' : (j.error || 'فشل'))); return; }
+    sel.innerHTML = '<option value="">' + (window.sctT ? window.sctT('g_pick_site') : '— اختر موقعاً —') + '</option>';
+    (j.sites || []).forEach((s) => {
+      const o = document.createElement('option'); o.value = s.site_url;
+      o.textContent = s.site_url + (s.permission_level ? ' (' + s.permission_level + ')' : '');
+      sel.appendChild(o);
+    });
+    sel.style.display = '';
+    sel.onchange = () => { if (sel.value) { inp.value = sel.value; if (window.sctSaveForm) window.sctSaveForm(); } };
+    _setG('تم جلب ' + (j.sites || []).length + ' موقعاً.');
+  } catch (e) { _setG('✗ ' + e); }
+}
+async function ga4FetchProps() {
+  const sel = document.getElementById('ga4PropChoice');
+  const inp = document.querySelector('[name=ga4_property_id]');
+  try {
+    const r = await fetch('/api/google/ga4-properties');
+    const j = await r.json();
+    if (!r.ok || j.error) { _setG('✗ ' + (j.error === 'not_connected' ? 'اربط Google أولاً' : (j.error || 'فشل'))); return; }
+    sel.innerHTML = '<option value="">' + (window.sctT ? window.sctT('g_pick_prop') : '— اختر خاصية —') + '</option>';
+    (j.properties || []).forEach((p) => {
+      const o = document.createElement('option'); o.value = p.property_id;
+      o.textContent = (p.account ? p.account + ' / ' : '') + p.display_name + ' [' + p.property_id + ']';
+      sel.appendChild(o);
+    });
+    sel.style.display = '';
+    sel.onchange = () => { if (sel.value) { inp.value = sel.value; if (window.sctSaveForm) window.sctSaveForm(); } };
+    _setG('تم جلب ' + (j.properties || []).length + ' خاصية.');
+  } catch (e) { _setG('✗ ' + e); }
+}
+
+// ===== لصق الرمز (للأجهزة بلا متصفّح) =====
+async function gPasteGetUrl() {
+  const msg = document.getElementById('gPasteMsg'); msg.textContent = '… يحضّر الرابط';
+  try {
+    const r = await fetch('/api/google/authorize-url');
+    const j = await r.json();
+    if (!r.ok || !j.auth_url) { msg.textContent = '✗ ' + (j.error || 'فشل'); return; }
+    const a = document.getElementById('gPasteLink');
+    a.href = j.auth_url; a.style.display = '';
+    msg.textContent = (window.sctT ? window.sctT('g_paste_hint') : 'افتح الرابط، وافق، ثم ألصق الرابط الناتج أو الرمز.');
+  } catch (e) { msg.textContent = '✗ ' + e; }
+}
+async function gPasteSubmit() {
+  const code = document.getElementById('gPasteCode').value;
+  const msg = document.getElementById('gPasteMsg');
+  if (!code) { msg.textContent = (window.sctT ? window.sctT('g_paste_need') : 'ألصق الرمز/الرابط أولاً.'); return; }
+  msg.textContent = '… يكمل التفويض';
+  try {
+    const fd = new FormData(); fd.set('code', code);
+    const r = await fetch('/api/google/authorize-code', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok || j.error) { msg.textContent = '✗ ' + (j.error || 'فشل'); return; }
+    msg.textContent = '✅ تم التفويض.'; gStatus();
+  } catch (e) { msg.textContent = '✗ ' + e; }
+}
 // تثبيت في الخلفية ثم استفسار عن الحالة (يتفادى سقوط اتصال fetch على التثبيت الطويل)
 async function _install(tool, btnId, stId) {
   const btn = document.getElementById(btnId), st = document.getElementById(stId);
@@ -709,6 +813,10 @@ document.addEventListener('click', (e) => {
   if (t.id === 'testGscBtn')      { e.preventDefault(); testConn('gsc'); }
   if (t.id === 'testGa4Btn')      { e.preventDefault(); testConn('ga4'); }
   if (t.id === 'testPsBtn')       { e.preventDefault(); testConn('pagespeed'); }
+  if (t.id === 'gscFetchBtn')     { e.preventDefault(); gscFetchSites(); }
+  if (t.id === 'ga4FetchBtn')     { e.preventDefault(); ga4FetchProps(); }
+  if (t.id === 'gPasteUrlBtn')    { e.preventDefault(); gPasteGetUrl(); }
+  if (t.id === 'gPasteSubmitBtn') { e.preventDefault(); gPasteSubmit(); }
 });
 window.addEventListener('DOMContentLoaded', () => {
   setTimeout(gStatus, 200);

@@ -693,11 +693,14 @@ async def google_authorize():
 
 
 @app.post("/api/google/disconnect")
-async def google_disconnect():
-    """يحذف الـtokens المحفوظة (يبقي client_secret حتى لا تُعيد رفعه)."""
+async def google_disconnect(full: int = 0):
+    """يحذف الـtokens المحفوظة. مع `?full=1` يحذف أيضاً client_secret (لتغييره)."""
     gd = _google_dir()
+    names = ["gsc_token.json", "ga4_token.json"]
+    if int(full or 0):
+        names.append("client_secret.json")
     removed = []
-    for name in ("gsc_token.json", "ga4_token.json"):
+    for name in names:
         p = gd / name
         if p.exists():
             try:
@@ -706,6 +709,123 @@ async def google_disconnect():
             except OSError:
                 pass
     return JSONResponse({"ok": True, "removed": removed})
+
+
+@app.get("/api/google/gsc-sites")
+async def google_gsc_sites():
+    """قائمة مواقع GSC المتاحة للحساب الموثَّق — لتعبئة قائمة منسدلة في الواجهة."""
+    gd = _google_dir()
+    cs = gd / "client_secret.json"
+    if not cs.exists() or not (gd / "gsc_token.json").exists():
+        return JSONResponse({"sites": [], "error": "not_connected"})
+
+    def _run():
+        from integrations.gsc_api import GSCClient, parse_gsc_sites
+        c = GSCClient(credentials_path=str(cs), site_url="https://example.com/")
+        if not c.authenticate(allow_interactive=False):
+            return {"sites": [], "error": "auth_failed"}
+        try:
+            return {"sites": parse_gsc_sites(c.service.sites().list().execute())}
+        except Exception as e:  # noqa: BLE001
+            return {"sites": [], "error": str(e)[:300]}
+
+    return JSONResponse(await _run_conn_test(_run))
+
+
+@app.get("/api/google/ga4-properties")
+async def google_ga4_properties():
+    """قائمة خصائص GA4 المتاحة للحساب الموثَّق."""
+    gd = _google_dir()
+    cs = gd / "client_secret.json"
+    if not cs.exists() or not (gd / "ga4_token.json").exists():
+        return JSONResponse({"properties": [], "error": "not_connected"})
+
+    def _run():
+        from integrations.ga4_api import list_ga4_properties
+        return {"properties": list_ga4_properties(str(cs), allow_interactive=False)}
+
+    return JSONResponse(await _run_conn_test(_run))
+
+
+# === مسار «لصق الرمز» — احتياط للأجهزة بلا متصفّح/الخوادم البعيدة ===
+# نحتفظ بكائن Flow مؤقتاً بين طلبَي url وcode (SCT محلية لمستخدم واحد).
+_paste_flow: dict[str, Any] = {}
+_PASTE_REDIRECT = "http://127.0.0.1:1/"  # لا نستمع — المتصفّح يفشل لكن الرمز يظهر في URL
+
+
+def _save_google_tokens(gd: Path, creds: Any) -> None:
+    """يحفظ token موحّداً يغطّي GSC + GA4 (نفس موافقة /authorize)."""
+    for name in ("gsc_token.json", "ga4_token.json"):
+        out = gd / name
+        out.write_text(creds.to_json(), encoding="utf-8")
+        try:
+            os.chmod(out, 0o600)
+        except (OSError, NotImplementedError):
+            pass
+
+
+def _extract_oauth_code(pasted: str) -> str:
+    """يستخرج معامل `code` سواء أُدخِل كرمز خام أو كرابط callback كامل."""
+    s = (pasted or "").strip()
+    if not s:
+        return ""
+    if "code=" in s:
+        from urllib.parse import urlparse, parse_qs
+        try:
+            qs = parse_qs(urlparse(s).query or s.split("?", 1)[-1])
+            v = qs.get("code") or []
+            if v:
+                return v[0]
+        except (ValueError, IndexError):
+            pass
+    return s
+
+
+@app.get("/api/google/authorize-url")
+async def google_authorize_url():
+    """يعيد رابط موافقة Google لاستعماله مع لصق الرمز يدوياً (بلا متصفّح محلي)."""
+    gd = _google_dir()
+    cs = gd / "client_secret.json"
+    if not cs.exists():
+        return JSONResponse({"error": "ارفع client_secret.json أولاً."}, status_code=400)
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return JSONResponse(
+            {"error": "ثبّت: pip install google-auth-oauthlib"}, status_code=500)
+    try:
+        flow = Flow.from_client_secrets_file(str(cs), scopes=_GOOGLE_SCOPES)
+        flow.redirect_uri = _PASTE_REDIRECT
+        auth_url, _state = flow.authorization_url(
+            access_type="offline", include_granted_scopes="true", prompt="consent")
+        _paste_flow["flow"] = flow
+        return JSONResponse({"auth_url": auth_url, "redirect_uri": _PASTE_REDIRECT})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)[:300]}, status_code=500)
+
+
+@app.post("/api/google/authorize-code")
+async def google_authorize_code(code: str = Form("")):
+    """يكمل التفويض بعد لصق المستخدم للرمز/رابط callback من المتصفّح."""
+    extracted = _extract_oauth_code(code)
+    if not extracted:
+        return JSONResponse({"error": "ألصق الرمز أو رابط callback كاملاً."}, status_code=400)
+    flow = _paste_flow.get("flow")
+    if flow is None:
+        return JSONResponse(
+            {"error": "ابدأ من «احصل على رابط الموافقة» أولاً."}, status_code=400)
+    try:
+        flow.fetch_token(code=extracted)
+        _save_google_tokens(_google_dir(), flow.credentials)
+        _paste_flow.pop("flow", None)
+        gd = _google_dir()
+        return JSONResponse({
+            "ok": True,
+            "gsc_token": str(gd / "gsc_token.json"),
+            "ga4_token": str(gd / "ga4_token.json"),
+        })
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)[:300]}, status_code=500)
 
 
 # تثبيت المتطلبات يعمل في الخلفية ثم نستفسر عن الحالة — لأنّ التثبيت قد يستغرق

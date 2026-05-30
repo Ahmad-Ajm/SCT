@@ -23,6 +23,61 @@ from utils.logger import get_logger
 log = get_logger(__name__)
 
 
+def parse_ga4_properties(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """يُسطّح استجابة `accountSummaries.list` إلى قائمة خصائص (دالّة نقية)."""
+    out: list[dict[str, Any]] = []
+    for acc in (resp or {}).get("accountSummaries", []) or []:
+        if not isinstance(acc, dict):
+            continue
+        acc_name = acc.get("displayName", "")
+        for ps in acc.get("propertySummaries", []) or []:
+            if not isinstance(ps, dict):
+                continue
+            prop = ps.get("property") or ""
+            pid = prop.split("/")[-1] if prop else ""
+            if not pid:
+                continue
+            out.append({
+                "property_id": pid,
+                "display_name": ps.get("displayName", ""),
+                "account": acc_name,
+                "property_type": ps.get("propertyType", ""),
+            })
+    return out
+
+
+def list_ga4_properties(
+    credentials_file: str, allow_interactive: bool | None = False
+) -> list[dict[str, Any]]:
+    """يجلب قائمة خصائص GA4 المتاحة للحساب الموثَّق (غير تفاعلي افتراضياً)."""
+    if not credentials_file:
+        return []
+    try:
+        from googleapiclient.discovery import build
+        from integrations.google_auth import load_google_credentials
+    except ImportError:
+        log.error("ثبّت: pip install google-api-python-client google-auth-oauthlib")
+        return []
+    try:
+        from pathlib import Path as _Path
+        token_path = str(_Path(credentials_file).parent / "ga4_token.json")
+        creds = load_google_credentials(
+            credentials_file,
+            ["https://www.googleapis.com/auth/analytics.readonly"],
+            token_path,
+            allow_interactive=allow_interactive,
+        )
+        if not creds:
+            return []
+        admin = build("analyticsadmin", "v1beta", credentials=creds,
+                      cache_discovery=False)
+        resp = admin.accountSummaries().list().execute()
+        return parse_ga4_properties(resp)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"تعذّر جلب خصائص GA4: {e}")
+        return []
+
+
 class GA4Client:
     def __init__(self, property_id: str, credentials_file: str = "", date_range_days: int = 90):
         self.property_id = str(property_id or "").strip()

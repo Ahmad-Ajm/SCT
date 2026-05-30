@@ -1009,6 +1009,44 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(cfg["integrations"]["gsc"]["inspect_max_urls"], 30)
         self.assertTrue(cfg["integrations"]["pagespeed"]["crux_history"])
 
+    def test_google_listing_parsers_and_code_extractor(self):
+        # المُحلّلات النقية: مواقع GSC، خصائص GA4، واستخراج code من رابط callback
+        from integrations.gsc_api import parse_gsc_sites
+        from integrations.ga4_api import parse_ga4_properties
+        sys.path.insert(0, str(ROOT / "webapp"))
+        try:
+            import app as webapp_app
+        except Exception:  # noqa: BLE001
+            self.skipTest("webapp app import unavailable")
+
+        # GSC sites
+        sites = parse_gsc_sites({"siteEntry": [
+            {"siteUrl": "https://a.com/", "permissionLevel": "siteOwner"},
+            {"siteUrl": "https://b.com/", "permissionLevel": "siteFullUser"},
+            {"siteUrl": "", "permissionLevel": "x"},  # يُتجاهَل
+        ]})
+        self.assertEqual([s["site_url"] for s in sites], ["https://a.com/", "https://b.com/"])
+        self.assertEqual(sites[0]["permission_level"], "siteOwner")
+
+        # GA4 properties — مسطّحة من accountSummaries
+        props = parse_ga4_properties({"accountSummaries": [
+            {"displayName": "Acme", "propertySummaries": [
+                {"property": "properties/12345", "displayName": "Acme.com"},
+                {"property": "properties/67890", "displayName": "Acme blog",
+                 "propertyType": "PROPERTY_TYPE_ORDINARY"}]},
+            {"displayName": "Other", "propertySummaries": [
+                {"property": "", "displayName": "ignored"}]},  # بلا معرّف ⇒ يُتجاهَل
+        ]})
+        self.assertEqual({p["property_id"] for p in props}, {"12345", "67890"})
+        self.assertEqual(props[0]["account"], "Acme")
+
+        # استخراج الرمز: من رمز خام، ومن رابط callback كامل، ومن سلسلة استعلام فقط
+        ex = webapp_app._extract_oauth_code
+        self.assertEqual(ex("4/0Aabc-raw_code"), "4/0Aabc-raw_code")
+        self.assertEqual(ex("http://127.0.0.1:1/?state=x&code=ABC123&scope=y"), "ABC123")
+        self.assertEqual(ex("?code=XYZ&state=s"), "XYZ")
+        self.assertEqual(ex(""), "")
+
     def test_connection_test_helper_times_out(self):
         # اختبارات الاتصال محدودة بمهلة كي لا يتعلّق الطلب (سبب CancelledError عند الإيقاف)
         import asyncio as _asyncio

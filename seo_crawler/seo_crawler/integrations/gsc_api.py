@@ -250,6 +250,22 @@ class GSCClient:
         return out
 
 
+def parse_gsc_sites(resp: dict[str, Any]) -> list[dict[str, Any]]:
+    """يُسطّح استجابة `sites.list` إلى صفوف {site_url, permission_level} (دالّة نقية)."""
+    out: list[dict[str, Any]] = []
+    for s in (resp or {}).get("siteEntry", []) or []:
+        if not isinstance(s, dict):
+            continue
+        url = s.get("siteUrl") or ""
+        if not url:
+            continue
+        out.append({
+            "site_url": url,
+            "permission_level": s.get("permissionLevel", ""),
+        })
+    return out
+
+
 def parse_inspection_result(resp: dict[str, Any], url: str) -> dict[str, Any]:
     """يُسطّح استجابة URL Inspection إلى صف واحد (دالّة نقية قابلة للاختبار)."""
     idx = ((resp or {}).get("inspectionResult") or {}).get("indexStatusResult") or {}
