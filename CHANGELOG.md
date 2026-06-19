@@ -4,6 +4,480 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.08.1 — 2026-06-19 (hotfix)
+
+### Fixed — critical NameError in `_discover_new_links`
+
+A real-world crawl
+raised `NameError: name 'url' is not defined` **6,500 times**. Every product
+page fetched, every product page failed at link-discovery, every product
+page logged a traceback. 3,246 pages were saved (sitemap-seeded), but **zero
+new URLs were discovered from page content** — the bug fired on the first
+iteration of every `for a_tag in soup.find_all("a", href=True)` loop.
+
+**Root cause:** v1.08 M2 added `source_url=url` to the `_enqueue` call in
+`async_core._discover_new_links`, but the method signature is
+`_discover_new_links(self, page, soup, depth)` — the URL parameter is named
+`page` (a `PageData` object), not `url`. The fix is one character: read
+`page.url` instead.
+
+**Why our v1.08 verification missed it:**
+- `compileall` doesn't catch undefined-at-runtime names (the line is
+  syntactically valid Python).
+- `unittest` covers 69 component-level tests; none of them actually drove
+  `AsyncCrawler._discover_new_links` against an HTML soup with anchor tags.
+- The classifier sanity tests exercised classification only, not the
+  enqueue path.
+
+**Added a regression smoke test** (`test_discover_new_links_smoke_smoke`)
+that instantiates a real `AsyncCrawler` with minimal config, runs
+`_discover_new_links` against a 4-link HTML soup, and asserts (a) no
+exception, (b) primary URLs enter the queue, (c) deferred URLs enter
+`crawler.deferred`. Verified the test correctly fails when the bug is
+present — temporarily reverting the fix triggered the same `NameError`,
+confirming the test guards against this exact class of regression.
+
+### Verified
+
+```
+70/70 tests pass (4.2s, includes new smoke test)
+compileall clean
+node --check on inline JS clean
+```
+
+### Practical recommendation
+
+The failed 5h crawl produced no audit JSON (return code 1, output dir
+empty). Delete it from the recent-jobs panel and start a fresh crawl.
+
+## v1.08 — 2026-06-18
+
+### Added — Two-phase crawl with deferred-URL panel
+
+The biggest UX shift since v1.04. Instead of asking the user upfront how
+many pages to crawl (a guess they can't make without seeing the site), the
+crawler now **classifies URLs as it discovers them** and quietly defers
+known-wasteful patterns. After Phase 1 finishes, a panel surfaces what was
+deferred — grouped by reason — and the user decides whether to spend the
+extra time on Phase 2.
+
+#### What gets deferred (and why)
+
+| Kind | Trigger | Why we defer |
+|---|---|---|
+| `pagination_deep` | `?page=N` (or `p=`, `pg=`) where N > **3** | Same template, similar SEO target; first 3 pages catch any pattern issue |
+| `redirect_wrapper` | `/auth/login?redirect_to=…`, `/login?next=…`, etc. | Cloudflare/WAF typically returns 403 to bots — wastes budget |
+| `filter_combination` | More than 1 `?filter[]=` / `category=` / `brand=` etc. | Cartesian explosion, same products different facets |
+
+URLs in **sitemap** + the **start URL** are always primary (never deferred).
+Everything else (`other`) is primary by default.
+
+#### What you see after Phase 1
+
+A new amber panel between status and downloads:
+> 🔍 **Discovered URLs not crawled in Phase 1**
+> The primary URLs have been crawled. The URLs below were deferred…
+>
+> [📄 Deep pagination] [🚪 Auth wrappers] [🧪 Filter combinations]
+>
+> [🔁 Run Phase 2 (crawl deferred)] [⬇️ Download deferred list (CSV)] [Show samples]
+
+Counts come from `deferred_summary` in `audit.json` (or the CSV as fallback).
+Clicking **Run Phase 2** re-spawns the crawler in `--phase2` mode against the
+same job directory: deferred URLs become seeds, the classifier is disabled,
+results merge into the same JSON. No new job ID — same job, deeper data.
+
+#### Files / modules
+
+- `seo_crawler/seo_crawler/utils/url_classifier.py` **(new)** —
+  `UrlClassifier(sitemap_urls, navigation_urls, pagination_max=3, filter_max=1)`
+  with `.classify(url) -> (kind, is_deferred)`. Stateless `classify_url(...)`
+  helper. 9/9 unit-style sanity checks pass.
+- `seo_crawler/seo_crawler/crawler/async_core.py` — classifier instantiated
+  in `__init__` from `crawl.deferred_crawl` config; `_enqueue(url, depth,
+  source_url)` consults it and routes deferred URLs to `self.deferred` dict
+  instead of the queue; sitemap URLs feed the classifier after sitemap parse;
+  `discover_links` passes the source URL for diagnostic traceability.
+- `seo_crawler/seo_crawler/main.py` — new `_deferred_list()` and
+  `_deferred_summary()` helpers; `--phase2` CLI flag toggles
+  `config.crawl.deferred_crawl.phase2 = True`; `run_crawl_async` injects
+  `deferred_urls.csv` as seeds in Phase 2 via `_inject_phase2_seeds()`;
+  `audit.json` gains `deferred_urls` (full list) and `deferred_summary`
+  (counts + 10 samples per kind); `csv/deferred_urls.csv` always written
+  alongside `excluded_urls.csv`.
+- `webapp/job_runner.py` — `start_phase2(job_id)` method validates
+  preconditions (job exists, config present, deferred CSV exists, no active
+  job) and spawns a new subprocess with `--phase2` against the same job
+  directory; log is appended (not overwritten) so Phase 1's log is preserved.
+- `webapp/app.py` — `POST /api/jobs/{id}/phase2` and `GET /api/jobs/{id}/deferred`
+  endpoints. The latter reads `deferred_summary` from `audit.json` if
+  available, falls back to streaming `deferred_urls.csv`.
+- `webapp/templates/job.html` — new deferred panel with kind-grouped cards,
+  Phase 2 button, CSV link, expandable samples; wired into `finish()` via
+  `_loadDeferred()`.
+- `webapp/static/i18n.js` — 7 new keys × 2 languages
+  (`deferred_h`, `deferred_p`, `phase2_run`, `phase2_starting`,
+  `phase2_running`, `deferred_csv`, `deferred_show_samples`).
+- `webapp/templates/index.html`, `json_exporter.py` — version bumps to v1.08.
+
+#### Backward compatibility
+
+- All previously-completed jobs work unchanged. They simply don't show the
+  deferred panel (no `deferred_summary` in their JSON → API returns empty).
+- A new crawl with the default `deferred_crawl.enabled: true` is the new
+  default behavior. Setting it to `false` in `config.yaml` reverts to v1.07
+  semantics (every discovered URL goes straight to the queue).
+- The classifier honors `crawl.deferred_crawl.pagination_max` and
+  `crawl.deferred_crawl.filter_max` for advanced overrides.
+
+#### Verified
+
+```
+69/69 tests pass (5.1s)
+9/9 classifier sanity checks pass
+6/6 realistic-scenario classifications correct (15/30 deferred as expected)
+node --check on both inline JS blocks: clean
+Jinja render of index.html + job.html: clean
+```
+
+### Deferred (only remaining ROADMAP item)
+
+- **Single-file Windows `.exe` (PyInstaller)** — needs a Windows CI build host.
+
+## v1.07 — 2026-06-18
+
+### Added — Aggressive URL normalization (queue shrink + crawl speed)
+
+- **Tracking-param strip list expanded 9 → ~30.** `_TRACKING_PARAMS` in
+  `utils/helpers.py` now covers Google Analytics (`utm_*`, `_ga`, `_gid`,
+  `_gac`), Google Ads (`gclid`, `dclid`, `gbraid`, `wbraid`), Microsoft
+  (`msclkid`), Meta (`fbclid`, `_fb`, `fb_*`), TikTok (`ttclid`), Twitter
+  (`twclid`), LinkedIn (`li_fat_id`), Pinterest (`epik`), Yandex (`yclid`),
+  Mailchimp (`mc_cid`, `mc_eid`), Instagram (`igshid`), plus generic
+  `ref`/`affiliate`/`source` variants. All safe — these never change page
+  content.
+- **Per-platform query-param normalization.** Each preset in
+  `config_presets.PRESETS` now carries a `strip_query_params` list, and
+  `apply_preset` calls a new `helpers.set_extra_strip_params(...)` so the
+  active preset's params are stripped globally for the crawl:
+  - **Zid:** `sort_by`, `sort`, `order_by`, `order`, `view`
+  - **Salla:** `sort`, `order`, `view`
+  - **Shopify:** `sort_by`, `sortBy`, `view`
+  - **WooCommerce:** `orderby`, `order`, `min_price`, `max_price`
+- **Why it's safe (and what it preserves):** these params produce
+  same-content-different-order pages that the platform itself canonicalizes
+  to the base URL. Collapsing them on the crawler side just avoids fetching
+  redundant variants. **Pagination is NOT touched** — `?page=1` and `?page=2`
+  remain distinct because they carry different content.
+- **Expected impact:** for a Zid store like the one in our test case, the
+  queue shrinks by 40-70% (multiple sort_by variants × 50+ categories
+  collapse to one each). Crawl wall-time drops proportionally.
+
+### Files touched
+
+`seo_crawler/seo_crawler/utils/helpers.py` (expanded `_TRACKING_PARAMS` set,
+new `_EXTRA_STRIP_PARAMS` + `set_extra_strip_params()`, `normalize_url` honors
+both), `seo_crawler/seo_crawler/config_presets.py` (`strip_query_params` per
+preset + `apply_preset` wires it via `set_extra_strip_params`),
+`webapp/templates/index.html` (v1.07 version tag),
+`seo_crawler/seo_crawler/exporters/json_exporter.py` (version bump).
+
+### Verified behaviors (manual test)
+
+```
+normalize_url("https://x/a?utm_source=fb&gclid=Y&_ga=Z")
+  → "https://x/a"                                                # tracking stripped
+
+normalize_url("https://x/c?sort_by=price&page=2")               # before preset
+  → "https://x/c?page=2&sort_by=price"                          # sort_by KEPT
+
+# After: set_extra_strip_params(["sort_by", "sort", "order_by", "order", "view"])
+normalize_url("https://x/c?sort_by=price&page=2&view=grid")
+  → "https://x/c?page=2"                                        # sort_by + view stripped, page KEPT
+
+normalize_url("https://x/c?page=1") != normalize_url("https://x/c?page=2")
+  → True                                                         # pagination preserved
+```
+
+### Note for the in-progress crawl
+
+The current running job started before this fix; restart it (or let it finish)
+to see the queue shrink. Future crawls with `platform_preset` set get the
+optimization automatically — no extra UI step.
+
+### Deferred (only remaining ROADMAP item)
+
+- **Single-file Windows `.exe` (PyInstaller)** — needs a Windows CI build host.
+
+## v1.06 — 2026-06-18
+
+### Fixed — two bugs hit in real-world use
+
+- **Integrations-only jobs no longer break the report panel.** When a user ran
+  «تكاملات فقط (بلا زحف)», the output was `integrations_*.json` (no pages/links),
+  but v1.04's on-demand generate buttons still appeared and every click failed
+  with `RuntimeError: no audit JSON for this job`. Fix: `_discover_result` now
+  recognizes `integrations_*.json` and tags the result with `kind`
+  (`audit` vs `integrations_only`). The job page hides the HTML/PDF/Excel/XML
+  generate row for integrations-only jobs and shows a clear hint pointing the
+  user to «زحف كامل» if reports are wanted. The existing CSV file list still
+  renders (gsc_pages, gsc_queries, ga4_landing_pages, pagespeed_*, etc.) so the
+  fetched data is fully accessible.
+- **Google OAuth token expiry is now detected before the crawl, not during it.**
+  Google's "Testing" mode revokes refresh tokens every 7 days, which previously
+  surfaced as a mid-job `invalid_grant: Token has been expired or revoked.`
+  failure. `/api/google/status` now actively probes both tokens (silent
+  `creds.refresh()`) and returns an `expired` flag. The readiness chip turns
+  amber/red with «⚠️ Google (منتهٍ — أعد التفويض)» and the status line in the
+  Integrations tab points the user at «وافق بحسابي» — no guessing why GSC
+  suddenly stopped working. The `client_secret` stays saved across re-consents,
+  so the user only re-approves, doesn't re-upload.
+
+### Files touched
+
+`webapp/job_runner.py` (integrations_json + kind in `_discover_result`),
+`webapp/templates/job.html` (kind-aware `_syncResultKindUI`, integrations-only
+note, hidden gen-row), `webapp/templates/index.html` (expired-aware readiness
+chip + gStatus text, v1.06 version tag), `webapp/static/i18n.js`
+(`integrations_only_note` + `g_expired` + `r_google_expired` AR/EN),
+`webapp/app.py` (`_probe_token_expired` + `/api/google/status` returns
+`expired`), `seo_crawler/seo_crawler/exporters/json_exporter.py` (version bump).
+
+### Notes
+
+- The two already-completed jobs from the report-failure session
+  (`20260618_115942_298d71` and `20260618_120723_1d186a`) were backfilled with
+  the new `kind: "integrations_only"` flag so the user's existing job pages
+  display the hint without re-running anything.
+- This release does not change Google's 7-day Testing-mode policy itself —
+  removing that requires OAuth verification (sensitive scopes). v1.06 just makes
+  the expiry visible *before* it bites in the middle of a job.
+
+### Deferred (only remaining ROADMAP item)
+
+- **Single-file Windows `.exe` (PyInstaller)** — needs a Windows CI build host.
+
+## v1.05 — 2026-06-02
+
+### Added — User-Agent spoofing (Googlebot simulation)
+
+- **Configurable User-Agent under Advanced crawl options.** Four presets +
+  custom: regular visitor (default, unchanged), Googlebot, Googlebot Mobile,
+  Bingbot. The selector lives next to the platform preset in the Advanced
+  collapsible; picking "Custom" reveals a text input for an arbitrary UA string.
+- **Why this exists**: a regular-UA crawl can't see Cloudflare/WAF blocks
+  that specifically target bots — e.g. a Zid/Cloudflare store can return 14k+
+  GSC 403s on bot-only paths that SCT can't reproduce when it crawls as a
+  normal browser. Picking "Googlebot" reproduces what Google's crawler sees
+  and surfaces those blocks immediately.
+- **Plumbing**: `ua_preset` is mapped to a real UA string in `webapp/job_runner.py`
+  and written to `crawl.user_agent` in the job config. The existing crawler
+  reads it without modification (`http_client.py` already accepts a per-job UA).
+- Bilingual tooltip warns to lower crawl speed when impersonating a bot to
+  avoid tripping rate-limit rules.
+
+### Files touched
+
+`webapp/templates/index.html` (UA dropdown + custom box + JS show/hide,
+v1.05 version tag), `webapp/static/i18n.js` (AR + EN UA preset keys + tooltip),
+`webapp/app.py` (`_UA_PRESETS` mapping note, `ua_preset` + `ua_custom`
+plumbed into overrides), `webapp/job_runner.py` (preset → `crawl.user_agent`
+translation), `seo_crawler/seo_crawler/exporters/json_exporter.py` (version
+bump 1.04 → 1.05).
+
+### Deferred (only remaining ROADMAP item)
+
+- **Single-file Windows `.exe` (PyInstaller)** — needs a Windows CI build host.
+
+## v1.04 — 2026-06-01
+
+### Added — 6 ROADMAP items shipped in one drop
+
+- **Queue counter clarity when `max_pages` is reached.** The async crawler now
+  emits `reached_max_pages: true` in every progress tick once the cap is hit;
+  the job-page renders the queue card with a dimmed label "discovered (won't
+  crawl)" instead of misleading "17,583 in queue". Removes the recurring
+  "the tool looks like it's still working" confusion.
+- **Silence-aware "why am I waiting?" hint.** A small ticker on the job page
+  watches all counters + phase signature; if nothing changes for ≥30 seconds it
+  surfaces a phase-aware hint (e.g. "Playwright is launching Chromium for the
+  first time — 30-60s", "each PageSpeed call takes ~25s × 2 strategies", "writing
+  dozens of CSV files can take a minute"). Pairs with the v1.03 per-URL phase
+  detail for full visibility.
+- **Excel + XML added to on-demand generation.** v1.03 shipped HTML/PDF as
+  per-format generate buttons; v1.04 extends the same UI + endpoint to Excel and
+  XML. Both rebuild from the audit JSON + the always-present CSV files (so even
+  if `output.json_full=false` they still work — links/images/headings are loaded
+  from `csv/`). `csv` + `json` are now the *only* always-generated formats.
+  XML download zips the multi-file `xml/` folder transparently.
+- **Crawl visualization page (`/jobs/<id>/graph`).** Three views in one page:
+  (1) depth + status-code distribution as horizontal bars, (2) hierarchical site
+  tree built from URL path segments with collapsible `<details>` and red
+  highlighting for branches containing 4xx pages, (3) a force-directed link map
+  on canvas (no external deps — small vanilla simulation, capped at 500 nodes
+  for browser perf). Reachable from the job page via the new "🗺️ Crawl map" button.
+  New endpoint: `GET /api/jobs/<id>/graph`.
+- **Log analyzer → Action Board join.** New helper
+  `join_log_with_audit(log_per_url, audit)` in `analyzers/log_analyzer` and a
+  new endpoint `POST /api/jobs/<id>/log-board` that takes a server log upload
+  and joins it with the current job. Output: (a) **wasted Google crawl budget**
+  — pages Google hits a lot that return 4xx/5xx, (b) **high-value pages with
+  issues** — pages Google cares about *and* have priority issues (the most
+  consequential to fix), (c) **orphan-at-Google** — pages Google knows but our
+  crawler didn't discover (strong internal-linking signal), (d) **rescored
+  priority** — every priority page boosted by `log10(googlebot_hits + 1) × 10`.
+  UI surfaces all four as a collapsible section on the existing Action Board
+  page with summary cards and tables.
+- **Live backlinks API integrations** (Ahrefs v3 + Majestic OpenApp). New module
+  `integrations/backlinks_api.py` with a unified shape across providers
+  (`summary`, `top_referring_domains`, `top_anchors`) so the report doesn't care
+  who fetched the data. Off by default; paid keys required. The key flows through
+  the existing secret-via-env pattern (`BACKLINKS_API_KEY`), never written to
+  disk. Lives next to the free AWT CSV importer in the Integrations tab with a
+  tooltip pointing users to the free option first. Documented in
+  `docs/EXTERNAL_TOOLS_GUIDE.md`.
+
+### Changed
+
+- **Default crawl formats reduced to `csv + json` only.** Excel/HTML/PDF/XML are
+  all on-demand now. Cuts crawl wall-time (especially on large sites) and gives
+  the user explicit control over which formats actually get built.
+- **`reached_max_pages` flag** is now part of every progress tick (not just the
+  final one) so the UI can react during the crawl, not after.
+
+### Backend
+
+- New endpoints: `POST /api/jobs/<id>/log-board`,
+  `GET /api/jobs/<id>/graph`, `GET /jobs/<id>/graph`.
+- Extended endpoints: `POST /api/jobs/<id>/generate?format=excel|xml`,
+  `GET /api/jobs/<id>/download/xml` (zips the xml folder).
+- New module `integrations/backlinks_api.py` (`BacklinksProvider`,
+  `AhrefsClient`, `MajesticClient`).
+- New analyzer entry `analyzers.log_analyzer.join_log_with_audit`.
+
+### Files touched
+
+`webapp/templates/index.html` (backlinks API card, v1.04 version tag),
+`webapp/templates/job.html` (queue-counter dimming, silence hint, Excel/XML gen
+buttons, Crawl-map link), `webapp/templates/board.html` (log-board section),
+`webapp/templates/graph.html` **(new)**, `webapp/static/i18n.js` (40+ new
+keys in both AR/EN: graph, log-board, backlinks, queue capped, silence hints),
+`webapp/static/app.css` (carries over v1.03 styles), `webapp/app.py`
+(`/api/requirements` already shipped, new `/jobs/<id>/graph` + `/api/.../graph`
++ `/api/.../log-board`, extended generate to excel/xml + xml-download zip),
+`webapp/job_runner.py` (`BACKLINKS_API_KEY` secret pass-through),
+`seo_crawler/seo_crawler/main.py` (run_integrations: backlinks block),
+`seo_crawler/seo_crawler/integrations/backlinks_api.py` **(new)**,
+`seo_crawler/seo_crawler/analyzers/log_analyzer.py` (`join_log_with_audit`),
+`seo_crawler/seo_crawler/crawler/async_core.py` (`reached_max_pages` in progress),
+`seo_crawler/seo_crawler/exporters/json_exporter.py` (version bump),
+`docs/EXTERNAL_TOOLS_GUIDE.md` (Ahrefs/Majestic live API section).
+
+### Deferred to a later release
+
+- **Single-file Windows `.exe` (PyInstaller)** — the only remaining ROADMAP P3
+  item. The PowerShell installer continues to be the supported non-Docker
+  Windows path; a true bundled `.exe` needs a Windows CI build host.
+
+## v1.03 — 2026-06-01
+
+### Added — UI/UX overhaul driven by 8 user-feedback items
+
+- **Hoverable tooltips on every UI control** (`?` and `⏱` badges). 30+ bilingual
+  tooltips explain what each option does, what it costs in time when applicable
+  ("PageSpeed adds ~25s per URL × 2 strategies", "URL Inspection ~1s per URL",
+  "JS rendering +200-400%"), and what the platform preset / sample-per-host /
+  CrUX History / Save-raw-Lighthouse options actually do. Tooltip text is loaded
+  from i18n (`tip_*` keys in both AR and EN) and re-applied on language switch.
+- **Multi-stage progress with current-URL detail.** Progress now emits
+  `phase_label` + `phase_percent` + `phase_detail` for every long phase
+  (PageSpeed loop per URL, External-links check, Analysis, Export). The job page
+  shows the operation name ("جلب من PageSpeed…"), a percentage that actually
+  moves, and a monospaced URL row underneath (e.g. `[42/212] mobile: /products/…`).
+  No more "stuck at 09:05 for 4 minutes" mystery — the user sees what's happening.
+- **Optional-requirements status row** at the top of the main page. Compact chips
+  for Excel (openpyxl), PDF (Chromium), GA4 — each shows ✓ present or ✗ missing
+  with an inline [Install] button that triggers the existing background installer.
+  Backed by a new `/api/requirements` endpoint that probes once and caches.
+- **On-demand HTML/PDF generation.** Removed the "output formats" multi-checkbox
+  from the main page; the crawl now always emits raw data (CSV + JSON + Excel),
+  and HTML/PDF are built only when the user clicks the per-format
+  `[🌐 Generate HTML] [⬇️ Download]` / `[📄 Generate PDF] [⬇️ Download]` buttons
+  on the job page. Cuts crawl wall-time noticeably (PDF via Playwright is the
+  slowest single step), saves disk on jobs whose reports are never opened.
+  New endpoint `POST /api/jobs/<id>/generate?format=html|pdf` runs in background;
+  `GET …/generate/<fmt>/status` polls.
+- **AI advisor — per-provider field cleanup.** Provider dropdown now hides
+  irrelevant fields dynamically: cloud providers (OpenAI/Gemini/DeepSeek/
+  OpenRouter/HuggingFace) show just API key + model + opps; new explicit
+  **🖥️ Local model (Ollama / LM Studio)** option shows endpoint URL + model +
+  allow-private (auto-suggests `http://127.0.0.1:11434/v1`) and hides the API
+  key; the custom OpenAI-compatible option shows all three. Eliminates the old
+  "every field always visible regardless of provider" confusion.
+- **PageSpeed DNS-error resilience.** The PageSpeed client now catches
+  `getaddrinfo` / `NameResolutionError` / generic `ConnectionError` and retries
+  with 2s/5s/10s backoff (vs the old "fail-fast on any exception"). Repeated
+  errors are aggregated into a single end-of-job summary line
+  (`PageSpeed errors summary: total=X | dns=… timeout=… http_429=… http_5xx=…
+  other=…`) instead of one ERROR row per failed URL. Addresses the exact
+  log noise we saw on the 31 May audit.
+- **GA4 property_id discovery doc** at `docs/GA4_PROPERTY_ID.md` with both the
+  GA4-admin path and the in-UI "📋 Fetch GA4 properties" shortcut, plus a clear
+  Property-ID vs Measurement-ID distinction.
+- **Full OAuth setup doc** at `docs/OAUTH_SETUP.md` (3 steps: enable APIs +
+  configure consent screen + create Desktop OAuth client), plus the paste-the-code
+  fallback for headless machines, plus a "common errors" table.
+
+### Changed — main-page simplification
+
+- **Max depth default lowered to 5** (was 10) with a tooltip explaining what
+  depth means in clicks-from-homepage. 5 covers a typical e-commerce store
+  (home → category → subcategory → product → variant); deeper crawls remain
+  configurable.
+- **Mode selector hidden from main page**; moved into the new "Advanced crawl"
+  collapsible. Default `audit` fits 95% of cases; `competitor` and `compare`
+  are still available for the rare cases that need them.
+- **Manual speed-tuning controls** (delay + concurrency) moved one level deeper
+  inside the Advanced collapsible. The 5-step speed slider is what most users
+  should touch; the manual controls remain for power users.
+- **External-links + resource-status + adaptive-throttle + sitemap-generation
+  + platform-preset** consolidated under the same Advanced collapsible.
+- **OAuth setup section trimmed to a single doc link** in the UI (the 3-step
+  inline guide moved to `docs/OAUTH_SETUP.md`, served at `/docs/oauth_setup`).
+  Less wall-of-text in the main interface; the doc itself is more thorough.
+- **Lighthouse / AWT importers folded under a single "External data" collapsible**
+  in the integrations panel — both are rarely needed since PageSpeed API covers
+  Lighthouse data and most users get backlinks via separate tools.
+
+### Backend
+
+- New `/docs/<name>` endpoint serves project markdown files as inline HTML
+  (zero deps — small in-house md→html converter handles `#/##/###`, code fences,
+  bullet/numbered lists, `**bold**`, `code`, and `[text](url)`). Mapped names:
+  `oauth_setup`, `ga4_property_id`.
+- `emit_phase()` now consistently sets `phase_label` + `phase_percent` (where
+  known) at: `integrations`, `analyzing`, `exporting`, `checking_external_links`,
+  `pagespeed` (per URL via callback). The job UI prefers these over the old
+  generic `status` for the phase label.
+- `PageSpeedClient` constructor accepts `on_progress(idx, total, url, strategy)`
+  callback used to drive `phase_detail` in the UI.
+
+### Files touched
+
+`webapp/templates/index.html` (tooltips, simplified main, AI panel cleanup, hidden
+mode, depth 5 default, requirements row, removed formats UI),
+`webapp/templates/job.html` (phase detail row, per-format generate buttons +
+download), `webapp/static/app.css` (`.tip`, `.phase-detail`, `.req-row`, `.gen-row`,
+`.gen-box` styles), `webapp/static/i18n.js` (30+ `tip_*` + `req_*` + `gen_*` +
+`ph_*` keys in both AR and EN), `webapp/app.py` (`/api/requirements`,
+`/docs/<name>`, `/api/jobs/<id>/generate`, `/api/jobs/<id>/generate/<fmt>/status`,
+updated default formats), `seo_crawler/seo_crawler/integrations/pagespeed_api.py`
+(DNS retry, error stats, on_progress hook, end-of-job summary),
+`seo_crawler/seo_crawler/main.py` (phase_label + phase_detail emission at every
+long phase including the PageSpeed loop), `seo_crawler/seo_crawler/exporters/
+json_exporter.py` (version bump). New: `docs/OAUTH_SETUP.md`,
+`docs/GA4_PROPERTY_ID.md`.
+
 ## v1.02 — 2026-05-30
 
 ### Added (docs for a real open-source project)

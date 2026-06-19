@@ -50,10 +50,45 @@ def hamming_distance(a: int, b: int) -> int:
 
 # معاملات التتبّع الشائعة التي تُزال أثناء التطبيع — ثابت على مستوى الوحدة
 # (كان يُعاد بناؤه في كل استدعاء لـ normalize_url داخل حلقات ساخنة).
+# v1.07: وسّعنا القائمة من 9 إلى ~30 لتغطية المنصّات الإعلانيّة الكبرى + Google Analytics
+# + بريد + شبكات اجتماعية. كلّها آمنة لأنّها لا تُغيّر المحتوى — فقط تتبّع المصدر.
 _TRACKING_PARAMS = frozenset({
+    # Google Analytics / Ads
     "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
-    "fbclid", "gclid", "msclkid", "ref", "ref_src",
+    "utm_id", "utm_source_platform", "utm_creative_format", "utm_marketing_tactic",
+    "gclid", "dclid", "gclsrc", "gbraid", "wbraid",
+    "_ga", "_gid", "_gac",
+    # Microsoft / Bing
+    "msclkid",
+    # Facebook / Meta
+    "fbclid", "_fb", "fb_action_ids", "fb_action_types", "fb_ref",
+    # TikTok / Twitter / LinkedIn / Pinterest
+    "ttclid", "twclid", "li_fat_id", "epik",
+    # Mailchimp / email
+    "mc_cid", "mc_eid",
+    # Instagram / WhatsApp share
+    "igshid",
+    # Yandex
+    "yclid",
+    # Generic referrer / affiliate
+    "ref", "ref_src", "ref_url", "referrer", "source", "src",
+    "affiliate", "aff", "aff_id", "affiliate_id",
 })
+
+# v1.07: معاملات إضافيّة تُحدَّد ديناميكياً (عبر `set_extra_strip_params`) — تُستعمل عند
+# تفعيل قالب منصّة معيّنة (Zid/Salla/...) لإزالة sort/order التي تُنتج تكرار محتوى.
+# تبقى فارغة افتراضياً (سلوك حالي محافظ على المعلومات).
+_EXTRA_STRIP_PARAMS: frozenset[str] = frozenset()
+
+
+def set_extra_strip_params(params) -> None:
+    """v1.07: يُعيّن معاملات إضافيّة تُزال من query string أثناء التطبيع.
+
+    يُستدعى مرّة واحدة من main.py بعد تفعيل platform_preset (إن وُجد). الفائدة:
+    تقليل تكرار الـURL في الطابور بسبب فروع لها نفس المحتوى (مثل `?sort_by=price` و
+    `?sort_by=name`). كلّ منصّة لها قائمتها (انظر config_presets.PRESETS)."""
+    global _EXTRA_STRIP_PARAMS
+    _EXTRA_STRIP_PARAMS = frozenset(p.lower() for p in (params or []))
 
 
 def normalize_url(url: str, base_url: Optional[str] = None) -> str:
@@ -109,7 +144,11 @@ def normalize_url(url: str, base_url: Optional[str] = None) -> str:
     # فرز query parameters
     query_pairs = parse_qsl(parsed.query, keep_blank_values=False)
     # إزالة معاملات التتبع الشائعة (الثابت معرّف على مستوى الوحدة)
-    query_pairs = [(k, v) for k, v in query_pairs if k not in _TRACKING_PARAMS]
+    # v1.07: نُزيل أيضاً معاملات إضافيّة (مثل sort_by) إن فُعِّل platform_preset
+    query_pairs = [
+        (k, v) for k, v in query_pairs
+        if k not in _TRACKING_PARAMS and k.lower() not in _EXTRA_STRIP_PARAMS
+    ]
     query = urlencode(sorted(query_pairs))
 
     # بناء الـ URL النهائي (بدون fragment)

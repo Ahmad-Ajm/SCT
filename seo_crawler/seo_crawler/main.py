@@ -121,6 +121,40 @@ def _ga4_summary(integrations: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _deferred_list(crawler: Any) -> list[dict[str, Any]]:
+    """v1.08: يُسطّح dict الـdeferred إلى قائمة للتصدير في audit JSON و CSV."""
+    d = getattr(crawler, "deferred", None) or {}
+    out: list[dict[str, Any]] = []
+    for url, info in d.items():
+        out.append({
+            "url": url,
+            "kind": info.get("kind", "other"),
+            "source_url": info.get("source_url", ""),
+            "depth": info.get("depth", ""),
+        })
+    return out
+
+
+def _deferred_summary(crawler: Any) -> dict[str, Any]:
+    """v1.08: ملخّص الـdeferred (counts بحسب kind + 10 أمثلة لكلّ نوع) — هذا ما
+    تعرضه واجهة المهمّة في «لوحة الروابط المؤجَّلة» بعد Phase 1."""
+    d = getattr(crawler, "deferred", None) or {}
+    by_kind: dict[str, int] = {}
+    samples: dict[str, list[str]] = {}
+    for url, info in d.items():
+        k = info.get("kind", "other")
+        by_kind[k] = by_kind.get(k, 0) + 1
+        s = samples.setdefault(k, [])
+        if len(s) < 10:
+            s.append(url)
+    return {
+        "total": len(d),
+        "by_kind": by_kind,
+        "samples": samples,
+        "phase2_available": len(d) > 0,
+    }
+
+
 def emit_phase(crawler: Any, status: str, **extra: Any) -> None:
     """كتابة حالة المرحلة الحالية لملف التقدّم (للواجهة المرئية).
 
@@ -296,12 +330,43 @@ async def run_crawl_async(
     from crawler.async_core import AsyncCrawler
 
     log.info("=" * 60)
-    log.info("Phase 1: Crawling (Async)")
+    is_phase2 = bool((config.get("crawl", {}).get("deferred_crawl", {}) or {}).get("phase2"))
+    log.info(f"{'Phase 2' if is_phase2 else 'Phase 1'}: Crawling (Async)")
     log.info("=" * 60)
     with span("phase.crawl.async", url=config["site"].get("start_url", ""), use_db=bool(db)):
         crawler = AsyncCrawler(config, db=db)
+        # v1.08: في Phase 2، حقن الـdeferred URLs المحفوظة سابقاً كبذور إضافيّة
+        if is_phase2:
+            _inject_phase2_seeds(crawler, config)
         await crawler.run()
     return crawler
+
+
+def _inject_phase2_seeds(crawler: Any, config: dict[str, Any]) -> None:
+    """v1.08: قبل بدء الزحف في وضع Phase 2، نقرأ deferred_urls.csv من المهمّة
+    السابقة ونضيفها كبذور إضافيّة. classifier.phase2_mode=True يعني أنّها تُعامَل
+    عاديّة بلا تأجيل."""
+    output_dir = config.get("output", {}).get("output_dir", "")
+    if not output_dir:
+        return
+    csv_path = Path(output_dir) / "csv" / "deferred_urls.csv"
+    if not csv_path.exists():
+        log.warning(f"Phase 2: deferred_urls.csv غير موجود في {csv_path}")
+        return
+    import csv as _csv
+    try:
+        with open(csv_path, "r", encoding="utf-8", newline="") as f:
+            urls = [row.get("url", "").strip() for row in _csv.DictReader(f) if row.get("url")]
+    except OSError as e:
+        log.warning(f"Phase 2: تعذّر قراءة deferred_urls.csv: {e}")
+        return
+    # نُضيفها إلى sitemap_seeds (تُسحب إلى الطابور كبذور مؤجَّلة عاديّة)
+    added = 0
+    for u in urls:
+        if u and u not in crawler.sitemap_seeds:
+            crawler.sitemap_seeds.append(u)
+            added += 1
+    log.info(f"Phase 2: حُقن {added} رابط مؤجَّل سابقاً كبذور للزحف")
 
 
 # ============================================================
@@ -662,13 +727,20 @@ async def run_external_links_check(crawler, db, config, mode: CrawlMode):
             progress_totals[key] += int(delta.get(key, 0))
 
         now = time.time()
-        is_last = progress_totals["checked"] >= int(delta.get("total", 0) or len(external_urls))
+        total = int(delta.get("total", 0) or len(external_urls))
+        is_last = progress_totals["checked"] >= total
         if is_last or now - last_emit >= 0.5:
             last_emit = now
+            # v1.02: نسبة تقدّم محسوبة + label موحّد لشريط التقدّم في الواجهة
+            pct = int(progress_totals["checked"] * 100 / max(total, 1))
             emit_phase(
                 crawler,
                 "checking_external_links",
-                external_links_total=int(delta.get("total", 0) or len(external_urls)),
+                phase_label="checking_external_links",
+                phase_percent=pct,
+                phase_detail=f"{progress_totals['checked']}/{total} "
+                             f"(✓ {progress_totals['ok']} · ✗ {progress_totals['broken']})",
+                external_links_total=total,
                 external_links_checked=progress_totals["checked"],
                 external_links_ok=progress_totals["ok"],
                 external_links_broken=progress_totals["broken"],
@@ -877,6 +949,18 @@ def run_integrations(crawler, config, mode: CrawlMode, cache=None):
                 if ps_config.get("save_raw_json"):
                     out_dir = config.get("output", {}).get("output_dir", "./output")
                     raw_dir = str(Path(out_dir) / "pagespeed_raw")
+
+                # v1.02: تحديث تقدّم الواجهة بكل طلب — تظهر «الحالة: جلب من PageSpeed»
+                # و«التفاصيل: <الرابط الحالي>» بدل أن يبدو الجوب «معلّقاً» لمدّة طويلة.
+                def _ps_progress(idx: int, total: int, page_url: str, strategy: str) -> None:
+                    pct = int(idx * 100 / max(total, 1))
+                    emit_phase(
+                        crawler, "pagespeed",
+                        phase_label="pagespeed",
+                        phase_detail=f"[{idx}/{total}] {strategy}: {page_url}",
+                        phase_percent=pct,
+                    )
+
                 client = PageSpeedClient(
                     api_key=api_key,
                     delay_seconds=ps_config.get("delay_seconds", 1),
@@ -884,6 +968,7 @@ def run_integrations(crawler, config, mode: CrawlMode, cache=None):
                     cache=cache,
                     cache_ttl_days=ps_config.get("cache_ttl_days", 7),
                     raw_dir=raw_dir,
+                    on_progress=_ps_progress,
                 )
                 pages = crawler.get_pages()
                 urls_to_test = [
@@ -930,6 +1015,41 @@ def run_integrations(crawler, config, mode: CrawlMode, cache=None):
             results["awt_keywords"] = importer.load_keywords()
     else:
         log.info("→ AWT disabled")
+
+    # v1.04: تكاملات الروابط الخلفيّة الحيّة (Ahrefs / Majestic) — اختياريّة ومدفوعة.
+    # المفتاح يُمرَّر من البيئة (مثل PageSpeed) كي لا يُكتب على القرص.
+    backlinks_config = integrations_config.get("backlinks", {})
+    if backlinks_config.get("enabled"):
+        provider = (backlinks_config.get("provider") or "").lower()
+        # المفتاح: من البيئة أوّلاً (لا يُكتب على القرص) ثم من الإعداد (للاختبار)
+        key = os.environ.get("BACKLINKS_API_KEY") or backlinks_config.get("api_key", "")
+        site_url = config.get("site", {}).get("start_url", "")
+        if not key:
+            log.warning(f"  Backlinks ({provider}) skipped — missing API key")
+        elif not provider:
+            log.warning("  Backlinks skipped — provider not set (ahrefs/majestic)")
+        else:
+            log.info(f"→ Backlinks ({provider})...")
+            with span(f"integration.backlinks.{provider}"):
+                from integrations.backlinks_api import BacklinksProvider
+                client = BacklinksProvider.create(
+                    provider, key,
+                    timeout=int(backlinks_config.get("timeout", 30)),
+                )
+                if client is None:
+                    log.warning(f"  Unknown backlinks provider: {provider}")
+                else:
+                    res = client.fetch(site_url)
+                    if res.get("error"):
+                        log.warning(f"  Backlinks {provider} failed: {res['error']}")
+                    else:
+                        log.info(
+                            f"  {provider}: {(res.get('summary') or {}).get('referring_domains', 0)} "
+                            f"referring domains"
+                        )
+                    results["backlinks"] = res
+    else:
+        log.info("→ Backlinks (live API) disabled")
 
     # === Lighthouse / PageSpeed JSON import (الخطة #6) — اختياري بلا مفاتيح ===
     lh_config = integrations_config.get("lighthouse", {})
@@ -1026,6 +1146,13 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
             )
             if excluded:
                 csv_files["excluded_urls"] = csv_exporter._export("excluded_urls.csv", excluded)
+
+            # v1.08: CSV للروابط المؤجَّلة — يتيح للمستخدم استعراضها/تصفيتها قبل Phase 2
+            deferred_rows = _deferred_list(crawler)
+            if deferred_rows:
+                csv_files["deferred_urls"] = csv_exporter._export(
+                    "deferred_urls.csv", deferred_rows,
+                )
 
             # تقارير redirects التفصيلية (الخطة #1)
             rd = analysis.get("redirect_data", {}) or {}
@@ -1265,6 +1392,9 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
                 integrations=_integrations_for_json(integrations),
                 excluded_urls=excluded,
                 excluded_summary=excluded_counts,
+                # v1.08: روابط مؤجَّلة (لم تُفحَص في Phase 1) + ملخّصها
+                deferred_urls=_deferred_list(crawler),
+                deferred_summary=_deferred_summary(crawler),
                 security_data=analysis.get("security_data", {}),
                 resources_data=analysis.get("resources_data", {}),
                 resource_status=analysis.get("resource_status", []),
@@ -1642,10 +1772,10 @@ async def _run_integrations_only(config, mode, output_dir, cache, db=None) -> No
             log.info(f"عُثر على {page_count} صفحة من زحف سابق — PageSpeed سيستعملها (مع سقف max_urls)")
     else:
         crawler = _MinimalCrawler(start_url)
-    emit_phase(crawler, "integrations")
+    emit_phase(crawler, "integrations", phase_label="integrations")
     integrations = run_integrations(crawler, config, mode, cache=cache)
 
-    emit_phase(crawler, "exporting")
+    emit_phase(crawler, "exporting", phase_label="exporting")
     csv_dir = output_dir / "csv"
     csv_exp = CSVExporter(str(csv_dir),
                           encoding=config["output"].get("encoding", "utf-8-sig"))
@@ -1888,6 +2018,11 @@ async def main_async(args, config: dict[str, Any]):
             cache.close()
             return
 
+        # v1.08: تفعيل Phase 2 (يستعمل deferred_urls.csv كبذور إضافيّة + يُعطّل التأجيل)
+        if getattr(args, "phase2", False):
+            config.setdefault("crawl", {}).setdefault("deferred_crawl", {})["phase2"] = True
+            log.info("🔁 Phase 2 mode — جميع الروابط ستُفحص (لا تأجيل)")
+
         crawler = None
         try:
             # === Phase 1: Crawl ===
@@ -1907,13 +2042,14 @@ async def main_async(args, config: dict[str, Any]):
             stopped_early = getattr(crawler, "_external_stop", False)
 
             # === Phase 2: Analyze ===
-            emit_phase(crawler, "analyzing")
+            emit_phase(crawler, "analyzing", phase_label="analyzing", phase_percent=0)
             analysis = run_analysis(crawler, config, mode)
 
             # === Phase 2.5: External Links ===
             external_check = {"external_results": []}
             if not args.skip_external and not stopped_early:
-                emit_phase(crawler, "checking_external_links")
+                emit_phase(crawler, "checking_external_links",
+                           phase_label="checking_external_links", phase_percent=0)
                 external_check = await run_external_links_check(crawler, db, config, mode)
             elif stopped_early:
                 log.info("→ External links check skipped (manual stop — exporting partial results)")
@@ -1977,7 +2113,7 @@ async def main_async(args, config: dict[str, Any]):
             analysis["ai_analysis"] = run_ai_analysis(analysis, config)
 
             # === Phase 4: Export ===
-            emit_phase(crawler, "exporting")
+            emit_phase(crawler, "exporting", phase_label="exporting", phase_percent=0)
             exported_files = run_export(
                 crawler, analysis, integrations, external_check, output_dir, config, mode
             )
@@ -2079,6 +2215,9 @@ Examples:
     parser.add_argument("--skip-external", action="store_true")
     parser.add_argument("--integrations-only", action="store_true",
                         help="جلب بيانات التكامل (GSC/GA4/PageSpeed) فقط بلا زحف")
+    parser.add_argument("--phase2", action="store_true",
+                        help="v1.08: زحف Phase 2 — يستعمل deferred_urls.csv كبذور "
+                             "ويعطّل المصنّف (يفحص الجميع). يُمدّد audit JSON الحالي.")
     parser.add_argument("--clear-cache", action="store_true")
     args = parser.parse_args()
 

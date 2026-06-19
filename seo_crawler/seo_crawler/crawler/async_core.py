@@ -163,6 +163,23 @@ class AsyncCrawler:
         self.excluded_counts: dict[str, int] = {}
         self._excluded_cap = 10000
 
+        # v1.08: روابط مُؤجَّلة (pagination عميق، redirect_wrapper، filter combos).
+        # تُكتَشف لكن لا تُضاف للطابور في Phase 1. تُحفَظ مع نوعها ومصدرها كي
+        # يُظهرها التقرير ويستطيع المستخدم تشغيل Phase 2 عليها لاحقاً.
+        from utils.url_classifier import UrlClassifier
+        deferred_cfg = self.crawl_config.get("deferred_crawl", {}) or {}
+        self.deferred_enabled = bool(deferred_cfg.get("enabled", True))
+        self.deferred: dict[str, dict[str, str]] = {}
+        self._deferred_cap = int(deferred_cfg.get("max_tracked", 50000))
+        # في Phase 2: classifier يُمرَّر له `phase2=True` فيُعطّل التأجيل
+        self.phase2_mode = bool(deferred_cfg.get("phase2", False))
+        self.classifier = UrlClassifier(
+            sitemap_urls=None,  # تُعبَّأ بعد قراءة sitemap
+            navigation_urls=None,
+            pagination_max=int(deferred_cfg.get("pagination_max", 3)),
+            filter_max=int(deferred_cfg.get("filter_max", 1)),
+        )
+
         # بذور sitemap مؤجَّلة: لا نُغرق بها الطابور؛ نزحف الصفحة الرئيسية
         # والروابط المكتشفة (BFS) أولاً، ثم نسحب من البذور دفعات عند نضوب الطابور.
         self.sitemap_seeds: list[str] = []
@@ -455,6 +472,13 @@ class AsyncCrawler:
                 except Exception as e:
                     log.debug(f"تعذّر حفظ sitemap_urls: {e}")
 
+            # v1.08: نُغذّي المصنّف بروابط sitemap (تُعتبر «أساسيّة» مهما كانت بنيتها)
+            if self.deferred_enabled and self.sitemap_urls_seen:
+                self.classifier.update_sitemap(self.sitemap_urls_seen)
+                # رابط البداية أيضاً «navigation» (Phase 1 يحتفظ به دائماً)
+                if self.start_url:
+                    self.classifier.update_navigation([self.start_url])
+
             gauge("crawler.initial_queue_size", self.queue.qsize())
             gauge("crawler.sitemap_seeds", len(self.sitemap_seeds))
             log.info(
@@ -483,8 +507,21 @@ class AsyncCrawler:
             increment("crawler.sitemap_refill", added)
         return added
 
-    async def _enqueue(self, url: str, depth: int) -> None:
-        """إضافة URL للطابور مع تتبّع العمق."""
+    async def _enqueue(self, url: str, depth: int, source_url: str = "") -> None:
+        """إضافة URL للطابور مع تتبّع العمق. v1.08: قبل الإضافة، يُستشار المصنّف:
+        إن كان الرابط من نوع «مؤجَّل» يُحفَظ في `self.deferred` بدل الطابور (للتقرير
+        + Phase 2). يُعطَّل التأجيل في phase2_mode أو إن deferred_enabled=False."""
+        if self.deferred_enabled and not self.phase2_mode:
+            kind, is_deferred = self.classifier.classify(url)
+            if is_deferred:
+                if (url not in self.deferred
+                        and len(self.deferred) < self._deferred_cap):
+                    self.deferred[url] = {
+                        "kind": kind,
+                        "source_url": source_url or "",
+                        "depth": str(depth),
+                    }
+                return
         await self.queue.put((url, depth))
         self.queued_urls.add(url)
         self._url_depth[url] = depth
@@ -724,6 +761,9 @@ class AsyncCrawler:
                 "elapsed_seconds": round(self.stats.duration_seconds, 1),
                 "pages_per_second": round(self.stats.pages_per_second, 2),
                 "status": status,
+                # v1.04: نُبلِّغ الواجهة فور بلوغ الحدّ كي تُخفي عدّاد الطابور المضلّل
+                # (يبقى الطابور يحوي مئات الآلاف من الروابط المكتشفة لكنّها لن تُزحف)
+                "reached_max_pages": bool(self._reached_max_pages),
             })
         except Exception as e:
             log.debug(f"progress_callback error: {e}")
@@ -1271,7 +1311,10 @@ class AsyncCrawler:
                     if "nofollow" in rel:
                         continue
 
-                await self._enqueue(normalized, depth + 1)
+                # v1.08: نُمرّر الـURL الأصل ليُحفَظ مع المؤجَّل (يُساعد التشخيص:
+                # «من أيّ صفحة جاء هذا الرابط المؤجَّل؟»). v1.08.1: استعمل page.url
+                # — المتغيّر `url` لا يوجد في هذه الـscope (parameter اسمه `page`).
+                await self._enqueue(normalized, depth + 1, source_url=page.url)
                 discovered += 1
             increment("crawler.discovered_links", discovered)
             gauge("crawler.queue_size", self.queue.qsize())

@@ -7,13 +7,24 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 
 | Priority | Feature | Importance | Notes |
 | --- | --- | --- | --- |
-| P3 | Crawl visualizations | Low | Force-directed crawl map / directory tree. Needs a rendering lib (matplotlib not installed here); consider exporting a JSON graph the UI renders instead. |
-| P3 | Single-file Windows `.exe` (PyInstaller) | Low | The PowerShell installer (`installer/`) is the supported non-Docker Windows path. A true bundled `.exe` is the next step — needs a Windows build host. |
-| P3 | Live third-party backlink APIs | Low | Backlink data via CSV is already supported through the AWT importer (`integrations/awt_importer.py`). A live Ahrefs/Majestic/Moz API integration (paid keys, off by default) is the remaining step. |
-| P3 | Log analysis report section | Low | The log analyzer (`analyzers/log_analyzer`, `/logs`) is shipped; a report section that joins log-derived crawl budget with the Action Board is the natural next step. |
+| P3 | Single-file Windows `.exe` (PyInstaller) | Low | The PowerShell installer (`installer/`) is the supported non-Docker Windows path. A true bundled `.exe` is the next step — needs a Windows CI build host (offline dev environment can't produce/test it). |
 
 ## Recently shipped (highlights)
 
+- v1.04 ROADMAP cleanup: queue counter clarity when max_pages hit, silence-aware
+  "why am I waiting?" hint, Excel + XML added to on-demand generation, crawl
+  visualization page (`/jobs/<id>/graph`) with depth/status bars + URL hierarchy
+  tree + force-directed link map, log analyzer → Action Board join
+  (`POST /api/jobs/<id>/log-board` surfacing wasted Google budget + high-value
+  pages with issues + orphan-at-Google), live backlinks API integrations
+  (Ahrefs v3 + Majestic OpenApp under `integrations/backlinks_api.py`).
+- v1.03 UI/UX overhaul: hoverable tooltips on every control with time-cost hints,
+  multi-stage phase visibility (current URL + percent during PageSpeed/External-links/
+  Analysis/Export), optional-requirements status row, on-demand HTML/PDF generation
+  (cuts crawl wall-time), AI advisor per-provider field cleanup with explicit local-model
+  option, PageSpeed DNS-error retry + grouped error summary, depth default lowered to 5
+  with explanatory tooltip, mode + speed fine-tuning + platform preset moved into
+  Advanced. Two new docs: `docs/OAUTH_SETUP.md` and `docs/GA4_PROPERTY_ID.md`.
 - Deep PageSpeed/Lighthouse structured tables (audits / network requests / JS treemap / failed
   audits) extracted from the raw report — no extra API calls.
 - GSC insights: keyword cannibalization + internal-link opportunities; GSC URL Inspection
@@ -42,6 +53,5 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 
 ## Current top targets
 
-1. Single-file Windows `.exe` (PyInstaller) — packages everything in one click.
-2. Log analysis report section — join log-derived crawl budget with the Action Board.
-3. Crawl visualizations (graph/tree of the link map).
+1. **Single-file Windows `.exe` (PyInstaller)** — packages everything in one click.
+   The only remaining roadmap item. Needs a Windows build host with CI.

@@ -33,7 +33,7 @@
 
     <div class="cards" id="liveCards">
       <div class="card"><div class="num" id="m_pages">0</div><div class="lbl" data-i18n="c_pages">صفحات</div></div>
-      <div class="card"><div class="num" id="m_queue">0</div><div class="lbl" data-i18n="c_queue">في الطابور</div></div>
+      <div class="card" id="m_queue_card"><div class="num" id="m_queue">0</div><div class="lbl" id="m_queue_lbl" data-i18n="c_queue">في الطابور</div></div>
       <div class="card"><div class="num" id="m_failed">0</div><div class="lbl" data-i18n="c_failed">فاشلة</div></div>
       <div class="card"><div class="num" id="m_ext_checked">0</div><div class="lbl" data-i18n="c_ext_checked">روابط مفحوصة</div></div>
       <div class="card"><div class="num" id="m_speed">0</div><div class="lbl" data-i18n="c_speed">صفحة/ث</div></div>
@@ -46,7 +46,11 @@
         <span id="phasePct" class="mono"></span>
       </div>
       <div class="progress-track"><div id="phaseBar" class="progress-bar"></div></div>
+      <!-- v1.02: تفاصيل المرحلة الحاليّة (مثل URL الذي يُعالَج الآن في PageSpeed) -->
+      <p id="phaseDetail" class="phase-detail dot" style="display:none"></p>
       <p id="phaseHint" class="muted sm"></p>
+      <!-- v1.04: تلميح ذكيّ يظهر إن لم يتغيّر شيء لأكثر من 30 ثانية -->
+      <p id="silenceHint" class="muted sm" style="display:none;color:#b45309;font-style:italic"></p>
     </div>
 
     <div class="actions">
@@ -57,6 +61,31 @@
 
   <section class="panel" id="resultsPanel" style="display:none">
     <h2 data-i18n="results">النتائج والتقارير</h2>
+    <!-- v1.06: ملاحظة تظهر فقط للمهام «تكاملات-فقط» (بلا زحف) — تُخفي أزرار التوليد -->
+    <div id="integrationsOnlyNote" class="card" style="display:none;border-color:#cbd5e1;background:#f1f5f9">
+      <p style="margin:0" data-i18n="integrations_only_note">هذه المهمّة جلبت التكاملات فقط (Google Search Console / Analytics / PageSpeed) بلا زحف للموقع.
+      ملفّات CSV الناتجة متاحة للتنزيل أدناه. لتوليد تقارير HTML/PDF/Excel، شغّل «زحف كامل» بدل «تكاملات فقط».</p>
+    </div>
+
+    <!-- v1.08: لوحة الروابط المؤجَّلة — تظهر فقط عند توفّر deferred URLs -->
+    <div id="deferredPanel" class="card" style="display:none;border-color:#fde68a;background:#fffbeb;margin-bottom:14px">
+      <h3 style="margin-top:0;color:#92400e" data-i18n="deferred_h">🔍 روابط مكتشفة لم تُفحَص في Phase 1</h3>
+      <p class="muted sm" data-i18n="deferred_p" style="margin:6px 0 10px">
+        تمّ فحص الروابط الأساسيّة (المُدرَجة في sitemap + قائمة التنقّل + روابط عاديّة).
+        الروابط أدناه أُجِّلت لأنّها أنماط معروفة بإهدار وقت الزحف دون قيمة SEO إضافيّة
+        (تركيبيّات الترقيم العميقة، شاشات تسجيل الدخول، تركيبيات الفلاتر).
+        تستطيع فحصها الآن (Phase 2) إن أردت، أو الاكتفاء بالأساسي.
+      </p>
+      <div id="deferredBreakdown" class="cards" style="margin:8px 0"></div>
+      <div class="actions">
+        <button type="button" id="phase2Btn" class="btn primary" data-i18n="phase2_run">🔁 شغّل Phase 2 (فحص المؤجَّلة)</button>
+        <a id="deferredCsvBtn" class="btn sm" data-i18n="deferred_csv" target="_blank">⬇️ تنزيل قائمة المؤجَّلة (CSV)</a>
+        <button type="button" id="deferredToggleSamples" class="btn sm" data-i18n="deferred_show_samples">عرض أمثلة لكل نوع</button>
+        <span id="phase2Msg" class="muted sm"></span>
+      </div>
+      <div id="deferredSamples" style="display:none;margin-top:10px;direction:ltr;font-family:ui-monospace,Consolas,monospace;font-size:.82rem;background:#fff;border:1px solid #fde68a;border-radius:8px;padding:10px;max-height:300px;overflow:auto"></div>
+    </div>
+
     <div class="actions" id="downloads"></div>
 
     <details id="filesBox" style="margin-top:12px">
@@ -70,8 +99,10 @@
       </div>
     </details>
 
-    <h3 data-i18n="customize_report">تخصيص تقرير PDF/HTML</h3>
-    <form id="reportForm" class="grid">
+    <!-- v1.02: توليد التقارير عند الطلب — كلّ تنسيق له زرّه ومؤشّر تقدّمه وزرّ تنزيله -->
+    <h3 data-i18n="gen_h">بناء تقرير</h3>
+    <p class="muted sm" data-i18n="gen_note">البيانات الخام (CSV + JSON) تُحفظ تلقائياً بعد الزحف. اختر التنسيقات التي تحتاجها فعلاً — يختصر الوقت والمساحة.</p>
+    <form id="genForm" class="grid">
       <label><span data-i18n="report_lang">اللغة</span>
         <select name="language" data-i18n-followlang>
           <option value="ar" data-i18n="lang_ar">العربية</option>
@@ -88,9 +119,31 @@
           <option value="both" data-i18n="aud_both">كلاهما</option>
         </select>
       </label>
-      <label class="chk full"><input type="checkbox" name="make_pdf" checked> <span data-i18n="make_pdf">توليد PDF</span></label>
-      <button type="submit" class="btn primary" data-i18n="rebuild_report">🧾 أعد بناء التقرير</button>
-      <span id="reportMsg" class="muted"></span>
+      <label class="full"><span data-i18n="logo_url">رابط الشعار (اختياري)</span>
+        <input type="url" name="logo_url" placeholder="https://.../logo.png">
+      </label>
+      <div class="full gen-row" id="genButtons" style="display:none">
+        <div class="gen-box" data-fmt="html">
+          <button type="button" class="btn sm gen-btn" data-i18n="gen_html">🌐 توليد HTML</button>
+          <button type="button" class="btn sm gen-dl" disabled data-i18n="gen_dl">⬇️ تنزيل</button>
+          <span class="gen-status" data-i18n="gen_pending">—</span>
+        </div>
+        <div class="gen-box" data-fmt="pdf">
+          <button type="button" class="btn sm gen-btn" data-i18n="gen_pdf">📄 توليد PDF</button>
+          <button type="button" class="btn sm gen-dl" disabled data-i18n="gen_dl">⬇️ تنزيل</button>
+          <span class="gen-status" data-i18n="gen_pending">—</span>
+        </div>
+        <div class="gen-box" data-fmt="excel">
+          <button type="button" class="btn sm gen-btn" data-i18n="gen_excel">📊 توليد Excel</button>
+          <button type="button" class="btn sm gen-dl" disabled data-i18n="gen_dl">⬇️ تنزيل</button>
+          <span class="gen-status" data-i18n="gen_pending">—</span>
+        </div>
+        <div class="gen-box" data-fmt="xml">
+          <button type="button" class="btn sm gen-btn" data-i18n="gen_xml">🧩 توليد XML</button>
+          <button type="button" class="btn sm gen-dl" disabled data-i18n="gen_dl">⬇️ تنزيل</button>
+          <span class="gen-status" data-i18n="gen_pending">—</span>
+        </div>
+      </div>
     </form>
   </section>
 
@@ -187,6 +240,12 @@ function renderDownloads(result) {
     cmp.href = '/jobs/' + jobId + '/compare';
     cmp.textContent = (window.sctT ? window.sctT('cmp_link') : '🆚 مقارنة قبل/بعد');
     box.appendChild(cmp);
+    // v1.04: زرّ تصوير الزحف (شجرة URL + توزيع + رسم بياني للروابط)
+    const gv = document.createElement('a');
+    gv.className = 'btn primary';
+    gv.href = '/jobs/' + jobId + '/graph';
+    gv.textContent = (window.sctT ? window.sctT('gv_link') : '🗺️ تصوير الزحف');
+    box.appendChild(gv);
   }
   // تنزيل كل الملفات كـ ZIP واحد
   const all = document.createElement('a');
@@ -195,6 +254,9 @@ function renderDownloads(result) {
   all.textContent = (window.sctT ? window.sctT('download_all') : '🗜️ تنزيل الكل (ZIP)');
   box.appendChild(all);
   loadFiles();
+  // v1.02: sync per-format generate buttons with newly-built artifacts
+  if (typeof _syncResultKindUI === 'function') _syncResultKindUI();
+  if (typeof _syncGenButtonStates === 'function') _syncGenButtonStates();
 }
 
 function _fmtSize(n) {
@@ -251,6 +313,17 @@ function applyProgress(p) {
   if (!p) return;
   lastProgress = p;
   document.getElementById('m_pages').textContent = p.pages_crawled ?? 0;
+  // v1.04: عند بلوغ max_pages الطابور يبقى ضخماً (روابط مكتشفة لكنها لن تُزحف).
+  // إعادة تسميته إلى «اكتُشف ولم يُزحف» مع لون باهت يمنع سوء فهم «المهمّة ما زالت تعمل».
+  const qLbl = document.getElementById('m_queue_lbl');
+  const qCard = document.getElementById('m_queue_card');
+  if (p.reached_max_pages) {
+    qLbl.textContent = T('c_queue_capped', 'اكتُشف (لن يُزحف)');
+    qCard.style.opacity = '0.55';
+  } else {
+    qLbl.textContent = T('c_queue', 'في الطابور');
+    qCard.style.opacity = '';
+  }
   document.getElementById('m_queue').textContent = p.queue_size ?? 0;
   document.getElementById('m_failed').textContent = p.pages_failed ?? 0;
   document.getElementById('m_ext_checked').textContent = p.external_links_checked ?? 0;
@@ -270,12 +343,65 @@ const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
 const phaseLabel = (s) => T('ph_' + s, s);
 let lastProgress = null;   // لإعادة الرسم عند تبديل اللغة
 
+// v1.04: تلميح ذكيّ عند صمت العدّادات أكثر من 30 ث — يخبر المستخدم ماذا يحصل غالباً
+let _lastProgressSig = null;
+let _lastChangeTs = Date.now();
+function _progressSig(p) {
+  if (!p) return '';
+  return [p.pages_crawled, p.pages_failed, p.queue_size, p.external_links_checked,
+          p.phase_detail, p.phase_label, p.phase_percent, p.status].join('|');
+}
+function _whatRunningForStatus(p) {
+  // نُخمّن السبب الأرجح من المرحلة الحاليّة كي يكون التلميح مفيداً لا عاماً
+  const s = (p && (p.phase_label || p.status)) || 'running';
+  if (s === 'pagespeed') return T('waiting_what_pagespeed');
+  if (s === 'building_pdf') return T('waiting_what_pdf');
+  if (s === 'building_html') return T('waiting_what_html');
+  if (s === 'analyzing') return T('waiting_what_analysis');
+  if (s === 'exporting') return T('waiting_what_export');
+  return T('waiting_what_generic');
+}
+function _checkSilence() {
+  const el = document.getElementById('silenceHint');
+  if (!el) return;
+  if (!lastProgress || FINISHED.includes(lastStatus)) {
+    el.style.display = 'none';
+    return;
+  }
+  const sig = _progressSig(lastProgress);
+  if (sig !== _lastProgressSig) {
+    _lastProgressSig = sig;
+    _lastChangeTs = Date.now();
+    el.style.display = 'none';
+    return;
+  }
+  const silentSecs = Math.floor((Date.now() - _lastChangeTs) / 1000);
+  if (silentSecs >= 30) {
+    const txt = T('waiting_hint', '⏳ No change for {s}s — likely: {what}')
+      .replace('{s}', silentSecs).replace('{what}', _whatRunningForStatus(lastProgress));
+    el.textContent = txt;
+    el.style.display = '';
+  }
+}
+setInterval(_checkSilence, 5000);
+
 function applyPhaseDetails(p) {
   const status = p.status || 'running';
-  const pct = Number(p.report_percent || 0);
-  document.getElementById('phaseText').textContent = phaseLabel(status);
+  // v1.02: نُفضّل phase_label الصريح إن وُجد (مثل "pagespeed") على الحالة العامة (running)
+  const label = p.phase_label || status;
+  // v1.02: شريط التقدّم يأخذ من phase_percent (المراحل) أو report_percent (التقرير)
+  const pct = Number(p.phase_percent || p.report_percent || 0);
+  document.getElementById('phaseText').textContent = phaseLabel(label);
   document.getElementById('phasePct').textContent = pct ? pct + '%' : '';
   document.getElementById('phaseBar').style.width = pct ? pct + '%' : '12%';
+  // v1.02: عرض تفاصيل المرحلة (مثل الرابط الحالي تحت اسم العملية)
+  const det = document.getElementById('phaseDetail');
+  if (p.phase_detail) {
+    det.textContent = p.phase_detail;
+    det.style.display = '';
+  } else {
+    det.style.display = 'none';
+  }
   const hint = document.getElementById('phaseHint');
   if (status === 'building_pdf' || status === 'building_html' || status === 'building_report_data') {
     hint.textContent = T('hint_preparing');
@@ -311,6 +437,8 @@ function finish(meta) {
     renderDownloads(meta.result);
   }
   renderDiagnostics(meta.diagnostics);
+  // v1.08: عند الاكتمال، نجلب ملخّص الروابط المؤجَّلة لعرض لوحة Phase 2
+  _loadDeferred();
 }
 
 function renderDiagnostics(d) {
@@ -346,21 +474,185 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
   await fetch('/api/jobs/' + jobId + '/stop', { method: 'POST' });
 });
 
-document.getElementById('reportForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const msg = document.getElementById('reportMsg');
-  msg.textContent = T('msg_building_report');
-  const fd = new FormData(e.target);
-  fd.set('make_pdf', fd.has('make_pdf') ? 'true' : 'false');
-  const res = await fetch('/api/jobs/' + jobId + '/report', { method: 'POST', body: fd });
-  if (res.ok) {
-    msg.textContent = T('msg_report_done');
-    const meta = await (await fetch('/api/jobs/' + jobId + '/progress')).json();
-    if (meta.meta && meta.meta.result) renderDownloads(meta.meta.result);
-  } else {
-    msg.textContent = T('msg_report_failed');
+// v1.02: زرّ توليد لكلّ تنسيق + تنزيل بجانبه — يستفسر حالة الجوب في الخلفية
+function _wireGenButtons() {
+  document.querySelectorAll('#genButtons .gen-box').forEach((box) => {
+    const fmt = box.getAttribute('data-fmt');
+    const btn = box.querySelector('.gen-btn');
+    const dl = box.querySelector('.gen-dl');
+    const st = box.querySelector('.gen-status');
+    btn.addEventListener('click', async () => {
+      const form = document.getElementById('genForm');
+      const fd = new FormData(form);
+      fd.set('format', fmt);
+      btn.disabled = true;
+      dl.disabled = true;
+      st.textContent = T('gen_running', 'يبني…');
+      try {
+        const r = await fetch('/api/jobs/' + jobId + '/generate', { method: 'POST', body: fd });
+        if (!r.ok) {
+          st.textContent = T('gen_failed', 'فشل');
+          btn.disabled = false;
+          return;
+        }
+      } catch (e) {
+        st.textContent = T('gen_failed', 'فشل');
+        btn.disabled = false;
+        return;
+      }
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetch('/api/jobs/' + jobId + '/generate/' + fmt + '/status');
+          const j = await r.json();
+          if (j.running) return;
+          clearInterval(poll);
+          btn.disabled = false;
+          if (j.ok) {
+            st.textContent = T('gen_done', 'جاهز');
+            const m = await (await fetch('/api/jobs/' + jobId + '/progress')).json();
+            if (m.meta && m.meta.result) {
+              renderDownloads(m.meta.result);   // يحدّث lastResult ويفعّل _syncGenButtonStates
+            }
+          } else {
+            st.textContent = T('gen_failed', 'فشل') + (j.message ? ': ' + j.message.slice(-120) : '');
+          }
+        } catch (e) {}
+      }, 2000);
+    });
+  });
+  _syncResultKindUI();
+  _syncGenButtonStates();
+}
+// ===== v1.08: لوحة الروابط المؤجَّلة + زرّ Phase 2 =====
+const KIND_LABELS = {
+  pagination_deep: { ar: '📄 ترقيم عميق', en: '📄 Deep pagination',
+                     hint_ar: '?page=N حيث N > 3 — نفس template، محتوى متشابه',
+                     hint_en: '?page=N where N > 3 — same template, similar content' },
+  redirect_wrapper: { ar: '🚪 شاشات تسجيل', en: '🚪 Auth wrappers',
+                      hint_ar: '/auth/login?redirect_to=… — Cloudflare يحجبها عادةً',
+                      hint_en: '/auth/login?redirect_to=… — Cloudflare typically blocks these' },
+  filter_combination: { ar: '🧪 تركيبيّات فلاتر', en: '🧪 Filter combinations',
+                        hint_ar: 'تركيبيّات متعدّدة من ?filter[]=…',
+                        hint_en: 'Multiple ?filter[]=… combinations' },
+  other: { ar: '❓ أخرى', en: '❓ Other',
+           hint_ar: 'لم تطابق أيّ نمط معروف',
+           hint_en: 'Did not match any known pattern' },
+};
+let _deferredData = null;
+async function _loadDeferred() {
+  try {
+    const r = await fetch('/api/jobs/' + jobId + '/deferred');
+    if (!r.ok) return;
+    const d = await r.json();
+    _deferredData = d;
+    _renderDeferred();
+  } catch (e) {}
+}
+function _renderDeferred() {
+  const panel = document.getElementById('deferredPanel');
+  if (!panel || !_deferredData) return;
+  const total = _deferredData.total || 0;
+  if (total === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  const lang = (document.documentElement.lang === 'en') ? 'en' : 'ar';
+  const box = document.getElementById('deferredBreakdown');
+  box.innerHTML = '';
+  Object.entries(_deferredData.by_kind || {}).forEach(([kind, count]) => {
+    const meta = KIND_LABELS[kind] || { ar: kind, en: kind, hint_ar: '', hint_en: '' };
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.flex = '1 1 200px';
+    card.innerHTML =
+      '<div class="num" style="color:#b45309">' + count.toLocaleString() + '</div>' +
+      '<div class="lbl"><b>' + meta[lang] + '</b></div>' +
+      '<div class="muted sm" style="margin-top:4px">' + meta['hint_' + lang] + '</div>';
+    box.appendChild(card);
+  });
+  // رابط CSV
+  const csvBtn = document.getElementById('deferredCsvBtn');
+  if (csvBtn) csvBtn.href = '/api/jobs/' + jobId + '/download-file?rel=csv/deferred_urls.csv';
+}
+document.addEventListener('click', async (e) => {
+  if (e.target && e.target.id === 'phase2Btn') {
+    e.target.disabled = true;
+    const msg = document.getElementById('phase2Msg');
+    msg.textContent = (window.sctT ? window.sctT('phase2_starting') : '… يبدأ Phase 2');
+    try {
+      const r = await fetch('/api/jobs/' + jobId + '/phase2', { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok || j.ok === false) {
+        msg.textContent = '✗ ' + (j.error || 'فشل');
+        e.target.disabled = false;
+        return;
+      }
+      msg.textContent = (window.sctT ? window.sctT('phase2_running') : '✓ Phase 2 يعمل — راقب التقدّم أعلاه');
+      setTimeout(() => location.reload(), 1500);
+    } catch (err) {
+      msg.textContent = '✗ ' + err;
+      e.target.disabled = false;
+    }
+  }
+  if (e.target && e.target.id === 'deferredToggleSamples') {
+    const box = document.getElementById('deferredSamples');
+    if (!box) return;
+    if (box.style.display === 'none') {
+      const lang = (document.documentElement.lang === 'en') ? 'en' : 'ar';
+      let html = '';
+      Object.entries(_deferredData.samples || {}).forEach(([kind, urls]) => {
+        const meta = KIND_LABELS[kind] || { ar: kind, en: kind };
+        html += '<div style="margin-bottom:10px"><b>' + meta[lang] + '</b><br>';
+        (urls || []).slice(0, 10).forEach(u => {
+          html += '&nbsp;&nbsp;' + (u || '').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '<br>';
+        });
+        html += '</div>';
+      });
+      box.innerHTML = html || '—';
+      box.style.display = '';
+    } else {
+      box.style.display = 'none';
+    }
   }
 });
+
+// v1.06: يُظهر/يُخفي أزرار توليد التقارير + ملاحظة التكاملات-فقط بحسب نوع المهمّة.
+// المهام التي ركّضها المستخدم بـ«تكاملات فقط» تنتج integrations_*.json بلا pages،
+// فلا يمكن توليد HTML/PDF/Excel/XML منها — نُخفي الأزرار ونُظهر ملاحظة واضحة.
+function _syncResultKindUI() {
+  const kind = lastResult && lastResult.kind;
+  const note = document.getElementById('integrationsOnlyNote');
+  const genRow = document.getElementById('genButtons');
+  if (kind === 'integrations_only') {
+    if (note) note.style.display = '';
+    if (genRow) genRow.style.display = 'none';
+  } else if (kind === 'audit') {
+    if (note) note.style.display = 'none';
+    if (genRow) genRow.style.display = '';
+  } else {
+    // مهمّة قديمة بلا kind — نسلك المسلك المحافظ: نُظهر الأزرار إن وُجدت json كاملة
+    if (note) note.style.display = 'none';
+    if (genRow) genRow.style.display = (lastResult && lastResult.json) ? '' : 'none';
+  }
+}
+
+// يُحدِّث حالة أزرار التنزيل بعد كلّ render للنتائج (إذا وُجد التقرير سابقاً → فعّل التنزيل)
+function _syncGenButtonStates() {
+  document.querySelectorAll('#genButtons .gen-box').forEach((box) => {
+    const fmt = box.getAttribute('data-fmt');
+    const dl = box.querySelector('.gen-dl');
+    const st = box.querySelector('.gen-status');
+    // v1.04: XML يتألّف من عدّة ملفّات (xml_pages, xml_links, ...) لذا نفحص أيّ مفتاح xml_*
+    const hasIt = lastResult && (lastResult[fmt] ||
+      (fmt === 'xml' && Object.keys(lastResult).some((k) => k.startsWith('xml_'))));
+    if (hasIt) {
+      dl.disabled = false;
+      dl.onclick = () => { window.location = '/api/jobs/' + jobId + '/download/' + fmt; };
+      if (st.textContent === '—' || st.textContent === T('gen_pending', '—')) {
+        st.textContent = T('gen_done', 'جاهز');
+      }
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', _wireGenButtons);
 
 // إعادة رسم النصوص المولّدة بالـ JS عند تبديل اللغة
 document.addEventListener('sct:langchange', () => {

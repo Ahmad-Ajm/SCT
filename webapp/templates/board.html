@@ -74,6 +74,53 @@
     </div>
     <div id="detailBody" class="muted sm" style="margin-top:8px"></div>
   </aside>
+
+  <!-- v1.04: ضمّ سجلّ الخادم (Googlebot) مع لوحة العمل لإظهار ميزانية الزحف المهدورة -->
+  <details class="adv" style="margin-top:14px" id="logBoardDetails">
+    <summary data-i18n="lb_h">📜 ضمّ سجلّ الخادم (Googlebot) مع لوحة العمل</summary>
+    <div class="adv-body">
+      <p class="muted sm" data-i18n="lb_p">ارفع ملفّ سجلّ Apache/Nginx (Combined Log Format) لربط ميزانيّة زحف Google الفعلية بأولويّات هذه المهمّة. يُظهر: الصفحات التي يزحفها Google كثيراً وتعطي 4xx/5xx (ميزانية مهدورة)، صفحات يهتمّ بها Google وعليها مشاكل (الأهمّ فعلاً)، وصفحات يكتشفها Google ولم يكتشفها الزاحف.</p>
+      <input type="file" id="lbFile" accept=".log,.txt,.gz">
+      <label class="chk" style="margin-top:6px"><input type="checkbox" id="lbBotOnly" checked> <span data-i18n="logs_bot_only">حصر التحليل في طلبات البوتات فقط (مُوصى به للـSEO)</span></label>
+      <div class="actions">
+        <button type="button" class="btn primary" id="lbRunBtn" data-i18n="lb_run">📜 شغّل الضمّ</button>
+        <span id="lbMsg" class="muted sm"></span>
+      </div>
+
+      <div id="lbResults" style="display:none; margin-top:10px">
+        <div class="cards">
+          <div class="card"><div class="num" id="lbTotal">0</div><div class="lbl" data-i18n="lb_total_hits">إجمالي زيارات Googlebot</div></div>
+          <div class="card"><div class="num" id="lbWasted" style="color:#dc2626">0</div><div class="lbl" data-i18n="lb_wasted">زيارات مهدورة</div></div>
+          <div class="card"><div class="num" id="lbHigh" style="color:#1F4E79">0</div><div class="lbl" data-i18n="lb_high_value">عالية القيمة بمشاكل</div></div>
+          <div class="card"><div class="num" id="lbOrphan" style="color:#b45309">0</div><div class="lbl" data-i18n="lb_orphan">يتيمة عند Google</div></div>
+        </div>
+
+        <h3 data-i18n="lb_wasted_h" style="margin-top:14px">🩸 ميزانية Google المهدورة (أعلى 4xx/5xx زيارة)</h3>
+        <table class="tbl"><thead><tr>
+          <th data-i18n="t_url">الرابط</th>
+          <th data-i18n="lb_hits">زيارات Googlebot</th>
+          <th>4xx</th><th>5xx</th><th data-i18n="logs_last">آخر زيارة</th>
+        </tr></thead><tbody id="lbWastedBody"></tbody></table>
+
+        <h3 data-i18n="lb_high_h" style="margin-top:14px">💎 صفحات عالية القيمة بمشاكل (Google يهتمّ + لها أولوية)</h3>
+        <table class="tbl"><thead><tr>
+          <th data-i18n="t_url">الرابط</th>
+          <th data-i18n="lb_hits">زيارات Googlebot</th>
+          <th data-i18n="t_score">الدرجة</th>
+          <th data-i18n="lb_boost_score">الدرجة المعزّزة</th>
+          <th data-i18n="t_top_fix">أهم إصلاح</th>
+        </tr></thead><tbody id="lbHighBody"></tbody></table>
+
+        <h3 data-i18n="lb_orphan_h" style="margin-top:14px">👁️ صفحات Google يعرفها ولم يكتشفها زاحفنا</h3>
+        <p class="muted sm" data-i18n="lb_orphan_p">إشارة قويّة لمشكلة ربط داخلي: Google يصل إلى هذه الصفحات بطريقة ما (روابط خارجية مثلاً) لكنها غير مكتشفة من داخل موقعك.</p>
+        <table class="tbl"><thead><tr>
+          <th data-i18n="logs_path">المسار</th>
+          <th data-i18n="lb_hits">زيارات Googlebot</th>
+          <th data-i18n="logs_last">آخر زيارة</th>
+        </tr></thead><tbody id="lbOrphanBody"></tbody></table>
+      </div>
+    </div>
+  </details>
 </main>
 
 <script>
@@ -224,6 +271,57 @@ document.querySelectorAll('#tbl th[data-sort]').forEach(th => {
 });
 document.addEventListener('sct:langchange', () => { if (allRows.length) render(); });
 load();
+
+// ===== v1.04: log-board (ضمّ سجلّ الخادم مع الأولويّات) =====
+function _lbEsc(v) { return String(v == null ? '' : v).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function _lbFillTable(id, rows, cols) {
+  const tb = document.getElementById(id); tb.innerHTML = '';
+  if (!rows || !rows.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="' + cols.length + '" class="muted">—</td>';
+    tb.appendChild(tr); return;
+  }
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = cols.map(c => '<td>' + _lbEsc(r[c]) + '</td>').join('');
+    tb.appendChild(tr);
+  }
+}
+document.getElementById('lbRunBtn').addEventListener('click', async () => {
+  const fileEl = document.getElementById('lbFile');
+  const msg = document.getElementById('lbMsg');
+  const f = fileEl.files && fileEl.files[0];
+  if (!f) { msg.textContent = T('logs_pick', 'اختر ملفّ اللوغ أوّلاً.'); return; }
+  msg.textContent = T('logs_running', 'يُحلّل') + '…';
+  const fd = new FormData(); fd.append('file', f);
+  const botOnly = document.getElementById('lbBotOnly').checked ? '1' : '0';
+  try {
+    const r = await fetch('/api/jobs/' + jobId + '/log-board?bot_only=' + botOnly,
+      { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok || j.error) { msg.textContent = '✗ ' + (j.error || 'failed'); return; }
+    msg.textContent = '✓';
+    document.getElementById('lbResults').style.display = '';
+    const s = j.summary || {};
+    document.getElementById('lbTotal').textContent = (s.total_googlebot_hits || 0).toLocaleString();
+    document.getElementById('lbWasted').textContent = (s.wasted_hits || 0).toLocaleString();
+    document.getElementById('lbHigh').textContent = (s.high_value_pages || 0).toLocaleString();
+    document.getElementById('lbOrphan').textContent = (s.orphan_bot_pages || 0).toLocaleString();
+    _lbFillTable('lbWastedBody', (j.wasted_budget || []).map(r => ({
+      url: r.url || r.path, googlebot_hits: r.googlebot_hits,
+      googlebot_4xx: r.googlebot_4xx, googlebot_5xx: r.googlebot_5xx,
+      last_seen: r.last_seen,
+    })), ['url','googlebot_hits','googlebot_4xx','googlebot_5xx','last_seen']);
+    _lbFillTable('lbHighBody', (j.high_value_with_issues || []).map(r => ({
+      url: r.url, googlebot_hits: r.googlebot_hits,
+      priority_score: r.priority_score, log_boosted_score: r.log_boosted_score,
+      top_fix: r.top_fix,
+    })), ['url','googlebot_hits','priority_score','log_boosted_score','top_fix']);
+    _lbFillTable('lbOrphanBody', (j.orphan_bot_urls || []).map(r => ({
+      path: r.path, hits: r.hits, last_seen: r.last_seen,
+    })), ['path','hits','last_seen']);
+  } catch (e) { msg.textContent = '✗ ' + e; }
+});
 </script>
 </body>
 </html>

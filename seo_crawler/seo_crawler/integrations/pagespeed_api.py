@@ -49,6 +49,7 @@ class PageSpeedClient:
         cache: Optional[Any] = None,
         cache_ttl_days: int = 7,
         raw_dir: Optional[str] = None,
+        on_progress: Optional[Any] = None,
     ):
         """
         Args:
@@ -57,6 +58,8 @@ class PageSpeedClient:
             timeout: المهلة الزمنية لكل طلب
             cache: APICache instance (اختياري)
             cache_ttl_days: مدة صلاحية الـ cache
+            raw_dir: حفظ JSON الخام لكل صفحة (اختياري)
+            on_progress: callback(idx, total, url, strategy) لتحديث تقدّم الواجهة
         """
         self.api_key = api_key
         self.delay_seconds = delay_seconds
@@ -66,6 +69,14 @@ class PageSpeedClient:
         self.raw_dir = raw_dir  # حفظ تقرير Lighthouse الكامل (JSON خام) لكل صفحة
         self._cache_hits = 0
         self._cache_misses = 0
+        self.on_progress = on_progress
+        # v1.02: تجميع أخطاء الشبكة/DNS كي نُلخّصها في نهاية الجلسة بدل لوغ متضخّم
+        # يحوي مفاتيح: {dns: int, timeout: int, http_429: int, http_5xx: int, other: int,
+        # sample_urls: list[str]}
+        self.error_stats: dict[str, Any] = {
+            "dns": 0, "timeout": 0, "http_429": 0, "http_5xx": 0,
+            "other": 0, "sample_urls": [],
+        }
 
     def audit(
         self,
@@ -111,9 +122,12 @@ class PageSpeedClient:
         ]
         req_params.extend(("category", cat) for cat in categories)
 
-        # إعادة محاولة بسيطة مع تراجع تصاعدي للأخطاء العابرة (مهلة/5xx/429).
-        max_attempts = 3
+        # إعادة محاولة مع تراجع تصاعدي للأخطاء العابرة:
+        # v1.02: نُعالج أيضاً أخطاء DNS / getaddrinfo / ConnectionError (انقطاع شبكة لحظي
+        # شائع على Windows عند الإقلاع). نُعيد المحاولة بمهلات أطول لها لإعطاء DNS وقتاً.
+        max_attempts = 4
         last_error = "Unknown"
+        dns_backoff = [2.0, 5.0, 10.0]   # ثوانٍ — أوسع من الافتراضي للأخطاء العابرة DNS
         for attempt in range(max_attempts):
             try:
                 response = requests.get(
@@ -132,9 +146,14 @@ class PageSpeedClient:
                     # أخطاء عابرة: أعد المحاولة؛ غير ذلك توقّف فوراً.
                     if response.status_code in (429, 500, 502, 503, 504) \
                             and attempt < max_attempts - 1:
+                        if response.status_code == 429:
+                            self.error_stats["http_429"] += 1
+                        else:
+                            self.error_stats["http_5xx"] += 1
                         time.sleep(self.delay_seconds * (2 ** attempt))
                         continue
-                    log.warning(f"PageSpeed فشل لـ {url}: {error_msg}")
+                    self._record_error(url, "other")
+                    log.debug(f"PageSpeed فشل لـ {url}: {error_msg}")
                     return {"url": url, "strategy": strategy, "error": last_error}
 
                 data = response.json()
@@ -161,14 +180,52 @@ class PageSpeedClient:
             except requests.exceptions.Timeout:
                 last_error = "Timeout"
                 if attempt < max_attempts - 1:
+                    self.error_stats["timeout"] += 1
                     time.sleep(self.delay_seconds * (2 ** attempt))
                     continue
+                self._record_error(url, "timeout")
                 return {"url": url, "strategy": strategy, "error": "Timeout"}
+            except requests.exceptions.ConnectionError as e:
+                # v1.02: DNS / getaddrinfo / Network unreachable — أعد بمهلة أطول.
+                # هذا أكثر الأخطاء شيوعاً وأقلّها استحقاقاً للوغ كامل لكلّ مرّة.
+                msg = str(e)
+                if "getaddrinfo" in msg or "NameResolutionError" in msg \
+                        or "Name or service not known" in msg:
+                    last_error = "DNS_resolution_failed"
+                    self.error_stats["dns"] += 1
+                else:
+                    last_error = "ConnectionError"
+                    self.error_stats["other"] += 1
+                if attempt < max_attempts - 1:
+                    backoff = dns_backoff[min(attempt, len(dns_backoff) - 1)]
+                    log.debug(f"PageSpeed شبكة/DNS لـ {url} — محاولة #{attempt+2} بعد {backoff}s")
+                    time.sleep(backoff)
+                    continue
+                self._record_error(url, "dns" if "getaddrinfo" in msg else "other")
+                return {"url": url, "strategy": strategy, "error": last_error}
             except Exception as e:
-                log.error(f"خطأ في PageSpeed لـ {url}: {e}")
+                self._record_error(url, "other")
+                log.debug(f"خطأ في PageSpeed لـ {url}: {e}")
                 return {"url": url, "strategy": strategy, "error": str(e)[:200]}
 
         return {"url": url, "strategy": strategy, "error": last_error}
+
+    def _record_error(self, url: str, kind: str) -> None:
+        """يجمع عيّنة الروابط الفاشلة لتلخيصها في النهاية بدل لوغ متضخّم."""
+        if len(self.error_stats["sample_urls"]) < 10:
+            self.error_stats["sample_urls"].append({"url": url, "kind": kind})
+
+    def log_error_summary(self) -> None:
+        """ينشر سطراً واحداً ملخّصاً لأخطاء PageSpeed في نهاية الجلسة."""
+        es = self.error_stats
+        total = es["dns"] + es["timeout"] + es["http_429"] + es["http_5xx"] + es["other"]
+        if total == 0:
+            return
+        log.warning(
+            f"PageSpeed errors summary: total={total} | dns={es['dns']} "
+            f"timeout={es['timeout']} http_429={es['http_429']} "
+            f"http_5xx={es['http_5xx']} other={es['other']}"
+        )
 
     def _save_raw(self, data: dict[str, Any], url: str, strategy: str) -> None:
         """يحفظ استجابة PageSpeed/Lighthouse الكاملة في ملف JSON لكل صفحة."""
@@ -222,9 +279,17 @@ class PageSpeedClient:
             for strategy in strategies:
                 count += 1
                 log.info(f"[{count}/{total}] PageSpeed: {url} ({strategy})")
+                # v1.02: تحديث تقدّم الواجهة (اسم الرابط الحالي + نسبة الإنجاز)
+                if self.on_progress:
+                    try:
+                        self.on_progress(count, total, url, strategy)
+                    except Exception:  # noqa: BLE001
+                        pass
                 result = self.audit(url, strategy=strategy)
                 results.append(result)
 
+        # v1.02: ملخّص أخطاء واحد في النهاية بدل لوغ متضخّم
+        self.log_error_summary()
         return results
 
     def _extract_metrics(

@@ -14,26 +14,36 @@ from __future__ import annotations
 from typing import Any
 
 # أنماط استبعاد موصى بها لكل منصّة (صفحات تفاعلية لا تُفهرَس عادةً)
+# v1.07: أضفنا strip_query_params — معاملات تُزال من URLs قبل الطابور كي لا تُولّد تكرار
+# محتوى (مثل sort_by=price و sort_by=name يُرجعان نفس المنتجات بترتيب مختلف).
+# عند تفعيل preset، main.py يستدعي helpers.set_extra_strip_params(preset["strip_query_params"]).
 PRESETS: dict[str, dict[str, Any]] = {
     "zid": {
         "label": "Zid",
         "exclude_patterns": ["*/cart*", "*/checkout*", "*/account*", "*add-to-cart*"],
-        "note": "منصّة زد — استبعاد السلّة/الدفع/الحساب.",
+        # Zid يُضيف ?sort_by=… على صفحات التصنيفات/المنتجات — نفس المحتوى بترتيب مختلف
+        "strip_query_params": ["sort_by", "sort", "order_by", "order", "view"],
+        "note": "منصّة زد — استبعاد السلّة/الدفع/الحساب + تطبيع sort_by.",
     },
     "salla": {
         "label": "Salla",
         "exclude_patterns": ["*/cart*", "*/checkout*", "*/profile*", "*/login*", "*add-to-cart*"],
-        "note": "منصّة سلة — استبعاد السلّة/الدفع/الملف الشخصي.",
+        "strip_query_params": ["sort", "order", "view"],
+        "note": "منصّة سلة — استبعاد السلّة/الدفع/الملف الشخصي + تطبيع sort.",
     },
     "shopify": {
         "label": "Shopify",
         "exclude_patterns": ["*/cart*", "*/checkout*", "*/account*", "*/collections/*/products.json", "*add-to-cart*"],
-        "note": "Shopify — استبعاد السلّة/الدفع/الحساب ونقاط JSON.",
+        # Shopify: sort_by=price-ascending و sort_by=manual يُرجعان نفس مجموعة المنتجات
+        "strip_query_params": ["sort_by", "sortBy", "view"],
+        "note": "Shopify — استبعاد السلّة/الدفع + نقاط JSON + تطبيع sort_by.",
     },
     "woocommerce": {
         "label": "WooCommerce",
         "exclude_patterns": ["*/cart*", "*/checkout*", "*/my-account*", "*add-to-cart*", "*/wp-admin*"],
-        "note": "WooCommerce — استبعاد السلّة/الدفع/الحساب/الإدارة.",
+        # WooCommerce يستعمل orderby بدل sort_by
+        "strip_query_params": ["orderby", "order", "min_price", "max_price"],
+        "note": "WooCommerce — استبعاد السلّة/الإدارة + تطبيع orderby.",
     },
 }
 
@@ -62,6 +72,9 @@ def apply_preset(config: dict[str, Any], name: str) -> dict[str, Any]:
     """يدمج قالب المنصّة في الإعداد (يضيف أنماط الاستبعاد دون مسح القائمة الحالية).
 
     name: معرّف منصّة معروف (zid/salla/shopify/woocommerce). غير المعروف يُتجاهَل بأمان.
+
+    v1.07: يُفعّل أيضاً تطبيع معاملات query الخاصّة بالمنصّة (sort_by ونحوها) عبر
+    helpers.set_extra_strip_params — يقلّص الطابور بـ40-70% للمواقع الكثيرة الصفحات.
     """
     preset = PRESETS.get((name or "").lower())
     if not preset:
@@ -73,4 +86,12 @@ def apply_preset(config: dict[str, Any], name: str) -> dict[str, Any]:
             existing.append(pat)
     filters["exclude_patterns"] = existing
     config.setdefault("site", {})["platform_preset_applied"] = preset["label"]
+    # v1.07: تطبيع معاملات المنصّة (sort_by/order/view) — يطبَّق globally للزحفة
+    strip = preset.get("strip_query_params") or []
+    if strip:
+        try:
+            from utils.helpers import set_extra_strip_params
+            set_extra_strip_params(strip)
+        except ImportError:
+            pass  # في وضع التحميل المنفصل (الاختبار)؛ التطبيق لا يفشل
     return config

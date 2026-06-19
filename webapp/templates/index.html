@@ -37,7 +37,7 @@
 </head>
 <body>
 <header class="topbar">
-  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO <small class="version-tag">v1.02 · by Ahmad-Ajm</small></h1>
+  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO <small class="version-tag">v1.08.1 · by Ahmad-Ajm</small></h1>
   <span>
     <a href="/logs" class="btn sm" data-i18n="logs_link">📜 تحليل اللوغ</a>
     <button id="langToggle" class="btn sm" type="button">English</button>
@@ -50,6 +50,23 @@
     <span class="r-chip off" id="rGoogle" title="Google">🔐 Google</span>
     <span class="r-chip off" id="rChromium" title="Chromium">🌐 Chromium</span>
     <span class="r-chip off" id="rReady" title="Ready">🚦 <span data-i18n="r_ready">جاهز</span></span>
+  </div>
+
+  <!-- v1.02: شريط جاهزية المتطلبات الاختيارية — يُحدَّث لمرّة من /api/requirements -->
+  <div class="req-row" id="reqRow" aria-label="Optional requirements">
+    <strong data-i18n="req_h">المتطلبات</strong>
+    <span class="req-chip" id="reqExcel" data-tool="excel">
+      <span data-i18n="req_excel">Excel</span>
+      <span class="req-state" data-i18n="req_checking">يتحقّق…</span>
+    </span>
+    <span class="req-chip" id="reqPdf" data-tool="pdf">
+      <span data-i18n="req_pdf">PDF</span>
+      <span class="req-state" data-i18n="req_checking">يتحقّق…</span>
+    </span>
+    <span class="req-chip" id="reqGa4" data-tool="ga4">
+      <span data-i18n="req_ga4">GA4</span>
+      <span class="req-state" data-i18n="req_checking">يتحقّق…</span>
+    </span>
   </div>
 
   {% if not jobs and not active_job %}
@@ -76,66 +93,46 @@
     <section class="panel">
       <h2 data-i18n="sec1">الموقع وإعدادات الزحف</h2>
       <div class="grid">
-        <label class="full"><span data-i18n="url">رابط الموقع</span>
+        <label class="full"><span data-i18n="url">رابط الموقع</span><span class="tip" data-tip-key="tip_url">?</span>
           <input type="url" name="url" data-i18n-ph="url_ph" placeholder="https://example.com/" required>
         </label>
-        <label><span data-i18n="mode">الوضع (mode)</span>
-          <select name="mode">
-            <option value="audit" data-i18n="mode_audit">تدقيق كامل (audit)</option>
-            <option value="competitor" data-i18n="mode_competitor">منافس (competitor)</option>
-            <option value="compare" data-i18n="mode_compare">مقارنة (compare)</option>
-          </select>
-        </label>
 
-        <label class="full"><span data-i18n="seed_strategy">طريقة اكتشاف الروابط</span>
+        <label class="full"><span data-i18n="seed_strategy">طريقة اكتشاف الروابط</span><span class="tip" data-tip-key="tip_seed_strategy">?</span>
           <select name="seed_strategy">
             <option value="hybrid" selected data-i18n="seed_hybrid">هجين (الرئيسية + الروابط أولاً، ثم sitemap) — مُوصى به</option>
             <option value="homepage" data-i18n="seed_homepage">من الصفحة الرئيسية فقط</option>
             <option value="sitemap" data-i18n="seed_sitemap">من sitemap أولاً (تغطية واسعة للمنتجات)</option>
           </select>
-          <span class="muted sm" data-i18n="seed_hint"> يبدأ من الرئيسية ويتبع الروابط (يلتقط التصنيفات/التنقّل/403/404).</span>
         </label>
-        <label><span data-i18n="max_pages">أقصى عدد صفحات</span>
+        <label><span data-i18n="max_pages">أقصى عدد صفحات</span><span class="tip" data-tip-key="tip_max_pages">?</span>
           <input type="number" name="max_pages" id="maxPages" value="500" min="0">
           <label class="chk" style="margin-top:6px">
             <input type="checkbox" id="allPages"> <span data-i18n="all_pages">الكل (زحف جميع صفحات الموقع بلا حد)</span>
           </label>
         </label>
-        <label><span data-i18n="max_depth">أقصى عمق</span>
-          <input type="number" name="max_depth" value="10" min="1">
+        <label><span data-i18n="max_depth">أقصى عمق</span><span class="tip" data-tip-key="tip_max_depth">?</span>
+          <input type="number" name="max_depth" value="5" min="1">
         </label>
-        <label class="full"><span data-i18n="speed">سرعة الزحف:</span> <span id="speedLabel" class="speed-tag">متوازن</span>
+        <label class="full"><span data-i18n="speed">سرعة الزحف:</span> <span id="speedLabel" class="speed-tag">متوازن</span><span class="tip" data-tip-key="tip_speed">?</span>
           <input type="range" id="speedSlider" min="1" max="5" step="1" value="3">
           <span class="muted sm" data-i18n="speed_hint">كلما زادت السرعة قلّ التأخير وزاد التزامن. هناك حدّ أدنى للتأخير لحماية الموقع.</span>
         </label>
-        <details class="adv full">
-          <summary data-i18n="speed_advanced">ضبط دقيق للسرعة (يدوياً)</summary>
-          <div class="grid">
-            <label><span data-i18n="delay">التأخير بين الطلبات (ث)</span>
-              <input type="number" step="0.1" name="delay_seconds" value="0.5" min="0.1">
-            </label>
-            <label><span data-i18n="concurrency">الطلبات المتزامنة</span>
-              <input type="number" name="concurrent_requests" value="5" min="1" max="20">
-            </label>
-          </div>
-        </details>
       </div>
       <div class="checks">
-        <label class="chk"><input type="checkbox" name="respect_robots" checked> <span data-i18n="respect_robots">احترام robots.txt</span></label>
+        <label class="chk"><input type="checkbox" name="respect_robots" checked> <span data-i18n="respect_robots">احترام robots.txt</span><span class="tip" data-tip-key="tip_respect_robots">?</span></label>
         <label class="chk"><input type="checkbox" name="no_resume"> <span data-i18n="fresh_start">بدء جديد (تجاهل الاستئناف)</span></label>
       </div>
       <details class="adv">
-        <summary data-i18n="adv_crawl">خيارات زحف متقدمة (الروابط الخارجية والموارد)</summary>
-        <div class="checks">
-          <label class="chk"><input type="checkbox" name="skip_external"> <span data-i18n="skip_external">تخطّي الروابط الخارجية</span></label>
-          <label class="chk"><input type="checkbox" name="ext_sample_per_host" checked> <span data-i18n="ext_sample_per_host">تسريع: رابط واحد لكل نطاق خارجي (sample per host) — موصى به</span></label>
-          <label><span data-i18n="ext_max_urls">سقف عدد الروابط الخارجية المفحوصة (0 = بلا حد)</span>
-            <input type="number" name="ext_max_urls" placeholder="0" min="0">
+        <summary data-i18n="adv_crawl">خيارات زحف متقدمة (الوضع، الروابط الخارجية، الموارد، الضبط الدقيق)</summary>
+        <div class="grid" style="margin-top:8px">
+          <label><span data-i18n="mode">الوضع (mode)</span><span class="tip" data-tip-key="tip_mode">?</span>
+            <select name="mode">
+              <option value="audit" data-i18n="mode_audit">تدقيق كامل (audit)</option>
+              <option value="competitor" data-i18n="mode_competitor">منافس (competitor)</option>
+              <option value="compare" data-i18n="mode_compare">مقارنة (compare)</option>
+            </select>
           </label>
-          <label class="chk"><input type="checkbox" name="check_resource_status"> <span data-i18n="check_resource_status">فحص حالة موارد الصفحة (CSS/JS/صور) — أبطأ، يتطلّب جمع الموارد</span></label>
-          <label class="chk"><input type="checkbox" name="adaptive_throttle"> <span data-i18n="adaptive_throttle">تحكّم تكيّفي بالسرعة (يبطئ تلقائياً عند 429/5xx/البطء)</span></label>
-          <label class="chk"><input type="checkbox" name="generate_sitemap"> <span data-i18n="generate_sitemap">توليد sitemap.xml من الصفحات القابلة للفهرسة</span></label>
-          <label class="full"><span data-i18n="platform_preset">قالب منصّة التجارة (يستبعد السلّة/الدفع/الحساب)</span>
+          <label class="full"><span data-i18n="platform_preset">قالب منصّة التجارة (يستبعد السلّة/الدفع/الحساب)</span><span class="tip" data-tip-key="tip_platform_preset">?</span>
             <select name="platform_preset">
               <option value="" selected data-i18n="platform_none">بدون</option>
               <option value="zid">Zid (زد)</option>
@@ -144,7 +141,41 @@
               <option value="woocommerce">WooCommerce</option>
             </select>
           </label>
+          <!-- v1.05: انتحال User-Agent (لكشف مشاكل Cloudflare/WAF خاصّة بالبوتات) -->
+          <label class="full"><span data-i18n="ua_preset">User-Agent</span><span class="tip" data-tip-key="tip_ua_preset">?</span>
+            <select name="ua_preset" id="uaPreset">
+              <option value="" selected data-i18n="ua_default">زائر عاديّ (افتراضي — ما يراه المستخدم)</option>
+              <option value="googlebot" data-i18n="ua_googlebot">Googlebot — ما يراه Google (يكشف مشاكل CF/WAF)</option>
+              <option value="googlebot-mobile" data-i18n="ua_googlebot_mobile">Googlebot Mobile (محاكاة فهرسة الجوال أوّلاً)</option>
+              <option value="bingbot" data-i18n="ua_bingbot">Bingbot</option>
+              <option value="custom" data-i18n="ua_custom">مخصّص</option>
+            </select>
+          </label>
+          <label class="full" id="uaCustomBox" style="display:none"><span data-i18n="ua_custom_label">User-Agent مخصّص</span>
+            <input type="text" name="ua_custom" placeholder="Mozilla/5.0 ...">
+          </label>
         </div>
+        <div class="checks" style="margin-top:8px">
+          <label class="chk"><input type="checkbox" name="skip_external"> <span data-i18n="skip_external">تخطّي الروابط الخارجية</span><span class="tip time" data-tip-key="tip_skip_external">⏱</span></label>
+          <label class="chk"><input type="checkbox" name="ext_sample_per_host" checked> <span data-i18n="ext_sample_per_host">تسريع: رابط واحد لكل نطاق خارجي (sample per host) — موصى به</span><span class="tip" data-tip-key="tip_ext_sample_per_host">?</span></label>
+          <label><span data-i18n="ext_max_urls">سقف عدد الروابط الخارجية المفحوصة (0 = بلا حد)</span>
+            <input type="number" name="ext_max_urls" placeholder="0" min="0">
+          </label>
+          <label class="chk"><input type="checkbox" name="check_resource_status"> <span data-i18n="check_resource_status">فحص حالة موارد الصفحة (CSS/JS/صور) — أبطأ، يتطلّب جمع الموارد</span><span class="tip time" data-tip-key="tip_check_resource_status">⏱</span></label>
+          <label class="chk"><input type="checkbox" name="adaptive_throttle"> <span data-i18n="adaptive_throttle">تحكّم تكيّفي بالسرعة (يبطئ تلقائياً عند 429/5xx/البطء)</span><span class="tip" data-tip-key="tip_adaptive_throttle">?</span></label>
+          <label class="chk"><input type="checkbox" name="generate_sitemap"> <span data-i18n="generate_sitemap">توليد sitemap.xml من الصفحات القابلة للفهرسة</span><span class="tip" data-tip-key="tip_generate_sitemap">?</span></label>
+        </div>
+        <details class="adv full" style="margin-top:8px">
+          <summary data-i18n="speed_advanced">ضبط دقيق للسرعة (يدوياً — يتجاوز شريط السرعة)</summary>
+          <div class="grid">
+            <label><span data-i18n="delay">التأخير بين الطلبات (ث)</span><span class="tip" data-tip-key="tip_speed_advanced">?</span>
+              <input type="number" step="0.1" name="delay_seconds" value="0.5" min="0.1">
+            </label>
+            <label><span data-i18n="concurrency">الطلبات المتزامنة</span>
+              <input type="number" name="concurrent_requests" value="5" min="1" max="20">
+            </label>
+          </div>
+        </details>
       </details>
     </section>
 
@@ -172,56 +203,13 @@
       </details>
     </section>
 
-    <!-- ===== المخرجات والتقرير (Phase A: دمج تبويب «التقارير» السابق هنا كقسم) ===== -->
-    <section class="panel">
-      <h2 data-i18n="sec3">نوع الملفات الناتجة</h2>
-      <div class="checks">
-        {% for f in formats %}
-        <label class="chk"><input type="checkbox" name="formats" value="{{ f.key }}" {% if f.default %}checked{% endif %} {% if f.key == 'pdf' %}id="fmtPdf"{% endif %}> {{ f.label }}</label>
-        {% endfor %}
-      </div>
-      <details class="adv" id="pdfOptionsDetails" style="margin-top:8px">
-        <summary data-i18n="report_customize">📄 تخصيص تقرير HTML/PDF (اللغة، الجمهور، الأقسام)</summary>
-        <div id="pdfOptions" class="subpanel">
-          <div class="grid">
-            <label><span data-i18n="report_lang">لغة التقرير</span>
-              <select name="language" data-i18n-followlang>
-                <option value="ar" data-i18n="lang_ar">العربية</option>
-                <option value="en" data-i18n="lang_en">English</option>
-              </select>
-            </label>
-            <label><span data-i18n="report_type">نوع التقرير</span>
-              <select name="audience">
-                <option value="expert" data-i18n="aud_expert">خبير SEO (تفصيلي)</option>
-                <option value="client" data-i18n="aud_client">عميل (مختصر ومبسّط)</option>
-                <option value="both" data-i18n="aud_both">كلاهما (تقريران)</option>
-              </select>
-            </label>
-            <label><span data-i18n="client_name">اسم العميل</span>
-              <input type="text" name="client_name" data-i18n-ph="optional" placeholder="اختياري">
-            </label>
-            <label class="full"><span data-i18n="logo_url">رابط الشعار (اختياري)</span>
-              <input type="url" name="logo_url" placeholder="https://.../logo.png">
-            </label>
-            <label><span data-i18n="max_rows">حد صفوف الجداول</span>
-              <input type="number" name="max_rows" value="100" min="10">
-            </label>
-          </div>
-          <p class="muted sm" data-i18n="sections_label">الأقسام المضمّنة:</p>
-          <div class="checks">
-            {% for s in sections %}
-            <label class="chk"><input type="checkbox" name="sections" value="{{ s.key }}" checked> <span data-i18n="sec_{{ s.key }}">{{ s.label }}</span></label>
-            {% endfor %}
-          </div>
-          <p class="muted sm" data-i18n="severity_label">مستويات الخطورة المضمّنة:</p>
-          <div class="checks">
-            {% for sev in severities %}
-            <label class="chk"><input type="checkbox" name="severity_filter" value="{{ sev }}" checked> {{ sev }}</label>
-            {% endfor %}
-          </div>
-        </div>
-      </details>
-    </section>
+    <!-- v1.02: قسم «نوع الملفات الناتجة» أُزيل من هنا — البيانات الخام (CSV/JSON) تُحفظ
+         دائماً بعد الزحف، وبقيّة التنسيقات (HTML/PDF/Excel/XML) تُولَّد عند الطلب من صفحة
+         المهمّة بأزرار «توليد + تنزيل» منفصلة. خيارات تخصيص PDF/HTML نُقلت إلى صفحة المهمّة
+         أيضاً (يبقى محرّر النموذج القديم لإعادة البناء كما هو).
+         الحقول المخفيّة أدناه تحفظ الافتراضيّات حتى لا تنكسر البنية التحتيّة للتقرير. -->
+    <input type="hidden" name="formats" value="csv">
+    <input type="hidden" name="formats" value="json">
 
     <!-- ===== شريط البدء الموحّد (Phase C) ===== -->
     <div class="submit-bar">
@@ -273,17 +261,9 @@
           </div>
           <p id="gPasteMsg" class="muted sm"></p>
         </details>
-        <details class="adv" style="margin-top:8px">
-          <summary data-i18n="g_setup_h">📘 إعداد OAuth client لأوّل مرّة (دليل من 3 خطوات)</summary>
-          <ol class="steps">
-            <li><span data-i18n="g_setup_1">في </span>
-                <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>
-                <span data-i18n="g_setup_1b"> أنشئ مشروعاً (أو استخدم مشروعك)، ثم فعّل APIs: «Search Console API» و«Google Analytics Admin API» و«Google Analytics Data API».</span></li>
-            <li><span data-i18n="g_setup_2">من «OAuth consent screen» اختر نوع External، أضِف نفسك (وزملاءك) كـ Test users، واحفظ. (وضع Testing كافٍ — بلا حاجة لتحقّق Google.)</span></li>
-            <li><span data-i18n="g_setup_3">من «Credentials» أنشئ «OAuth client ID» نوع «Desktop app»، نزّل ملف JSON، وارفعه هنا أعلاه. ثم اضغط «وافق بحسابي».</span></li>
-          </ol>
-          <p class="muted sm" data-i18n="g_setup_note">ملاحظة: في وضع Testing تنتهي refresh tokens كل 7 أيام (موافقة أسبوعية). للإنتاج بلا تحذير تحتاج OAuth verification (الـ scopes حسّاسة).</p>
-        </details>
+        <p class="muted sm" style="margin-top:8px">
+          <a href="/static/docs/oauth_setup.html" target="_blank" rel="noopener" data-i18n="docs_oauth_link">📘 دليل إعداد OAuth و Google Cloud (مستندات المشروع) ↗</a>
+        </p>
       </div>
 
       <!-- تثبيت متطلبات (مُنقَل من «الإعدادات» السابقة) -->
@@ -300,7 +280,7 @@
       </div>
 
       <div class="card">
-        <label class="chk"><input type="checkbox" name="gsc_enabled"> <span data-i18n="gsc_enable">تفعيل Google Search Console</span></label>
+        <label class="chk"><input type="checkbox" name="gsc_enabled"> <span data-i18n="gsc_enable">تفعيل Google Search Console</span><span class="tip" data-tip-key="tip_gsc">?</span></label>
         <span class="badge off" id="gscBadge" data-i18n="badge_unknown">لم يُختبر</span>
         <div class="grid">
           <label><span data-i18n="gsc_site">رابط الموقع في GSC</span><input type="text" name="gsc_site_url" placeholder="https://example.com/"></label>
@@ -313,16 +293,19 @@
             <option value="" data-i18n="g_pick_site">— اختر موقعاً —</option>
           </select>
         </div>
-        <label class="chk"><input type="checkbox" name="gsc_url_inspection"> <span data-i18n="gsc_url_inspection">فحص حالة الفهرسة الحقيقية لكل رابط (URL Inspection — يحترم الحصّة عبر السقف)</span></label>
+        <label class="chk"><input type="checkbox" name="gsc_url_inspection"> <span data-i18n="gsc_url_inspection">فحص حالة الفهرسة الحقيقية لكل رابط (URL Inspection — يحترم الحصّة عبر السقف)</span><span class="tip time" data-tip-key="tip_gsc_url_inspection">⏱</span></label>
         <button type="button" id="testGscBtn" class="btn sm" data-i18n="test_conn">🔎 اختبار الاتصال</button>
         <p id="gscTestMsg" class="muted sm"></p>
       </div>
 
       <div class="card">
-        <label class="chk"><input type="checkbox" name="ga4_enabled"> <span data-i18n="ga4_enable">تفعيل Google Analytics 4</span></label>
+        <label class="chk"><input type="checkbox" name="ga4_enabled"> <span data-i18n="ga4_enable">تفعيل Google Analytics 4</span><span class="tip" data-tip-key="tip_ga4">?</span></label>
         <span class="badge off" id="ga4Badge" data-i18n="badge_unknown">لم يُختبر</span>
         <div class="grid">
-          <label><span data-i18n="ga4_prop">GA4 property_id</span><input type="text" name="ga4_property_id" placeholder="123456789"></label>
+          <label><span data-i18n="ga4_prop">GA4 property_id</span>
+            <input type="text" name="ga4_property_id" placeholder="123456789">
+            <a class="muted sm" href="/docs/ga4_property_id" target="_blank" rel="noopener" data-i18n="docs_ga4_link">📘 كيف تجد GA4 property_id؟ ↗</a>
+          </label>
           <label><span data-i18n="ga4_range">نطاق التاريخ (أيام)</span><input type="number" name="ga4_date_range_days" placeholder="90" min="1"></label>
         </div>
         <div class="actions">
@@ -336,57 +319,77 @@
       </div>
 
       <div class="card">
-        <label class="chk"><input type="checkbox" name="pagespeed_enabled"> <span data-i18n="pagespeed_enable">تفعيل PageSpeed API</span></label>
+        <label class="chk"><input type="checkbox" name="pagespeed_enabled"> <span data-i18n="pagespeed_enable">تفعيل PageSpeed API</span><span class="tip time" data-tip-key="tip_pagespeed">⏱</span></label>
         <span class="badge off" id="psBadge" data-i18n="badge_unknown">لم يُختبر</span>
         <div class="grid">
           <label><span data-i18n="pagespeed_max">أقصى عدد URLs (افتراضي 25 — كل URL ~25ث × 2؛ لا تضع 0 على موقع كبير)</span><input type="number" name="pagespeed_max_urls" value="25" min="0"></label>
         </div>
         <button type="button" id="testPsBtn" class="btn sm" data-i18n="test_conn">🔎 اختبار الاتصال</button>
         <p id="psTestMsg" class="muted sm"></p>
-      </div>
-      <label class="chk"><input type="checkbox" name="pagespeed_save_raw"> <span data-i18n="pagespeed_save_raw">حفظ تقرير Lighthouse الكامل (JSON خام لكل صفحة) — للتحليل العميق، كبير الحجم</span></label>
-      <label class="chk"><input type="checkbox" name="pagespeed_crux_history"> <span data-i18n="pagespeed_crux_history">اتجاه Core Web Vitals عبر الزمن (CrUX History — يستعمل نفس المفتاح)</span></label>
-      <p class="muted sm" data-i18n="pagespeed_deep_hint">«PageSpeed API» = Lighthouse نفسه. تحصل على: pagespeed.csv (الدرجات) + pagespeed_opportunities.csv (فرص التحسين العميقة: ما يُبطئ كل صفحة وكم يوفّر) + التقرير الخام الكامل عند تفعيل الخيار أعلاه.</p>
-
-      <label class="chk"><input type="checkbox" name="lighthouse_enabled"> <span data-i18n="lighthouse_enable">استيراد Lighthouse/PageSpeed JSON (ملفات محلية)</span></label>
-      <p class="muted sm" data-i18n="lighthouse_hint">ليس جلباً أونلاين — يقرأ ملفات JSON تصدّرها أنت يدوياً (Chrome DevTools / Lighthouse CLI) وتضعها في المجلد. لمعظم الحالات لا تحتاجه: PageSpeed API أعلاه يعطي نفس بيانات Lighthouse مباشرةً.</p>
-      <div class="grid">
-        <label><span data-i18n="lighthouse_folder">مجلد ملفات Lighthouse</span><input type="text" name="lighthouse_folder" placeholder="./external_data/lighthouse"></label>
+        <label class="chk" style="margin-top:8px"><input type="checkbox" name="pagespeed_save_raw"> <span data-i18n="pagespeed_save_raw">حفظ تقرير Lighthouse الكامل (JSON خام لكل صفحة) — للتحليل العميق، كبير الحجم</span><span class="tip" data-tip-key="tip_pagespeed_save_raw">?</span></label>
+        <label class="chk"><input type="checkbox" name="pagespeed_crux_history"> <span data-i18n="pagespeed_crux_history">اتجاه Core Web Vitals عبر الزمن (CrUX History — يستعمل نفس المفتاح)</span><span class="tip" data-tip-key="tip_pagespeed_crux_history">?</span></label>
       </div>
 
-      <label class="chk"><input type="checkbox" name="awt_enabled"> <span data-i18n="awt_enable">استيراد Ahrefs Webmaster (CSV)</span></label>
-      <div class="grid">
-        <label><span data-i18n="awt_folder">مجلد AWT</span><input type="text" name="awt_csv_folder" placeholder="./external_data/awt"></label>
+      <details class="adv" style="margin-top:8px">
+        <summary>📥 استيراد بيانات خارجيّة (Lighthouse / Ahrefs CSV) — اختياري نادر</summary>
+        <div class="adv-body">
+          <label class="chk"><input type="checkbox" name="lighthouse_enabled"> <span data-i18n="lighthouse_enable">استيراد Lighthouse/PageSpeed JSON (ملفات محلية)</span><span class="tip" data-tip-key="tip_lighthouse">?</span></label>
+          <div class="grid">
+            <label><span data-i18n="lighthouse_folder">مجلد ملفات Lighthouse</span><input type="text" name="lighthouse_folder" placeholder="./external_data/lighthouse"></label>
+          </div>
+          <label class="chk"><input type="checkbox" name="awt_enabled"> <span data-i18n="awt_enable">استيراد Ahrefs Webmaster (CSV)</span><span class="tip" data-tip-key="tip_awt">?</span></label>
+          <div class="grid">
+            <label><span data-i18n="awt_folder">مجلد AWT</span><input type="text" name="awt_csv_folder" placeholder="./external_data/awt"></label>
+          </div>
+        </div>
+      </details>
+
+      <!-- v1.04: روابط خلفيّة حيّة (Ahrefs / Majestic) — مدفوعة، مطفأة افتراضياً -->
+      <div class="card">
+        <label class="chk"><input type="checkbox" name="backlinks_enabled"> <span data-i18n="backlinks_enable">🔗 الروابط الخلفيّة (API حيّ — Ahrefs/Majestic)</span><span class="tip" data-tip-key="tip_backlinks">?</span></label>
+        <p class="muted sm" data-i18n="backlinks_p">يجلب ملخّص النطاق (Domain Rating / Trust Flow)، أعلى النطاقات المُحيلة، وتوزيع نصوص الروابط من API الحيّ. مدفوع — يحتاج اشتراك Ahrefs Standard أو Majestic OpenApp. للحلّ المجاني (الموقع تملكه فقط): استعمل AWT CSV أعلاه.</p>
+        <div class="grid">
+          <label><span data-i18n="backlinks_provider">المزوّد</span>
+            <select name="backlinks_provider">
+              <option value="ahrefs">Ahrefs</option>
+              <option value="majestic">Majestic</option>
+            </select>
+          </label>
+          <label><span data-i18n="backlinks_key">مفتاح API</span>
+            <input type="password" name="backlinks_api_key" placeholder="مفتاحك الخاص (يبقى محلياً)" autocomplete="off">
+          </label>
+        </div>
       </div>
 
-      <!-- مستشار الذكاء الاصطناعي (دُمج من تبويبَي «الذكاء» و«الإعدادات» السابقَين) -->
+      <!-- مستشار الذكاء الاصطناعي — v1.02: تنظيف لكلّ مزوّد (إظهار/إخفاء الحقول حسب الاختيار) -->
       <div class="subpanel">
         <h3 data-i18n="ai_h">🤖 مستشار الذكاء الاصطناعي</h3>
-        <label class="chk"><input type="checkbox" name="ai_enabled"> <span data-i18n="ai_enable">تفعيل تحليل الذكاء الاصطناعي وتوصياته</span></label>
+        <label class="chk"><input type="checkbox" name="ai_enabled"> <span data-i18n="ai_enable">تفعيل تحليل الذكاء الاصطناعي وتوصياته</span><span class="tip" data-tip-key="tip_ai">?</span></label>
         <p class="muted sm" data-i18n="ai_page_note">يعمل تلقائياً أثناء الزحف عند التفعيل: يقرأ ملخّص التدقيق وأهم الفرص ويُرجع ملخّصاً تنفيذياً وتوصيات مرتّبة (تظهر في التقرير وملف ai_recommendations.csv). لا تُرسَل بيانات مستخدمين — فقط روابط وأنواع مشاكل وأرقام مجمّعة.</p>
         <div class="grid">
-          <label><span data-i18n="ai_provider">المزوّد</span>
-            <select name="ai_provider">
+          <label><span data-i18n="ai_provider">المزوّد</span><span class="tip" data-tip-key="tip_ai_provider">?</span>
+            <select name="ai_provider" id="aiProviderSel">
               <option value="openai">OpenAI (GPT)</option>
               <option value="gemini">Google Gemini</option>
               <option value="deepseek">DeepSeek</option>
               <option value="openrouter">OpenRouter</option>
               <option value="huggingface">Hugging Face</option>
-              <option value="openai_compatible" data-i18n="ai_provider_compatible">نقطة متوافقة مع OpenAI (مخصّص/محلي)</option>
+              <option value="local">🖥️ نموذج محلي (Ollama / LM Studio على 127.0.0.1)</option>
+              <option value="openai_compatible" data-i18n="ai_provider_compatible">نقطة متوافقة مع OpenAI (مخصّص)</option>
             </select>
           </label>
-          <label><span data-i18n="ai_key">مفتاح API</span>
+          <label data-ai-field="api_key"><span data-i18n="ai_key">مفتاح API</span>
             <input type="password" name="ai_api_key" data-i18n-ph="ai_key_ph" placeholder="sk-... (يُحفظ محلياً فقط)" autocomplete="off">
           </label>
-          <label><span data-i18n="ai_model">النموذج (اختياري)</span>
+          <label data-ai-field="model"><span data-i18n="ai_model">النموذج (اختياري)</span>
             <input type="text" name="ai_model" data-i18n-ph="ai_model_ph" placeholder="فارغ = الافتراضي لكل مزوّد">
           </label>
-          <label><span data-i18n="ai_base_url">عنوان الخدمة base_url (اختياري)</span>
+          <label data-ai-field="base_url"><span data-i18n="ai_base_url">عنوان الخدمة base_url</span>
             <input type="url" name="ai_base_url" data-i18n-ph="ai_base_url_ph" placeholder="مطلوب فقط للنقطة المخصّصة">
           </label>
-          <label><span data-i18n="ai_max_opps">عدد الفرص المُرسلة للنموذج</span><input type="number" name="ai_max_opportunities" placeholder="15" min="1" max="50"></label>
+          <label data-ai-field="max_opps"><span data-i18n="ai_max_opps">عدد الفرص المُرسلة للنموذج</span><input type="number" name="ai_max_opportunities" placeholder="15" min="1" max="50"></label>
         </div>
-        <label class="chk"><input type="checkbox" name="ai_allow_private"> <span data-i18n="ai_allow_private">السماح بنقطة محلية/خاصة (للنماذج المحلية مثل Ollama على 127.0.0.1)</span></label>
+        <label class="chk" data-ai-field="allow_private"><input type="checkbox" name="ai_allow_private"> <span data-i18n="ai_allow_private">السماح بنقطة محلية/خاصة (للنماذج المحلية مثل Ollama على 127.0.0.1)</span><span class="tip" data-tip-key="tip_ai_allow_private">?</span></label>
       </div>
     </section>
     </div>
@@ -413,7 +416,7 @@
 
       <!-- الاستخراج المخصّص -->
       <div class="subpanel">
-        <h3 data-i18n="adv_custom">🧩 الاستخراج المخصّص (Custom Extraction)</h3>
+        <h3 data-i18n="adv_custom">🧩 الاستخراج المخصّص (Custom Extraction)<span class="tip" data-tip-key="tip_custom">?</span></h3>
         <label class="chk"><input type="checkbox" id="customEnabled" name="custom_enabled"> <span data-i18n="custom_enable">تفعيل الاستخراج المخصّص</span></label>
         <table class="tbl" id="customRules"><thead><tr>
           <th data-i18n="th_name">الاسم</th><th data-i18n="th_type">النوع</th><th data-i18n="th_selector">المحدّد/النمط</th><th data-i18n="th_extract">الاستخراج</th><th data-i18n="th_attr">attr/group</th><th></th>
@@ -425,7 +428,7 @@
 
       <!-- عتبات التحليل -->
       <div class="subpanel">
-        <h3 data-i18n="adv_thresholds">📏 عتبات التحليل</h3>
+        <h3 data-i18n="adv_thresholds">📏 عتبات التحليل<span class="tip" data-tip-key="tip_thresholds">?</span></h3>
         <div class="grid">
           <label><span data-i18n="thin_threshold">حد المحتوى الرقيق (كلمات)</span><input type="number" name="thin_content_threshold" placeholder="300" min="0"></label>
           <label><span data-i18n="title_min">أدنى طول Title</span><input type="number" name="title_min_length" placeholder="30" min="0"></label>
@@ -612,16 +615,16 @@ function collectCustomRules() {
   document.getElementById('customRulesJson').value = JSON.stringify(rules);
 }
 
-// --- إظهار/إخفاء خيارات PDF ---
-function togglePdfOptions() {
-  const pdf = document.querySelector('input[name="formats"][value="pdf"]');
-  const html = document.querySelector('input[name="formats"][value="html"]');
-  const show = (pdf && pdf.checked) || (html && html.checked);
-  document.getElementById('pdfOptions').style.display = show ? 'block' : 'none';
-}
-document.querySelectorAll('input[name="formats"]').forEach(c =>
-  c.addEventListener('change', togglePdfOptions));
-togglePdfOptions();
+// v1.02: قسم خيارات PDF/HTML نُقل إلى صفحة المهمّة (توليد عند الطلب) — لا توجد عناصر هنا الآن.
+
+// v1.05: إظهار حقل UA المخصّص عند اختيار «مخصّص» من قائمة UA المنسدلة
+(function () {
+  const uaSel = document.getElementById('uaPreset');
+  const uaBox = document.getElementById('uaCustomBox');
+  if (!uaSel || !uaBox) return;
+  function sync() { uaBox.style.display = uaSel.value === 'custom' ? '' : 'none'; }
+  uaSel.addEventListener('change', sync); sync();
+})();
 
 // --- بناء الطلب وإرساله (يُستخدم للزحف ولاحضار التكامل) ---
 async function startJob(opts, msgEl) {
@@ -667,9 +670,7 @@ document.getElementById('crawlForm').addEventListener('submit', async (e) => {
   if (form.querySelectorAll('input[name="extraction"]:checked').length === 0) {
     msg.textContent = T('msg_pick_extraction'); return;
   }
-  if (form.querySelectorAll('input[name="formats"]:checked').length === 0) {
-    msg.textContent = T('msg_pick_format'); return;
-  }
+  // v1.02: formats أصبحت ثابتة (csv+json) ويُولَّد ما عداها عند الطلب من صفحة المهمّة.
   await startJob({ integrations_only: 'false' }, msg);
 });
 
@@ -713,7 +714,12 @@ async function gStatus() {
       j.gsc_token ? '✓ GSC token' : '— GSC token',
       j.ga4_token ? '✓ GA4 token' : '— GA4 token',
     ];
-    _setG((j.connected ? '✅ مربوط — ' : 'الحالة: ') + parts.join(' • '));
+    // v1.06: نُميّز بين «مربوط» (سار) و«مربوط لكن منتهٍ» (Google ألغى refresh_token).
+    // المستخدم يحتاج فقط إعادة الضغط على «وافق بحسابي» — الـclient_secret يبقى محفوظاً.
+    let prefix = 'الحالة: ';
+    if (j.connected && j.expired) prefix = (window.sctT ? window.sctT('g_expired') : '⚠️ تفويض Google منتهٍ — أعد الضغط على «وافق بحسابي»') + ' • ';
+    else if (j.connected) prefix = '✅ مربوط — ';
+    _setG(prefix + parts.join(' • '));
     if (j.client_secret) _autofillCreds(j.client_secret);
   } catch (e) { _setG('✗ ' + e); }
 }
@@ -894,7 +900,23 @@ function _setChip(id, ok, text) {
 async function refreshReadiness() {
   try {
     const r = await fetch('/api/google/status');
-    if (r.ok) { const j = await r.json(); _setChip('rGoogle', !!j.connected); }
+    if (r.ok) {
+      const j = await r.json();
+      // v1.06: «مربوط لكن منتهٍ» يجب أن يبدو مختلفاً عن «مربوط» — نُلوِّن الشريحة باللون
+      // الكهرماني ونضع نصّاً تحذيرياً كي ينتبه المستخدم قبل بدء أيّ مهمّة.
+      const el = document.getElementById('rGoogle');
+      if (j.connected && j.expired) {
+        if (el) {
+          el.classList.remove('ok'); el.classList.remove('off'); el.classList.add('err');
+          const tx = el.querySelector('span[data-i18n]');
+          const label = (window.sctT ? window.sctT('r_google_expired') : '⚠️ Google (منتهٍ — أعد التفويض)');
+          if (tx) tx.textContent = label; else el.title = label;
+          el.firstChild.nodeValue = '⚠️ ';
+        }
+      } else {
+        _setChip('rGoogle', !!j.connected);
+      }
+    }
   } catch (e) {}
   try {
     const r = await fetch('/api/setup/playwright/status');
@@ -932,8 +954,106 @@ function resetToDefaults() {
   window.location.reload();
 }
 
+// ===== v1.02: تلميحات (tooltips) — نقرأ نصّ التلميح من i18n حسب data-tip-key =====
+function _refreshTipsText() {
+  document.querySelectorAll('.tip[data-tip-key]').forEach((el) => {
+    const k = el.getAttribute('data-tip-key');
+    el.setAttribute('data-tip', T(k, ''));
+  });
+}
+document.addEventListener('sct:langchange', _refreshTipsText);
+
+// ===== v1.02: AI panel — إظهار/إخفاء الحقول حسب المزوّد =====
+const AI_FIELDS_BY_PROVIDER = {
+  // المزوّدات السحابية: مفتاح + (نموذج اختياري) — لا نحتاج base_url ولا allow_private
+  openai:        ['api_key', 'model',          'max_opps'],
+  gemini:        ['api_key', 'model',          'max_opps'],
+  deepseek:      ['api_key', 'model',          'max_opps'],
+  openrouter:    ['api_key', 'model',          'max_opps'],
+  huggingface:   ['api_key', 'model',          'max_opps'],
+  // نموذج محلي: base_url + اسم النموذج + السماح بنقطة محلية (مطلوب أمنياً)
+  local:         [           'model', 'base_url', 'max_opps', 'allow_private'],
+  // نقطة متوافقة مع OpenAI مخصّصة: مفتاح + base_url + نموذج
+  openai_compatible: ['api_key', 'model', 'base_url', 'max_opps', 'allow_private'],
+};
+function _applyAIProvider() {
+  const sel = document.getElementById('aiProviderSel');
+  if (!sel) return;
+  const want = new Set(AI_FIELDS_BY_PROVIDER[sel.value] || AI_FIELDS_BY_PROVIDER.openai);
+  document.querySelectorAll('[data-ai-field]').forEach((el) => {
+    el.style.display = want.has(el.getAttribute('data-ai-field')) ? '' : 'none';
+  });
+  // افتراضي ملائم لـ Ollama إن كان حقل base_url ظاهراً وفارغاً
+  const baseInp = document.querySelector('input[name="ai_base_url"]');
+  if (sel.value === 'local' && baseInp && !baseInp.value) {
+    baseInp.placeholder = 'http://127.0.0.1:11434/v1';
+  }
+}
+
+// ===== v1.02: شريط جاهزية المتطلبات =====
+async function refreshRequirements() {
+  let data;
+  try {
+    const r = await fetch('/api/requirements');
+    if (!r.ok) return;
+    data = await r.json();
+  } catch (e) { return; }
+  const items = (data && data.items) || {};
+  const setChip = (id, tool) => {
+    const chip = document.getElementById(id);
+    if (!chip) return;
+    const st = items[tool] || {};
+    chip.classList.toggle('ok', !!st.present);
+    chip.classList.toggle('miss', st.present === false);
+    const stateEl = chip.querySelector('.req-state');
+    if (!stateEl) return;
+    if (st.present) {
+      stateEl.textContent = '✓ ' + T('req_present', 'متوفّر');
+    } else {
+      stateEl.innerHTML = '';
+      const txt = document.createElement('span');
+      txt.textContent = '✗ ' + T('req_missing', 'مفقود');
+      stateEl.appendChild(txt);
+      const setupKey = ({excel: 'ga4_lib', pdf: 'playwright', ga4: 'ga4_lib'})[tool];
+      if (setupKey) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn sm';
+        btn.style.marginInlineStart = '6px';
+        btn.textContent = T('req_install', 'تثبيت');
+        btn.addEventListener('click', async () => {
+          stateEl.textContent = T('req_installing', 'يثبّت…');
+          try {
+            await fetch('/api/setup/' + setupKey, {method: 'POST'});
+          } catch (e) {}
+          // poll the existing setup-status endpoint
+          const poll = setInterval(async () => {
+            try {
+              const r = await fetch('/api/setup/' + setupKey + '/status');
+              const j = await r.json();
+              if (j.running) return;
+              clearInterval(poll);
+              refreshRequirements();
+            } catch (e) {}
+          }, 2500);
+        });
+        stateEl.appendChild(btn);
+      }
+    }
+  };
+  setChip('reqExcel', 'excel');
+  setChip('reqPdf', 'pdf');
+  setChip('reqGa4', 'ga4');
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   setTimeout(gStatus, 200);
+  // v1.02: تهيئة التلميحات + AI panel + شريط المتطلبات
+  _refreshTipsText();
+  _applyAIProvider();
+  refreshRequirements();
+  const aiSel = document.getElementById('aiProviderSel');
+  if (aiSel) aiSel.addEventListener('change', _applyAIProvider);
   // استعادة آخر تبويب
   try {
     const last = localStorage.getItem('sct_tab');

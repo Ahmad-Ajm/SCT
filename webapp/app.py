@@ -94,6 +94,18 @@ SECTIONS = [
 ]
 SEVERITIES = ["🔴 Critical", "🟠 High", "🟡 Medium", "🟢 Low"]
 
+# v1.05: انتحال User-Agent لكشف مشاكل خاصّة بـbots (Cloudflare/WAF challenges)
+# الـUA الافتراضي «SEOCrawlerBot/1.0» (في crawler/http_client.py) يبقى عند `ua_preset=""`.
+_UA_PRESETS = {
+    "googlebot": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "googlebot-mobile": (
+        "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.6099.118 Mobile Safari/537.36 "
+        "(compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    ),
+    "bingbot": "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+}
+
 # سقف حجم ملف audit JSON الذي نحمّله في الذاكرة (المستكشف/إعادة بناء التقرير).
 # يمنع تعليق الخادم عند فتح أرشيف ضخم (مثل 1.7GB من زحف غير محدود قديم).
 MAX_AUDIT_JSON_MB = 300
@@ -202,6 +214,9 @@ async def start(request: Request):
         return str(form.get(name, str(default))).lower() in ("true", "1", "on", "yes")
 
     # === صيغ المخرجات المختارة ===
+    # v1.04: كلّ التنسيقات الثقيلة (Excel/XML/HTML/PDF) صارت عند الطلب من صفحة المهمّة.
+    # الزحف يُنتج CSV+JSON فقط (سريع جدّاً، مساحة قليلة). للحفاظ على التوافق العكسي،
+    # نقبل overrides من الـform إن طُلبت صراحةً (مثلاً عبر API خارجي).
     formats = form.getlist("formats") or ["csv", "json"]
     make_pdf = "pdf" in formats
 
@@ -231,6 +246,9 @@ async def start(request: Request):
         "platform_preset": (form.get("platform_preset") or "").strip(),
         "generate_sitemap": _b("generate_sitemap", False),
         "adaptive_throttle": _b("adaptive_throttle", False),
+        # v1.05: انتحال User-Agent — يُحوَّل preset → سلسلة فعلية في job_runner عبر crawl.user_agent
+        "ua_preset": (form.get("ua_preset") or "").strip().lower(),
+        "ua_custom": (form.get("ua_custom") or "").strip(),
         "formats": formats,
         # extraction: إن لم يُختر شيء نترك الإعداد الافتراضي (الكل)
         "extraction": extraction if extraction else None,
@@ -296,6 +314,14 @@ async def start(request: Request):
         integrations["awt"] = {
             "enabled": True,
             "csv_folder": (form.get("awt_csv_folder") or "./external_data/awt").strip(),
+        }
+    # v1.04: تكاملات الروابط الخلفيّة الحيّة (Ahrefs / Majestic) — مدفوعة، مطفأة افتراضياً
+    if _b("backlinks_enabled", False):
+        integrations["backlinks"] = {
+            "enabled": True,
+            "provider": (form.get("backlinks_provider") or "ahrefs").strip().lower(),
+            "api_key": (form.get("backlinks_api_key") or "").strip(),
+            "timeout": int(form.get("backlinks_timeout") or 30),
         }
     if _b("ai_enabled", False):
         ai = {
@@ -388,6 +414,56 @@ async def job_events(job_id: str):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.post("/api/jobs/{job_id}/phase2")
+async def job_phase2(job_id: str):
+    """v1.08: يبدأ Phase 2 — يفحص الروابط المؤجَّلة (deferred) من Phase 1."""
+    return JSONResponse(runner.start_phase2(job_id))
+
+
+@app.get("/api/jobs/{job_id}/deferred")
+async def job_deferred(job_id: str):
+    """v1.08: يُرجع ملخّص الروابط المؤجَّلة (counts + samples) للوحة الواجهة.
+
+    البيانات تأتي من audit JSON إن وُجد، وإلّا من output/csv/deferred_urls.csv كاحتياط."""
+    import json as _json
+    meta = runner.meta(job_id)
+    json_path = (meta.get("result") or {}).get("json")
+    if json_path and Path(json_path).exists():
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                audit = _json.load(f)
+            ds = audit.get("deferred_summary") or {}
+            if ds.get("total"):
+                return JSONResponse(ds)
+        except (OSError, ValueError):
+            pass
+    # احتياط: نقرأ CSV مباشرة
+    out = _job_output_dir(job_id)
+    if not out:
+        return JSONResponse({"total": 0, "by_kind": {}, "samples": {}})
+    csv_path = out / "csv" / "deferred_urls.csv"
+    if not csv_path.exists():
+        return JSONResponse({"total": 0, "by_kind": {}, "samples": {}})
+    import csv as _csv
+    by_kind: dict[str, int] = {}
+    samples: dict[str, list[str]] = {}
+    try:
+        with open(csv_path, "r", encoding="utf-8", newline="") as f:
+            for row in _csv.DictReader(f):
+                k = row.get("kind", "other") or "other"
+                by_kind[k] = by_kind.get(k, 0) + 1
+                if len(samples.setdefault(k, [])) < 10:
+                    samples[k].append(row.get("url", ""))
+    except OSError:
+        pass
+    return JSONResponse({
+        "total": sum(by_kind.values()),
+        "by_kind": by_kind,
+        "samples": samples,
+        "phase2_available": sum(by_kind.values()) > 0,
+    })
+
+
 @app.post("/api/jobs/{job_id}/stop")
 async def job_stop(job_id: str):
     ok = runner.stop(job_id)
@@ -462,6 +538,28 @@ def _safe_under_jobs(path: str) -> Path | None:
 
 @app.get("/api/jobs/{job_id}/download/{kind}")
 async def download(job_id: str, kind: str):
+    # v1.04: kind=xml يجمع كلّ ملفّات مجلّد xml/ في ZIP واحد لأنّه عدّة ملفّات لا ملفّ واحد
+    if kind == "xml":
+        out = _job_output_dir(job_id)
+        if not out:
+            return JSONResponse({"error": "no output"}, status_code=404)
+        xml_dir = out / "xml"
+        if not xml_dir.exists():
+            return JSONResponse({"error": "xml folder not built yet"}, status_code=404)
+        tmp = tempfile.NamedTemporaryFile(prefix=f"sct_{job_id}_xml_", suffix=".zip", delete=False)
+        tmp.close()
+        def _build():
+            with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+                for p in sorted(xml_dir.glob("*.xml")):
+                    if p.is_file():
+                        zf.write(p, arcname=f"xml/{p.name}")
+        await asyncio.get_event_loop().run_in_executor(None, _build)
+        return FileResponse(
+            tmp.name, media_type="application/zip",
+            filename=f"sct_{job_id}_xml.zip",
+            background=BackgroundTask(lambda: os.path.exists(tmp.name) and os.unlink(tmp.name)),
+        )
+
     meta = runner.meta(job_id)
     path = (meta.get("result", {}) or {}).get(kind)
     safe = _safe_under_jobs(path) if path else None
@@ -619,18 +717,64 @@ def _google_dir() -> Path:
     return d
 
 
+def _probe_token_expired(token_path: Path) -> bool:
+    """v1.06: يفحص بسرعة ما إن كان token Google منتهي الصلاحية (يحاول refresh صامتاً).
+
+    Google في وضع «Testing» يُلغي refresh_token كلّ 7 أيام، فيظهر للمستخدم خطأ
+    `invalid_grant` فقط حين يبدأ الزحف ويفشل التكامل في منتصفه. هذا الفحص يكتشف
+    الحالة مبكّراً ويُمكّن الواجهة من إظهار «التفويض منتهٍ» قبل بدء أيّ مهمّة."""
+    if not token_path.exists():
+        return False
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+    except ImportError:
+        return False
+    try:
+        creds = Credentials.from_authorized_user_file(str(token_path), _GOOGLE_SCOPES)
+    except (OSError, ValueError):
+        return True  # ملف تالف ⇒ يُعامَل كمنتهٍ كي يُعيد المستخدم الربط
+    if creds.valid:
+        return False
+    if not creds.expired or not creds.refresh_token:
+        return True
+    try:
+        creds.refresh(Request())
+        # نُعيد كتابة الـtoken المُحدَّث على القرص (refresh ينتج access_token جديداً)
+        token_path.write_text(creds.to_json(), encoding="utf-8")
+        return False
+    except Exception:  # noqa: BLE001
+        return True  # refresh فشل (غالباً invalid_grant) ⇒ منتهٍ
+
+
 @app.get("/api/google/status")
 async def google_status():
-    """حالة الاتصال: هل لدينا client_secret + tokens؟"""
+    """حالة الاتصال: هل لدينا client_secret + tokens + هل الـtokens صالحة؟
+
+    v1.06: نُضيف فحص نشط (`expired`) لاكتشاف Token الذي ألغته Google (Testing
+    mode بعد 7 أيام) قبل بدء أيّ مهمّة، بدل اكتشافه مع أوّل فشل تكامل."""
     gd = _google_dir()
     cs = gd / "client_secret.json"
     gsc = gd / "gsc_token.json"
     ga4 = gd / "ga4_token.json"
+    # فحص الانتهاء يستدعي شبكة (refresh) — نُشغّله في executor كي لا يحجب الحلقة
+    loop = asyncio.get_event_loop()
+    expired = False
+    if gsc.exists() or ga4.exists():
+        try:
+            checks = await asyncio.gather(
+                loop.run_in_executor(None, _probe_token_expired, gsc),
+                loop.run_in_executor(None, _probe_token_expired, ga4),
+            )
+            expired = any(checks)
+        except Exception:  # noqa: BLE001
+            expired = False
     return JSONResponse({
         "client_secret": str(cs) if cs.exists() else None,
         "gsc_token": str(gsc) if gsc.exists() else None,
         "ga4_token": str(ga4) if ga4.exists() else None,
         "connected": gsc.exists() and ga4.exists(),
+        "expired": expired,
     })
 
 
@@ -974,6 +1118,316 @@ async def setup_status(tool: str):
     return JSONResponse(st)
 
 
+# === v1.02: شريط جاهزية المتطلبات الاختيارية ===
+# نسبر التوفّر مرّة واحدة بعد الإقلاع ونُخزّن النتيجة. يُعاد السبر فقط عند طلب صريح أو بعد
+# تثبيت ناجح كي لا نُدخل تأخيراً في كل تحميل صفحة (في بعض الأنظمة استيراد playwright
+# بطيء — قد يأخذ ~300ms).
+_REQUIREMENTS_PROBES = {
+    "excel": ("openpyxl", None),                       # مكتبة Python
+    "ga4": ("google.analytics.data_v1beta", None),     # مكتبة Python
+    "pdf": ("playwright", "chromium_present"),         # Python + متصفّح Chromium مثبَّت
+}
+_requirements_cache: dict[str, dict[str, Any]] | None = None
+
+
+def _probe_requirements() -> dict[str, dict[str, Any]]:
+    """يُعيد قاموساً {tool: {present, version, note}} لكل متطلّب اختياري."""
+    import importlib
+    out: dict[str, dict[str, Any]] = {}
+    for tool, (module_name, extra_check) in _REQUIREMENTS_PROBES.items():
+        info: dict[str, Any] = {"present": False, "version": None, "note": ""}
+        try:
+            mod = importlib.import_module(module_name)
+            info["present"] = True
+            info["version"] = getattr(mod, "__version__", None) or ""
+        except ImportError:
+            out[tool] = info
+            continue
+        # فحص إضافي خاص بـ Playwright: متصفّح Chromium مثبَّت فعلاً؟
+        if extra_check == "chromium_present":
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    info["present"] = bool(p.chromium.executable_path)
+                    if not info["present"]:
+                        info["note"] = "playwright OK but chromium not installed"
+            except Exception:  # noqa: BLE001
+                # حتى لو فشل الفحص العميق نُبقي info كما هو (المكتبة موجودة على الأقلّ)
+                info["note"] = "chromium check failed"
+        out[tool] = info
+    return out
+
+
+@app.get("/api/requirements")
+async def get_requirements(refresh: int = 0):
+    """v1.02: حالة المتطلبات الاختيارية للواجهة (Excel/GA4/PDF Chromium)."""
+    global _requirements_cache
+    if _requirements_cache is None or refresh:
+        loop = asyncio.get_event_loop()
+        _requirements_cache = await loop.run_in_executor(None, _probe_requirements)
+    return JSONResponse({"items": _requirements_cache})
+
+
+# === v1.02: خدمة وثائق المشروع كـMarkdown للواجهة (روابط «دليل…») ===
+_DOCS_MAP = {
+    "oauth_setup": ("OAUTH_SETUP.md", "إعداد OAuth و Google Cloud — SCT"),
+    "ga4_property_id": ("GA4_PROPERTY_ID.md", "اكتشاف GA4 property_id — SCT"),
+}
+
+
+@app.get("/docs/{name}")
+async def serve_doc(name: str):
+    """يخدم ملفّاً من مجلّد docs/ كـHTML مُبسَّط (للروابط من واجهة البرنامج)."""
+    entry = _DOCS_MAP.get(name)
+    if not entry:
+        return JSONResponse({"error": "doc not found"}, status_code=404)
+    fname, title = entry
+    fpath = ROOT / "docs" / fname
+    if not fpath.exists():
+        return JSONResponse({"error": "doc file missing on disk"}, status_code=404)
+    try:
+        md = fpath.read_text(encoding="utf-8")
+    except OSError:
+        return JSONResponse({"error": "read error"}, status_code=500)
+    # تحويل Markdown مبسَّط جدّاً (بلا تبعيات): ندعم # و## و```code``` و**bold** والروابط.
+    body = _md_to_html(md)
+    html = f"""<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
+<title>{title}</title>
+<style>body{{max-width:800px;margin:30px auto;padding:0 20px;font-family:Segoe UI,Tahoma,Arial,sans-serif;line-height:1.7;color:#1f2937;background:#f9fafb}}
+h1,h2,h3{{color:#1F4E79}}h1{{border-bottom:2px solid #1F4E79;padding-bottom:8px}}
+pre{{background:#111827;color:#f9fafb;padding:14px;border-radius:8px;overflow:auto;direction:ltr;text-align:left;font-size:.88rem}}
+code{{background:#e2e8f0;padding:1px 6px;border-radius:4px;font-size:.9em;direction:ltr;display:inline-block}}
+a{{color:#1F4E79}}ol,ul{{padding-inline-start:22px}}</style>
+</head><body>{body}</body></html>"""
+    return HTMLResponse(html)
+
+
+def _md_to_html(md: str) -> str:
+    """محوّل Markdown بسيط بلا تبعيات (يكفي لوثائقنا القصيرة)."""
+    import re as _re
+    out: list[str] = []
+    in_code = False
+    code_buf: list[str] = []
+    for line in md.splitlines():
+        if line.startswith("```"):
+            if in_code:
+                out.append("<pre><code>" + "\n".join(code_buf) + "</code></pre>")
+                code_buf = []
+                in_code = False
+            else:
+                in_code = True
+            continue
+        if in_code:
+            code_buf.append(_html_escape(line))
+            continue
+        if line.startswith("### "):
+            out.append("<h3>" + _inline_md(line[4:]) + "</h3>")
+        elif line.startswith("## "):
+            out.append("<h2>" + _inline_md(line[3:]) + "</h2>")
+        elif line.startswith("# "):
+            out.append("<h1>" + _inline_md(line[2:]) + "</h1>")
+        elif _re.match(r"^\s*[-*]\s+", line):
+            text = _re.sub(r"^\s*[-*]\s+", "", line)
+            if out and out[-1] == "</ul>":
+                out.pop()
+                out.append("<li>" + _inline_md(text) + "</li></ul>")
+            elif out and out[-1].endswith("</li></ul>"):
+                out[-1] = out[-1][:-5] + "<li>" + _inline_md(text) + "</li></ul>"
+            else:
+                out.append("<ul><li>" + _inline_md(text) + "</li></ul>")
+        elif _re.match(r"^\s*\d+\.\s+", line):
+            text = _re.sub(r"^\s*\d+\.\s+", "", line)
+            if out and out[-1].endswith("</li></ol>"):
+                out[-1] = out[-1][:-5] + "<li>" + _inline_md(text) + "</li></ol>"
+            else:
+                out.append("<ol><li>" + _inline_md(text) + "</li></ol>")
+        elif line.strip() == "":
+            out.append("")
+        else:
+            out.append("<p>" + _inline_md(line) + "</p>")
+    return "\n".join(out)
+
+
+def _html_escape(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _inline_md(s: str) -> str:
+    """دعم **bold**، `code`، [text](url)."""
+    import re as _re
+    s = _html_escape(s)
+    s = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+    s = _re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+    s = _re.sub(r"\[(.+?)\]\(([^)]+)\)",
+                r'<a href="\2" target="_blank" rel="noopener">\1</a>', s)
+    return s
+
+
+# === v1.02: توليد التقارير عند الطلب — بدل توليد الكل أثناء الزحف ===
+# الزحف يُنتج دائماً CSV+JSON (سريعة ورخيصة)؛ HTML/PDF/Excel/XML تُطلَب من زرّ منفصل
+# لكلّ تنسيق، مع شريط تقدّم خاص بها. هذا يختصر وقت/مساحة الجوب الرئيسي.
+# v1.02: HTML/PDF عند الطلب. v1.04: أُضيف Excel + XML — يُعاد بناؤهما من audit JSON +
+# ملفّات CSV الحاضرة دائماً في مجلّد المخرجات. هكذا يستطيع المستخدم تشغيل زحف خفيف
+# بـCSV+JSON فقط، ثم يُولِّد التنسيقات الأثقل عند الحاجة (يختصر وقتاً ومساحة).
+_GEN_VALID_FORMATS = {"html", "pdf", "excel", "xml"}
+_gen_state: dict[str, dict[str, dict[str, Any]]] = {}   # {job_id: {fmt: {running, ok, message}}}
+_gen_lock = __import__("threading").Lock()
+
+
+def _run_generate_bg(job_id: str, fmt: str, options: dict[str, Any]) -> None:
+    """ينفّذ توليد تنسيق واحد في الخلفية لمهمّة منتهية."""
+    import importlib
+    err = ""
+    ok = False
+    try:
+        meta = runner.meta(job_id)
+        json_path = (meta.get("result") or {}).get("json")
+        if not json_path or not Path(json_path).exists():
+            raise RuntimeError("no audit JSON for this job")
+        size_mb = Path(json_path).stat().st_size / (1024 * 1024)
+        if size_mb > MAX_AUDIT_JSON_MB:
+            raise RuntimeError(f"audit JSON too large ({size_mb:.0f} MB)")
+
+        out_dir = str(Path(json_path).parent)
+        if fmt in ("html", "pdf"):
+            mod = importlib.import_module("exporters.report_builder")
+            make_pdf = (fmt == "pdf")
+            mod.build_report_from_json(json_path, out_dir, options, make_pdf)
+        elif fmt == "excel":
+            _regen_excel_from_outputs(Path(out_dir), Path(json_path))
+        elif fmt == "xml":
+            _regen_xml_from_outputs(Path(out_dir), Path(json_path))
+        else:
+            raise RuntimeError(f"unknown format: {fmt}")
+        ok = True
+        # تحديث meta.result كي تظهر روابط التنزيل الجديدة
+        meta = runner.meta(job_id)
+        new_result = runner._discover_result(Path(out_dir).parent, meta.get("mode", "audit"))
+        meta["result"] = new_result
+        runner._write_meta(Path(out_dir).parent, meta)
+    except Exception as e:  # noqa: BLE001
+        err = f"{type(e).__name__}: {str(e)[:300]}"
+
+    with _gen_lock:
+        _gen_state.setdefault(job_id, {})[fmt] = {
+            "running": False, "ok": ok, "message": err,
+        }
+
+
+def _load_csv_rows(p: Path) -> list[dict[str, Any]]:
+    """يقرأ ملفّ CSV ويُرجعه كقائمة قواميس (فارغ إن لم يوجد)."""
+    if not p.exists():
+        return []
+    import csv as _csv
+    rows: list[dict[str, Any]] = []
+    try:
+        with open(p, "r", encoding="utf-8", newline="") as f:
+            for row in _csv.DictReader(f):
+                rows.append(dict(row))
+    except OSError:
+        return []
+    return rows
+
+
+def _regen_excel_from_outputs(out_dir: Path, json_path: Path) -> None:
+    """v1.04: يُعيد بناء Excel من audit JSON + ملفّات CSV الموجودة. CSV هو المصدر
+    الأوثق للمصفوفات الكبيرة (links/images/headings) لأنّ JSON قد يحذفها لتوفير الحجم."""
+    from utils.auto_install import ensure_package
+    ensure_package("openpyxl")
+    from exporters.excel_exporter import ExcelExporter
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        audit = json.load(f)
+
+    csv_dir = out_dir / "csv"
+    pages = audit.get("pages") or _load_csv_rows(csv_dir / "pages.csv")
+    links = audit.get("links") or _load_csv_rows(csv_dir / "all_links.csv")
+    images = audit.get("images") or _load_csv_rows(csv_dir / "images.csv")
+    headings = audit.get("headings") or _load_csv_rows(csv_dir / "headings.csv")
+    schema = audit.get("schema") or _load_csv_rows(csv_dir / "schema.csv")
+    redirects = audit.get("redirects") or _load_csv_rows(csv_dir / "redirects.csv")
+    headers = _load_csv_rows(csv_dir / "headers.csv")
+
+    site_url = (audit.get("site_config") or {}).get("start_url", "")
+    excel_name = f"audit_{json_path.stem.replace('audit_', '')}.xlsx"
+
+    ExcelExporter(str(out_dir), excel_name).export(
+        pages=pages, links=links, images=images, headings=headings,
+        schema=schema, redirects=redirects, headers=headers,
+        seo_issues=audit.get("seo_issues", {}),
+        duplicate_data=audit.get("duplicate_data", {}),
+        orphan_data=audit.get("orphan_data", {}),
+        thin_content_data=audit.get("thin_content_data", {}),
+        broken_data=audit.get("broken_data", {}),
+        images_analysis=audit.get("images_analysis", {}),
+        crawl_stats=None,
+        site_url=site_url,
+    )
+
+
+def _regen_xml_from_outputs(out_dir: Path, json_path: Path) -> None:
+    """v1.04: يُعيد بناء ملفّات XML من audit JSON + CSV (نفس فكرة Excel)."""
+    from exporters.xml_exporter import XMLExporter
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        audit = json.load(f)
+
+    csv_dir = out_dir / "csv"
+    pages = audit.get("pages") or _load_csv_rows(csv_dir / "pages.csv")
+    links = audit.get("links") or _load_csv_rows(csv_dir / "all_links.csv")
+    images = audit.get("images") or _load_csv_rows(csv_dir / "images.csv")
+    schema = audit.get("schema") or _load_csv_rows(csv_dir / "schema.csv")
+
+    XMLExporter(str(out_dir / "xml")).export_all(
+        pages=pages, links=links, images=images, schema=schema,
+        seo_issues=audit.get("seo_issues", {}),
+    )
+
+
+@app.post("/api/jobs/{job_id}/generate")
+async def jobs_generate(
+    job_id: str,
+    format: str = Form(...),
+    language: str = Form("ar"),
+    client_name: str = Form(""),
+    audience: str = Form("expert"),
+    logo_url: str = Form(""),
+    max_rows: int = Form(100),
+):
+    """يُولّد تنسيقاً واحداً (html/pdf/excel/xml) عند الطلب من صفحة المهمّة."""
+    fmt = (format or "").lower().strip()
+    if fmt not in _GEN_VALID_FORMATS:
+        return JSONResponse({"error": "invalid format"}, status_code=400)
+    if not runner.meta(job_id):
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    with _gen_lock:
+        cur = (_gen_state.get(job_id) or {}).get(fmt)
+        if cur and cur.get("running"):
+            return JSONResponse({"started": False, "running": True})
+        _gen_state.setdefault(job_id, {})[fmt] = {
+            "running": True, "ok": None, "message": "",
+        }
+    options = {
+        "language": language, "audience": audience, "client_name": client_name,
+        "logo_url": logo_url, "max_rows": max_rows,
+    }
+    import threading
+    threading.Thread(
+        target=_run_generate_bg, args=(job_id, fmt, options), daemon=True
+    ).start()
+    return JSONResponse({"started": True, "format": fmt})
+
+
+@app.get("/api/jobs/{job_id}/generate/{fmt}/status")
+async def jobs_generate_status(job_id: str, fmt: str):
+    """يستفسر عن حالة توليد تنسيق واحد لمهمّة."""
+    with _gen_lock:
+        st = (_gen_state.get(job_id) or {}).get(fmt) or {
+            "running": False, "ok": None, "message": "",
+        }
+    return JSONResponse(st)
+
+
 # --- مستكشف النتائج: تصفية/فرز/بحث (الخطة #2) ---
 _PAGE_FIELDS = [
     "url", "status_code", "is_indexable", "depth", "content_type", "title",
@@ -1052,6 +1506,48 @@ async def logs_analyze(file: UploadFile = File(...), bot_only: int = 1):
         from analyzers.log_analyzer import analyze_log
         res = analyze_log(text.splitlines(), bot_only=bool(bot_only))
         return JSONResponse(res)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)[:300]}, status_code=500)
+
+
+@app.post("/api/jobs/{job_id}/log-board")
+async def jobs_log_board(job_id: str, file: UploadFile = File(...), bot_only: int = 1):
+    """v1.04: يستقبل ملفّ سجلّ خادم ويضمّه مع نتائج الزحف الحاليّة لإظهار:
+    - ميزانية Google المهدورة (404/5xx يزحفها كثيراً)
+    - صفحات عالية القيمة بمشاكل (Google يهتمّ بها + لها أخطاء)
+    - صفحات يتيمة يكتشفها Google ولم يكتشفها زاحفنا
+    - أولويّات معاد ترجيحها بتكرار Google
+    """
+    import json as _json
+    meta = runner.meta(job_id)
+    json_path = (meta.get("result") or {}).get("json")
+    if not json_path or not Path(json_path).exists():
+        return JSONResponse({"error": "no audit json for this job"}, status_code=404)
+
+    raw = await file.read()
+    if len(raw) > _MAX_LOG_UPLOAD_MB * 1024 * 1024:
+        return JSONResponse(
+            {"error": f"الملف أكبر من الحدّ ({_MAX_LOG_UPLOAD_MB}MB)"},
+            status_code=413,
+        )
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "تعذّر فكّ الترميز"}, status_code=400)
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            audit = _json.load(f)
+    except (OSError, ValueError):
+        return JSONResponse({"error": "audit JSON unreadable"}, status_code=500)
+
+    try:
+        from analyzers.log_analyzer import analyze_log, join_log_with_audit
+        log_res = analyze_log(text.splitlines(), bot_only=bool(bot_only))
+        joined = join_log_with_audit(log_res.get("per_url", []), audit)
+        # نُمرّر ملخّص اللوغ نفسه (لعرضه في البطاقات العلويّة)
+        joined["log_summary"] = log_res.get("summary", {})
+        return JSONResponse(joined)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
 
@@ -1143,6 +1639,159 @@ async def job_url_detail(job_id: str, url: str = ""):
         return JSONResponse({"error": "read error"}, status_code=500)
     from reporting.url_detail import build_url_detail
     return JSONResponse(build_url_detail(audit, url.strip()))
+
+
+@app.get("/jobs/{job_id}/graph", response_class=HTMLResponse)
+async def graph_page(request: Request, job_id: str):
+    """v1.04: صفحة تصوير الزحف — شجرة URL + توزيع العمق/الحالة + رسم بياني للروابط
+    على المواقع الصغيرة (<500 صفحة)."""
+    return templates.TemplateResponse(
+        "graph.html", {"request": request, "job_id": job_id}
+    )
+
+
+@app.get("/api/jobs/{job_id}/graph")
+async def jobs_graph(job_id: str):
+    """يبني تمثيل شجريّ + توزيعات + قائمة جوار للروابط الداخلية من audit JSON."""
+    import json as _json
+    meta = runner.meta(job_id)
+    json_path = (meta.get("result") or {}).get("json")
+    if not json_path or not Path(json_path).exists():
+        return JSONResponse({"error": "no audit json"}, status_code=404)
+    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
+    if size_mb > MAX_AUDIT_JSON_MB:
+        return JSONResponse({
+            "error": f"audit JSON too large ({size_mb:.0f} MB); use pages.csv instead",
+        }, status_code=413)
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            audit = _json.load(f)
+    except (OSError, ValueError):
+        return JSONResponse({"error": "read error"}, status_code=500)
+    return JSONResponse(_build_graph_payload(audit))
+
+
+def _build_graph_payload(audit: dict[str, Any]) -> dict[str, Any]:
+    """v1.04: يحوّل audit JSON إلى:
+    - tree: شجرة URL هرميّة من مسارات pages (الأنفع للمستخدم العام)
+    - by_depth / by_status: توزيع للرسم البياني
+    - graph: nodes+edges للروابط الداخلية (يُحدّ على 500 عقدة للحفاظ على أداء المتصفّح)
+    """
+    from urllib.parse import urlparse
+    pages = audit.get("pages") or []
+    links = audit.get("links") or []
+    site_url = (audit.get("site_config") or {}).get("start_url", "")
+    domain = urlparse(site_url).netloc or ""
+
+    # --- توزيعات depth + status ---
+    from collections import Counter
+    by_depth = Counter()
+    by_status = Counter()
+    for p in pages:
+        d = p.get("depth") if isinstance(p, dict) else getattr(p, "depth", None)
+        s = p.get("status_code") if isinstance(p, dict) else getattr(p, "status_code", None)
+        if d is not None:
+            by_depth[int(d)] += 1
+        if s is not None:
+            by_status[str(s)] += 1
+
+    # --- شجرة URL هرميّة (path segments) ---
+    # كلّ عقدة: {"name": segment, "count": pages_under, "status": worst_status, "children": {...}}
+    root: dict[str, Any] = {"name": "/", "count": 0, "status": None, "children": {}}
+    for p in pages:
+        url = p.get("url") if isinstance(p, dict) else getattr(p, "url", "")
+        status = p.get("status_code") if isinstance(p, dict) else getattr(p, "status_code", None)
+        parsed = urlparse(url)
+        segments = [s for s in parsed.path.split("/") if s]
+        cur = root
+        cur["count"] += 1
+        for seg in segments:
+            children = cur["children"]
+            if seg not in children:
+                children[seg] = {"name": seg, "count": 0, "status": None, "children": {}}
+            cur = children[seg]
+            cur["count"] += 1
+            # نُسجّل الحالة الأسوأ في الفرع (404 يُحجب الفرع كأحمر)
+            if status:
+                cur_st = cur["status"]
+                if not cur_st or (isinstance(status, int) and status >= 400 and
+                                  (not isinstance(cur_st, int) or status > cur_st)):
+                    cur["status"] = status
+        # ورقة: نضع الـURL الكامل عند نهاية المسار
+        cur["url"] = url
+        cur["status"] = status
+
+    def _to_array(node):
+        children = node.pop("children", {}) or {}
+        node["children"] = sorted(
+            (_to_array(c) for c in children.values()),
+            key=lambda x: (-x["count"], x["name"]),
+        )
+        return node
+    tree = _to_array(root)
+
+    # --- قائمة جوار للروابط الداخلية (محدودة للحفاظ على أداء المتصفّح) ---
+    MAX_GRAPH_NODES = 500
+    nodes_idx: dict[str, int] = {}
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, int]] = []
+    truncated = False
+
+    def _ensure_node(url: str, status=None, depth=None) -> int:
+        if url in nodes_idx:
+            return nodes_idx[url]
+        if len(nodes) >= MAX_GRAPH_NODES:
+            return -1
+        nodes_idx[url] = len(nodes)
+        nodes.append({
+            "id": len(nodes),
+            "url": url,
+            "label": (urlparse(url).path or "/")[:40],
+            "status": status,
+            "depth": depth,
+        })
+        return nodes_idx[url]
+
+    # نُضيف صفحات الزحف أوّلاً (الأولوية للأكثر إنلِنكاً)
+    for p in pages[:MAX_GRAPH_NODES]:
+        url = p.get("url") if isinstance(p, dict) else getattr(p, "url", "")
+        if url:
+            _ensure_node(
+                url,
+                p.get("status_code") if isinstance(p, dict) else getattr(p, "status_code", None),
+                p.get("depth") if isinstance(p, dict) else getattr(p, "depth", None),
+            )
+    if len(pages) > MAX_GRAPH_NODES:
+        truncated = True
+
+    for link in (links or [])[:5000]:
+        if not isinstance(link, dict):
+            continue
+        if link.get("is_internal") in (False, "False", "false", 0, "0"):
+            continue
+        src = link.get("from_url") or link.get("source_url")
+        dst = link.get("to_url") or link.get("target_url")
+        if not src or not dst:
+            continue
+        si = nodes_idx.get(src)
+        di = nodes_idx.get(dst)
+        if si is None or di is None:
+            continue
+        edges.append({"s": si, "t": di})
+
+    return {
+        "domain": domain,
+        "total_pages": len(pages),
+        "by_depth": dict(sorted(by_depth.items())),
+        "by_status": dict(sorted(by_status.items())),
+        "tree": tree,
+        "graph": {
+            "nodes": nodes,
+            "edges": edges,
+            "truncated": truncated,
+            "max_nodes": MAX_GRAPH_NODES,
+        },
+    }
 
 
 @app.get("/api/jobs/{job_id}/priority")

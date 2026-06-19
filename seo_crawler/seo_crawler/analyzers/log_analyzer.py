@@ -195,3 +195,109 @@ def find_orphan_bot_urls(
         if p not in crawl_paths:
             out.append(r)
     return out
+
+
+# v1.04: ضمّ بيانات اللوغ مع مخرجات الزحف لإظهار «ميزانية زحف Google المهدورة»
+# وترتيب جديد للأولويات يأخذ في الحسبان تكرار Google لكلّ صفحة.
+def join_log_with_audit(
+    log_per_url: list[dict[str, Any]],
+    audit: dict[str, Any],
+) -> dict[str, Any]:
+    """يُدمج تقرير اللوغ مع audit JSON كاملاً ويُرجع رؤى عمليّة:
+
+    - wasted_budget: أعلى الصفحات التي يزحفها Google كثيراً ثم تعطي 4xx/5xx (ميزانية مهدورة).
+    - high_value_with_issues: صفحات يزحفها Google كثيراً ولها مشاكل في الأولوية (الأهمّ فعلاً).
+    - orphan_bot_urls: صفحات يزحفها Google لم تكتشفها أداتنا (مشكلة ربط داخلي).
+    - rescored_priority: ترتيب الأولويّات معاد ترجيحه بـ"تكرار Google" (الإصلاح ذو الأثر الأعلى).
+    """
+    from urllib.parse import urlparse
+    # 1) فهرسة pages الزحف بـpath (للضمّ مع per_url من اللوغ)
+    pages = audit.get("pages") or []
+    by_path: dict[str, dict[str, Any]] = {}
+    for p in pages:
+        url = p.get("url") if isinstance(p, dict) else getattr(p, "url", "")
+        if not url:
+            continue
+        try:
+            path = (urlparse(url).path or "/").rstrip("/") or "/"
+        except (TypeError, ValueError):
+            continue
+        by_path[path] = {
+            "url": url,
+            "status_code": p.get("status_code") if isinstance(p, dict) else getattr(p, "status_code", None),
+            "is_indexable": p.get("is_indexable") if isinstance(p, dict) else getattr(p, "is_indexable", False),
+        }
+
+    # 2) فهرسة priority pages
+    priority_pages = (audit.get("priority", {}) or {}).get("pages", []) or []
+    prio_by_url: dict[str, dict[str, Any]] = {}
+    for pp in priority_pages:
+        url = pp.get("url", "")
+        if url:
+            prio_by_url[url] = pp
+
+    # 3) المرور على per_url من اللوغ وضمّه
+    wasted: list[dict[str, Any]] = []
+    high_value: list[dict[str, Any]] = []
+    rescored: list[dict[str, Any]] = []
+
+    for row in (log_per_url or []):
+        raw_path = (row.get("path") or "").split("?")[0]
+        path = (raw_path or "/").rstrip("/") or "/"
+        page = by_path.get(path)
+        crawl_url = page["url"] if page else None
+        hits = int(row.get("hits", 0) or 0)
+        bad_hits = int(row.get("status_404", 0) or 0) + int(row.get("status_5xx", 0) or 0)
+
+        # (أ) ميزانية مهدورة: Google يزحف الصفحة بكثرة وتعطي 4xx/5xx
+        if bad_hits > 0:
+            wasted.append({
+                "path": path,
+                "url": crawl_url or path,
+                "googlebot_hits": hits,
+                "googlebot_4xx": int(row.get("status_404", 0) or 0)
+                                  + int(row.get("status_4xx_other", 0) or 0),
+                "googlebot_5xx": int(row.get("status_5xx", 0) or 0),
+                "in_audit": page is not None,
+                "audit_status": (page or {}).get("status_code"),
+                "last_seen": row.get("last_seen", ""),
+            })
+
+        # (ب) الأولويّة المعاد ترجيحها: نمزج درجة الأولوية مع تكرار Google
+        if crawl_url and crawl_url in prio_by_url:
+            pp = prio_by_url[crawl_url]
+            base_score = float(pp.get("priority_score", 0) or 0)
+            # log10 لتجنّب طغيان صفحة واحدة عالية الزيارات على البقيّة
+            import math
+            log_boost = math.log10(hits + 1) * 10
+            new_score = round(base_score + log_boost, 2)
+            entry = {**pp, "googlebot_hits": hits, "log_boosted_score": new_score}
+            rescored.append(entry)
+            # حدّ «عالية القيمة»: درجة معاد ترجيحها >= 50 وزيارات Google >= 10
+            if new_score >= 50 and hits >= 10:
+                high_value.append(entry)
+
+    wasted.sort(key=lambda r: -r["googlebot_hits"])
+    rescored.sort(key=lambda r: -r["log_boosted_score"])
+    high_value.sort(key=lambda r: -r["log_boosted_score"])
+
+    # 4) صفحات يزحفها Google لكنّ أداتنا لم تكتشفها (orphan bot)
+    orphans = find_orphan_bot_urls(log_per_url or [], by_path.keys())
+
+    # 5) إحصاءات ملخّصة لعرض البطاقات في الواجهة
+    total_googlebot_hits = sum(int(r.get("hits", 0) or 0) for r in (log_per_url or []))
+    wasted_hits = sum(r["googlebot_hits"] for r in wasted)
+    return {
+        "summary": {
+            "total_googlebot_hits": total_googlebot_hits,
+            "wasted_hits": wasted_hits,
+            "wasted_pages": len(wasted),
+            "high_value_pages": len(high_value),
+            "orphan_bot_pages": len(orphans),
+            "rescored_pages": len(rescored),
+        },
+        "wasted_budget": wasted[:50],
+        "high_value_with_issues": high_value[:50],
+        "orphan_bot_urls": orphans[:50],
+        "rescored_priority": rescored[:100],
+    }

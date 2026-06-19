@@ -104,6 +104,48 @@ Bing Webmaster connector is not implemented yet (planned).
 
 ---
 
+## Live backlinks API — Ahrefs / Majestic (v1.04, paid)
+
+In addition to the free AWT CSV importer above (only covers sites you own/verify),
+SCT ships a **live backlinks API** integration for the two main commercial providers.
+Off by default. Paid keys required.
+
+**When to use which:**
+- **AWT CSV (free)**: site you own + verified in Ahrefs Webmaster. No API needed.
+  Export from Ahrefs Webmaster UI → drop CSV into `external_data/awt/`.
+- **Ahrefs live API (v1.04, paid)**: any site (yours, a client's, a competitor's).
+  Requires Ahrefs **Standard** subscription or higher (Webmaster tier does **not**
+  expose the public API).
+- **Majestic live API (v1.04, paid)**: any site. Requires Majestic **OpenApp** key.
+
+**Wire it up:**
+
+In the SCT web UI, *Integrations & AI* tab:
+1. Toggle **🔗 Backlinks (live API — Ahrefs/Majestic)**.
+2. Pick the provider (Ahrefs or Majestic).
+3. Paste your API key. The key is passed to the crawl subprocess via the
+   `BACKLINKS_API_KEY` env var and **never written to disk** (same pattern as PageSpeed).
+
+Or via `config.yaml`:
+
+```yaml
+integrations:
+  backlinks:
+    enabled: true
+    provider: ahrefs    # or: majestic
+    timeout: 30
+```
+
+And export `BACKLINKS_API_KEY=...` in your shell before running.
+
+**What it pulls** (both providers, unified shape under `integrations.backlinks` in
+`audit.json`):
+- `summary`: domain-level metrics (DR/TrustFlow, total backlinks, referring domains)
+- `top_referring_domains`: up to 50, sorted by domain rating / trust flow
+- `top_anchors` (Ahrefs only): top 30 anchor texts
+
+---
+
 ## Where to put files
 
 ```

@@ -1259,5 +1259,51 @@ class RegressionTests(unittest.TestCase):
         self.assertGreater(top["priority_score"], 0)
 
 
+    # v1.08.1: smoke test يستدعي _discover_new_links فعلياً — لو حصل خطأ مثل
+    # NameError في scope (الذي وقع في v1.08) لـEnterprise مع روابط داخلية يكشفه
+    # هذا الاختبار فوراً بدل أن يتفجّر في زحف 5 ساعات.
+    def test_discover_new_links_smoke_smoke(self):
+        import asyncio
+        from bs4 import BeautifulSoup
+        from crawler.async_core import AsyncCrawler
+        # نُهيّئ crawler خفيفاً بأقلّ إعداد (بلا DB، بلا robots خارجي)
+        config = {
+            "site": {"start_url": "https://example.com/", "domain": "example.com"},
+            "crawl": {
+                "max_pages": 0, "max_depth": 5, "delay_seconds": 0.1,
+                "concurrent_requests": 1, "respect_robots": False,
+                "user_agent": "SCT-test/1.0", "timeout_seconds": 30,
+                "max_retries": 1, "verify_ssl": True,
+                "deferred_crawl": {"enabled": True, "pagination_max": 3},
+            },
+            "extraction": {}, "filters": {}, "external_check": {"enabled": False},
+            "state": {"use_db": False},
+        }
+        crawler = AsyncCrawler(config, db=None)
+        soup = BeautifulSoup(
+            '<html><body>'
+            '<a href="/products/abc">A</a>'
+            '<a href="/categories/x?page=2">P2 (primary)</a>'
+            '<a href="/categories/x?page=9">P9 (deferred)</a>'
+            '<a href="/auth/login?redirect_to=/x">Auth (deferred)</a>'
+            '</body></html>',
+            "html.parser",
+        )
+        # PageData بسيطة بحدّها الأدنى — يحتاجها _discover_new_links فقط لـpage.url
+        page = type("P", (), {"url": "https://example.com/", "final_url": None})()
+
+        async def run():
+            await crawler._discover_new_links(page, soup, depth=0)
+        # يجب ألّا يرمي NameError أو أيّ شيء غير متوقّع. asyncio.run() يُنشئ loop
+        # جديدة كي لا نتأثّر بـloop خلّفته اختبارات أخرى في نفس thread.
+        asyncio.run(run())
+        # بعد التشغيل: نتوقّع روابط في الطابور وأخرى مؤجَّلة
+        self.assertGreater(crawler.queue.qsize(), 0, "primary URLs should be queued")
+        self.assertGreater(len(crawler.deferred), 0, "deferred URLs should be tracked")
+        # التحقّق التفصيلي: /auth/login يجب أن يكون مؤجَّلاً
+        deferred_paths = [u for u in crawler.deferred if "/auth/login" in u]
+        self.assertEqual(len(deferred_paths), 1, "auth wrapper should be deferred")
+
+
 if __name__ == "__main__":
     unittest.main()

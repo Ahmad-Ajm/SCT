@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تصوير الزحف — {{ job_id }} — SCT</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/i18n.js"></script>
+<style>
+  /* v1.04: شجرة URL + شريط توزيع + رسم بياني canvas */
+  .gv-tree { font-family: ui-monospace, Consolas, monospace; font-size: .88rem;
+    direction: ltr; text-align: left; max-height: 60vh; overflow: auto;
+    background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+  .gv-tree details { margin: 1px 0; }
+  .gv-tree summary { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+  .gv-tree summary:hover { background: #e0e7ef; }
+  .gv-tree .seg { color: #1F4E79; font-weight: 600; }
+  .gv-tree .cnt { color: #64748b; font-size: .85em; margin-inline-start: 6px; }
+  .gv-tree .leaf { color: #475569; padding-inline-start: 18px; padding-block: 1px; }
+  .gv-tree .leaf a { color: #1F4E79; text-decoration: none; }
+  .gv-tree .leaf a:hover { text-decoration: underline; }
+  .gv-tree .st-4 { color: #b91c1c; font-weight: 700; }
+  .gv-tree .st-5 { color: #92400e; font-weight: 700; }
+  .gv-tree .st-3 { color: #b45309; }
+  .gv-bars { display: grid; grid-template-columns: 80px 1fr 50px; gap: 6px 12px;
+    align-items: center; font-size: .85rem; }
+  .gv-bar-bg { background: #e5e7eb; border-radius: 6px; height: 16px; overflow: hidden; }
+  .gv-bar-fill { background: #1F4E79; height: 100%; border-radius: inherit; transition: width .3s; }
+  .gv-bar-fill.warn { background: #f59e0b; }
+  .gv-bar-fill.err { background: #dc2626; }
+  .gv-bar-fill.ok { background: #16a34a; }
+  #gvCanvas { width: 100%; height: 480px; background: #0f1722; border-radius: 10px;
+    display: block; cursor: grab; }
+  #gvCanvas:active { cursor: grabbing; }
+  .gv-hint { color: #64748b; font-size: .82rem; margin-top: 6px; direction: rtl; text-align: start; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1 data-i18n="gv_title">🗺️ تصوير الزحف</h1>
+  <span>
+    <a href="/jobs/{{ job_id }}" class="btn sm" data-i18n="back_job">⟵ المهمة</a>
+    <button id="langToggle" class="btn sm" type="button">English</button>
+  </span>
+</header>
+
+<main class="container">
+  <section class="panel">
+    <h2 data-i18n="gv_overview">نظرة عامّة</h2>
+    <div class="cards" id="gvStats">
+      <div class="card"><div class="num" id="gvTotal">—</div><div class="lbl" data-i18n="gv_total_pages">صفحات</div></div>
+      <div class="card"><div class="num" id="gvDomain">—</div><div class="lbl" data-i18n="gv_domain">النطاق</div></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 data-i18n="gv_depth_dist">توزيع العمق</h2>
+    <p class="muted sm" data-i18n="gv_depth_p">كم صفحة على كلّ مسافة (نقرات) من الرئيسيّة. كلّما زاد العمق صعُب الوصول إليها.</p>
+    <div class="gv-bars" id="gvDepth"></div>
+  </section>
+
+  <section class="panel">
+    <h2 data-i18n="gv_status_dist">توزيع كود الحالة</h2>
+    <p class="muted sm" data-i18n="gv_status_p">200 = صفحة سليمة · 3xx = تحويل · 4xx = مكسورة · 5xx = خطأ خادم.</p>
+    <div class="gv-bars" id="gvStatus"></div>
+  </section>
+
+  <section class="panel">
+    <h2 data-i18n="gv_tree">شجرة الموقع (حسب مسار الرابط)</h2>
+    <p class="muted sm" data-i18n="gv_tree_p">اضغط على أيّ فرع لفتحه/طيّه. الرقم بجانب كلّ مجلّد = عدد الصفحات تحته. الفروع الحمراء تحوي صفحات 4xx.</p>
+    <div class="gv-tree" id="gvTree"></div>
+  </section>
+
+  <section class="panel" id="gvGraphPanel">
+    <h2 data-i18n="gv_graph">خريطة الروابط الداخليّة (Force-directed)</h2>
+    <p class="muted sm" id="gvGraphNote"></p>
+    <canvas id="gvCanvas"></canvas>
+    <p class="gv-hint" data-i18n="gv_graph_hint">اسحب لتحريك العرض · عجلة الفأرة للتكبير · كلّ دائرة = صفحة (حجمها = عدد الروابط الواردة) · كلّ خط = رابط داخلي.</p>
+  </section>
+</main>
+
+<script>
+const jobId = "{{ job_id }}";
+const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
+
+function _renderBars(box, items, total) {
+  box.innerHTML = '';
+  if (!items || !Object.keys(items).length) {
+    box.innerHTML = '<p class="muted sm">—</p>'; return;
+  }
+  const max = Math.max(...Object.values(items));
+  Object.entries(items).forEach(([k, v]) => {
+    const pct = max > 0 ? Math.round(v * 100 / max) : 0;
+    const sharePct = total > 0 ? Math.round(v * 100 / total) : 0;
+    const label = document.createElement('div');
+    label.textContent = k;
+    label.style.fontWeight = '600';
+    const bar = document.createElement('div'); bar.className = 'gv-bar-bg';
+    const fill = document.createElement('div'); fill.className = 'gv-bar-fill';
+    // ألوان مختلفة للحالة
+    const ki = parseInt(k);
+    if (ki >= 500) fill.classList.add('err');
+    else if (ki >= 400) fill.classList.add('err');
+    else if (ki >= 300) fill.classList.add('warn');
+    else if (ki >= 200 && ki < 300) fill.classList.add('ok');
+    fill.style.width = pct + '%';
+    bar.appendChild(fill);
+    const cnt = document.createElement('div');
+    cnt.textContent = v.toLocaleString() + (sharePct ? ' (' + sharePct + '%)' : '');
+    cnt.style.color = '#64748b';
+    cnt.style.fontSize = '.82rem';
+    cnt.style.textAlign = 'end';
+    box.appendChild(label); box.appendChild(bar); box.appendChild(cnt);
+  });
+}
+
+function _renderTree(box, node, depth = 0) {
+  if (!node) return;
+  // ورقة (URL كامل بلا أبناء)
+  const hasKids = node.children && node.children.length;
+  if (!hasKids && node.url) {
+    const div = document.createElement('div');
+    div.className = 'leaf' + (node.status >= 400 ? ' st-4' : (node.status >= 300 ? ' st-3' : ''));
+    div.innerHTML = '<a href="' + node.url + '" target="_blank" rel="noopener">' +
+      (node.name || '/') + '</a> <span class="cnt">[' + (node.status || '?') + ']</span>';
+    box.appendChild(div);
+    return;
+  }
+  const det = document.createElement('details');
+  if (depth < 1) det.open = true;
+  const sum = document.createElement('summary');
+  let cls = 'seg';
+  if (node.status >= 500) cls += ' st-5';
+  else if (node.status >= 400) cls += ' st-4';
+  else if (node.status >= 300) cls += ' st-3';
+  sum.innerHTML = '<span class="' + cls + '">' + (node.name || '/') + '/</span>' +
+    '<span class="cnt">' + node.count.toLocaleString() + ' ' + T('gv_pages_unit', 'صفحة') + '</span>';
+  det.appendChild(sum);
+  const wrap = document.createElement('div');
+  wrap.style.paddingInlineStart = '14px';
+  (node.children || []).forEach((c) => _renderTree(wrap, c, depth + 1));
+  det.appendChild(wrap);
+  box.appendChild(det);
+}
+
+// === رسم بياني بسيط Force-directed على Canvas (بلا تبعيات خارجيّة) ===
+function _renderForceGraph(canvas, graph) {
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  function _resize() {
+    const r = canvas.getBoundingClientRect();
+    canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  _resize(); window.addEventListener('resize', _resize);
+
+  const W = () => canvas.getBoundingClientRect().width;
+  const H = () => canvas.getBoundingClientRect().height;
+  const nodes = graph.nodes.map((n) => ({
+    ...n, x: Math.random() * W(), y: Math.random() * H(), vx: 0, vy: 0,
+    inlinks: 0,
+  }));
+  // عُمر inlinks لتحديد الحجم
+  graph.edges.forEach((e) => { if (nodes[e.t]) nodes[e.t].inlinks += 1; });
+  const edges = graph.edges;
+
+  // تحويل العرض (pan + zoom)
+  let scale = 1, ox = 0, oy = 0, dragging = false, last = null;
+  canvas.addEventListener('mousedown', (e) => { dragging = true; last = [e.clientX, e.clientY]; });
+  window.addEventListener('mouseup', () => { dragging = false; });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    ox += e.clientX - last[0]; oy += e.clientY - last[1];
+    last = [e.clientX, e.clientY];
+  });
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const k = e.deltaY > 0 ? 0.9 : 1.1;
+    scale = Math.max(0.2, Math.min(5, scale * k));
+  }, { passive: false });
+
+  // محرّك قوى مبسَّط — تنافر بين العقد + جذب على الحوافّ + توسيط
+  let ticks = 0;
+  function _step() {
+    const w = W(), h = H();
+    // تنافر O(n²) — مقبول حتى ~500 عقدة
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const d2 = dx * dx + dy * dy + 1;
+        const f = 800 / d2;
+        const fx = dx * f, fy = dy * f;
+        a.vx += fx; a.vy += fy;
+        b.vx -= fx; b.vy -= fy;
+      }
+    }
+    // جذب على الحوافّ
+    edges.forEach((e) => {
+      const a = nodes[e.s], b = nodes[e.t];
+      if (!a || !b) return;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      a.vx += dx * 0.01; a.vy += dy * 0.01;
+      b.vx -= dx * 0.01; b.vy -= dy * 0.01;
+    });
+    // جذب إلى المركز + تطبيق السرعة
+    nodes.forEach((n) => {
+      n.vx += (w / 2 - n.x) * 0.005;
+      n.vy += (h / 2 - n.y) * 0.005;
+      n.vx *= 0.85; n.vy *= 0.85;
+      n.x += n.vx; n.y += n.vy;
+    });
+    ticks++;
+  }
+  function _draw() {
+    const w = W(), h = H();
+    ctx.fillStyle = '#0f1722'; ctx.fillRect(0, 0, w, h);
+    ctx.save();
+    ctx.translate(ox + w / 2 * (1 - scale), oy + h / 2 * (1 - scale));
+    ctx.scale(scale, scale);
+    // حوافّ
+    ctx.strokeStyle = 'rgba(148,163,184,.25)';
+    ctx.lineWidth = 0.5;
+    edges.forEach((e) => {
+      const a = nodes[e.s], b = nodes[e.t];
+      if (!a || !b) return;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    });
+    // عُقد
+    nodes.forEach((n) => {
+      const r = 2 + Math.min(12, Math.sqrt(n.inlinks + 1));
+      let color = '#38bdf8';
+      if (n.status >= 500) color = '#dc2626';
+      else if (n.status >= 400) color = '#f87171';
+      else if (n.status >= 300) color = '#fbbf24';
+      else if (n.status >= 200 && n.status < 300) color = '#22c55e';
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.restore();
+  }
+  function _loop() {
+    if (ticks < 300) _step();
+    _draw();
+    requestAnimationFrame(_loop);
+  }
+  _loop();
+}
+
+async function _load() {
+  let data;
+  try {
+    const r = await fetch('/api/jobs/' + jobId + '/graph');
+    if (!r.ok) { document.getElementById('gvStats').innerHTML = '<p class="muted">—</p>'; return; }
+    data = await r.json();
+  } catch (e) { return; }
+  document.getElementById('gvTotal').textContent = (data.total_pages || 0).toLocaleString();
+  document.getElementById('gvDomain').textContent = data.domain || '—';
+  document.getElementById('gvDomain').style.fontSize = '1rem';
+  _renderBars(document.getElementById('gvDepth'), data.by_depth, data.total_pages);
+  _renderBars(document.getElementById('gvStatus'), data.by_status, data.total_pages);
+  const treeBox = document.getElementById('gvTree');
+  treeBox.innerHTML = '';
+  if (data.tree) _renderTree(treeBox, data.tree);
+  // الرسم البياني: نُخفيه على المواقع الكبيرة لأنّ Force-directed على 1000+ عقدة بطيء جدّاً
+  const gPanel = document.getElementById('gvGraphPanel');
+  const gNote = document.getElementById('gvGraphNote');
+  if (data.graph && data.graph.nodes.length > 0 && data.graph.nodes.length <= 500) {
+    gNote.textContent = data.graph.truncated
+      ? T('gv_graph_truncated', 'الموقع كبير — يُعرَض فقط أوّل ' + data.graph.max_nodes + ' صفحة')
+      : T('gv_graph_count', data.graph.nodes.length + ' عقدة · ' + data.graph.edges.length + ' رابط');
+    _renderForceGraph(document.getElementById('gvCanvas'), data.graph);
+  } else if (data.graph && data.graph.nodes.length > 500) {
+    gPanel.querySelector('canvas').style.display = 'none';
+    gNote.textContent = T('gv_graph_too_big', 'الموقع كبير جدّاً (' + data.graph.nodes.length + ' صفحة) — الرسم البياني عُطِّل للحفاظ على أداء المتصفّح. استخدم الشجرة أعلاه.');
+  } else {
+    gPanel.style.display = 'none';
+  }
+}
+window.addEventListener('DOMContentLoaded', _load);
+</script>
+</body>
+</html>

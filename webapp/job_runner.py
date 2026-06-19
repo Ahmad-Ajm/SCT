@@ -110,6 +110,25 @@ class JobRunner:
             if strat in ("homepage", "sitemap", "hybrid"):
                 cfg["crawl"]["seed_strategy"] = strat
 
+        # v1.05: انتحال User-Agent (preset أو مخصّص) — يكشف مشاكل Cloudflare/WAF
+        # الخاصّة بـbots مثل Googlebot 403 challenges. الافتراضي يبقى كما هو في
+        # http_client (SEOCrawlerBot/1.0) عند عدم اختيار شيء.
+        ua_preset = str(overrides.get("ua_preset", "") or "").lower()
+        ua_custom = str(overrides.get("ua_custom", "") or "").strip()
+        ua_map = {
+            "googlebot": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "googlebot-mobile": (
+                "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.6099.118 Mobile Safari/537.36 "
+                "(compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+            ),
+            "bingbot": "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+        }
+        if ua_preset == "custom" and ua_custom:
+            cfg["crawl"]["user_agent"] = ua_custom
+        elif ua_preset in ua_map:
+            cfg["crawl"]["user_agent"] = ua_map[ua_preset]
+
         # قالب منصّة التجارة (IMP-11): يُطبَّق فقط لقيمة معروفة
         preset = str(overrides.get("platform_preset", "") or "").strip().lower()
         if preset in ("zid", "salla", "shopify", "woocommerce"):
@@ -185,6 +204,11 @@ class JobRunner:
         if ai.get("api_key"):
             self._secret_env["AI_API_KEY"] = str(ai["api_key"])
             ai["api_key"] = ""
+        # v1.04: مفتاح Ahrefs/Majestic يُمرَّر عبر BACKLINKS_API_KEY (نفس فلسفة PageSpeed)
+        bl = cfg.get("integrations", {}).get("backlinks", {})
+        if bl.get("api_key"):
+            self._secret_env["BACKLINKS_API_KEY"] = str(bl["api_key"])
+            bl["api_key"] = ""
 
         # === الاستخراج المخصّص ===
         ce = overrides.get("custom_extraction")
@@ -241,8 +265,13 @@ class JobRunner:
             args.append("--skip-external")
         if overrides.get("integrations_only"):
             args.append("--integrations-only")
+        if overrides.get("phase2"):
+            args.append("--phase2")
 
-        log_file = open(job_dir / "run.log", "w", encoding="utf-8")
+        # v1.08: في Phase 2 نُلحق بالـrun.log بدل الكتابة من جديد، كي يحتفظ المستخدم
+        # بسجلّ Phase 1 الذي تابعه. أيضاً نستخدم اسم تقدّم مختلف لتجنّب الالتباس.
+        log_file = open(job_dir / "run.log", "a" if overrides.get("phase2") else "w",
+                        encoding="utf-8")
         creationflags = 0
         if os.name == "nt":
             creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -257,6 +286,69 @@ class JobRunner:
 
         threading.Thread(target=self._watch, args=(job_id, job_dir, proc), daemon=True).start()
         return job_id
+
+    def start_phase2(self, job_id: str) -> dict[str, Any]:
+        """v1.08: يبدأ Phase 2 لمهمّة موجودة (يستعمل deferred_urls.csv كبذور).
+
+        المسبّقات: المهمّة منتهية + deferred_urls.csv موجود + لا توجد مهمّة أخرى نشطة.
+        النتيجة: subprocess جديد ينضمّ إلى نفس job_dir (لا job_id جديد).
+        """
+        if not _valid_job_id(job_id):
+            return {"ok": False, "error": "invalid job_id"}
+        with self._lock:
+            self._sweep_finished()
+            if self._procs:
+                return {"ok": False, "error": "active_job",
+                        "active_job": next(iter(self._procs), None)}
+        job_dir = JOBS_DIR / job_id
+        if not job_dir.exists():
+            return {"ok": False, "error": "job_not_found"}
+        cfg_path = job_dir / "config.yaml"
+        if not cfg_path.exists():
+            return {"ok": False, "error": "config_missing"}
+        # تحقّق من deferred_urls.csv قبل الإطلاق (يوفّر فشلاً سريعاً وواضحاً)
+        deferred_csv = job_dir / "output" / "csv" / "deferred_urls.csv"
+        if not deferred_csv.exists():
+            return {"ok": False, "error": "no_deferred_urls"}
+
+        meta = self._read_meta(job_dir)
+        meta["status"] = "running"
+        meta["phase2_started_at"] = datetime.now().isoformat()
+        self._write_meta(job_dir, meta)
+        progress_file = job_dir / "progress.json"
+        self._write_progress(progress_file, {"status": "starting_phase2", "pages_crawled": 0})
+
+        env = dict(os.environ)
+        env["SCT_PROGRESS_FILE"] = str(progress_file)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["SCT_NONINTERACTIVE"] = "1"
+        env.update(self._secret_env)
+
+        args = [
+            sys.executable, str(MAIN_PY),
+            "--config", str(cfg_path),
+            "--mode", meta.get("mode", "audit"),
+            "--phase2",
+        ]
+        if meta.get("url"):
+            args += ["--url", meta["url"]]
+
+        log_file = open(job_dir / "run.log", "a", encoding="utf-8")
+        log_file.write("\n\n========= PHASE 2 STARTED =========\n")
+        log_file.flush()
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        proc = subprocess.Popen(
+            args, cwd=str(ROOT), env=env,
+            stdout=log_file, stderr=subprocess.STDOUT,
+            creationflags=creationflags,
+        )
+        with self._lock:
+            self._procs[job_id] = proc
+        threading.Thread(target=self._watch, args=(job_id, job_dir, proc), daemon=True).start()
+        return {"ok": True, "job_id": job_id, "phase": 2}
 
     # حالات الانتهاء التي يكتبها المحرّك في progress.json
     _FINAL_STATUSES = {"complete", "partial", "partial_max_pages", "stopped"}
@@ -428,9 +520,12 @@ class JobRunner:
         result: dict[str, str] = {}
         if not out.exists():
             return result
-        # نطابق الأسماء المؤرّخة الجديدة وأيضاً القديمة (توافق رجعي)
+        # v1.06: نُميّز بين «audit JSON» (زحف كامل، يصلح لتوليد HTML/PDF/Excel) و
+        # «integrations JSON» (تكاملات-فقط، يحوي GSC/GA4/PageSpeed بلا pages). الواجهة
+        # تستعمل result.kind لإخفاء أزرار التوليد على المهام التي لا تحوي بيانات زحف.
         patterns = {
             "json": ["audit_*.json", "complete_audit.json"],
+            "integrations_json": ["integrations_*.json"],
             "html": ["report_*.html", "report.html"],
             "pdf": ["report_*.pdf", "report.pdf"],
             "excel": ["audit_*.xlsx", "master_audit.xlsx"],
@@ -461,6 +556,12 @@ class JobRunner:
         if xml_dir.exists():
             for xml_file in sorted(xml_dir.glob("*.xml")):
                 result[f"xml_{xml_file.stem}"] = str(xml_file)
+        # v1.06: علامة kind تساعد الواجهة على اتّخاذ قرار «هل أُظهر أزرار توليد التقارير؟»
+        # — لا audit JSON ⇒ مهمّة تكاملات-فقط ⇒ يظهر شريط نتائج التكاملات بدل أزرار التوليد.
+        if result.get("json"):
+            result["kind"] = "audit"
+        elif result.get("integrations_json"):
+            result["kind"] = "integrations_only"
         return result
 
     def _summarize_run_log(self, log_path: Path) -> dict[str, Any]:

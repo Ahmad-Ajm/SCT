@@ -124,6 +124,66 @@ input[type="range"] { width: 100%; accent-color: #1F4E79; }
   .tab { white-space: nowrap; }
 }
 
+/* ===== v1.02: تلميحات (tooltips) للعناصر — تظهر عند الوقوف بالماوس ===== */
+/* أيقونة سؤال صغيرة بجانب نص الحقل تكشف شرحاً موسّعاً ثنائي اللغة. */
+.tip {
+  display: inline-block; width: 14px; height: 14px; line-height: 14px;
+  text-align: center; border-radius: 50%; background: #cbd5e1; color: #334155;
+  font-size: .72rem; font-weight: 700; cursor: help; margin-inline-start: 6px;
+  position: relative; vertical-align: middle;
+}
+.tip:hover { background: #1F4E79; color: #fff; }
+.tip[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute; bottom: calc(100% + 6px); inset-inline-end: 0;
+  background: #111827; color: #f9fafb; padding: 8px 10px; border-radius: 8px;
+  font-size: .8rem; font-weight: 400; white-space: pre-wrap; line-height: 1.45;
+  width: 280px; z-index: 999; box-shadow: 0 4px 12px rgba(0,0,0,.25);
+  text-align: start; direction: rtl;
+}
+html[lang="en"] .tip[data-tip]:hover::after { direction: ltr; }
+.tip[data-tip]:hover::before {
+  content: ""; position: absolute; bottom: 100%; inset-inline-end: 4px;
+  border: 6px solid transparent; border-top-color: #111827; z-index: 999;
+}
+/* تلميح خاص بزيادة الوقت — نبرة تحذير صفراء */
+.tip.time { background: #fbbf24; color: #78350f; }
+.tip.time:hover { background: #b45309; color: #fff; }
+
+/* ===== v1.02: تفاصيل المرحلة (current URL) تحت اسم العملية ===== */
+.phase-detail {
+  margin-top: 6px; font-size: .82rem; color: #64748b; direction: ltr;
+  text-align: start; font-family: ui-monospace, Consolas, monospace;
+  overflow-x: auto; white-space: nowrap; max-width: 100%;
+}
+.phase-detail.dot::before { content: "› "; color: #1F4E79; font-weight: 700; }
+
+/* ===== v1.02: شريط جاهزية المتطلبات في الواجهة ===== */
+.req-row {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px;
+  align-items: center; font-size: .85rem;
+}
+.req-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+  border-radius: 999px; border: 1px solid #cbd5e1; background: #f8fafc; color: #475569;
+}
+.req-chip.ok   { background: #dcfce7; border-color: #86efac; color: #166534; }
+.req-chip.miss { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+.req-chip button { font-size: .75rem; padding: 1px 6px; }
+
+/* ===== v1.02: أزرار توليد التقارير عند الطلب ===== */
+.gen-row {
+  display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;
+}
+.gen-box {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
+  border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc;
+}
+.gen-box .gen-btn { background: #1F4E79; color: #fff; }
+.gen-box .gen-dl { background: #16a34a; color: #fff; }
+.gen-box .gen-dl:disabled { background: #cbd5e1; color: #475569; }
+.gen-box .gen-status { font-size: .8rem; color: #64748b; }
+
 /* وضع داكن (تلقائي حسب تفضيل النظام) */
 @media (prefers-color-scheme: dark) {
   body { background: #0f1722; color: #e5edf5; }
