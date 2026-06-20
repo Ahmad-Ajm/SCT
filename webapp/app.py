@@ -50,216 +50,21 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")
 
 
 # ============================================================
-# v1.10-A1: Local auth token — يُحمي webapp من أيّ مَن يصل لـ127.0.0.1
-# (Docker bridge، LAN، VPN، تطبيقات أخرى على نفس الجهاز).
-# يُولَّد عند أوّل startup ويُحفَظ في ~/.sct/local_token بصلاحيّات 0600.
-# يُحقَن تلقائياً في القوالب عبر `request.scope["sct_token"]`، فالمستخدم
-# الذي فتح الصفحة من نفس الجهاز يحصل عليه شفافياً. أيّ POST/PUT/DELETE
-# يحتاج Bearer header أو `?token=` query (لـcurl).
+# v1.12.3 REFACTOR-app-routers: auth + middlewares + exception handlers
+# نُقلت إلى webapp/security.py.
 # ============================================================
-def _load_or_create_token() -> str:
-    """ينشئ token محلّياً إن لم يوجد. يُخزَّن بـ0600. مَن يمسك الـtoken يدير الأداة."""
-    from secrets import token_urlsafe
-    home = Path.home() / ".sct"
-    home.mkdir(mode=0o700, exist_ok=True)
-    tp = home / "local_token"
-    if tp.exists():
-        try:
-            existing = tp.read_text(encoding="utf-8").strip()
-            if existing and len(existing) >= 32:
-                return existing
-        except OSError:
-            pass
-    new = token_urlsafe(32)
-    try:
-        tp.write_text(new, encoding="utf-8")
-        try:
-            os.chmod(tp, 0o600)
-        except (OSError, NotImplementedError):
-            pass
-    except OSError:
-        # إن تعذّر الحفظ (rare)، نستعمل token جلسة فقط — يفقد عند إعادة التشغيل
-        pass
-    return new
-
-
-_LOCAL_TOKEN = _load_or_create_token()
-
-# مسارات معفاة (يمكن GET-ها بلا auth: صفحات HTML + static + health/readyz)
-# هذا يسمح للمتصفّح بتحميل index.html ثم يحقن الـtoken في كلّ POST.
-_AUTH_EXEMPT_PREFIXES = ("/static/", "/health", "/readyz")
-_AUTH_EXEMPT_EXACT = {"/favicon.ico"}
-
-
-def _extract_token(request) -> str:
-    """يقرأ token من Bearer header أو query param."""
-    auth = request.headers.get("authorization") or ""
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip()
-    return (request.query_params.get("token") or "").strip()
-
-
-@app.middleware("http")
-async def _local_auth_guard(request, call_next):
-    """v1.10-A1: يفرض token على كلّ POST/PUT/DELETE + كلّ /api/.
-
-    GET على HTML صفحات يمر — لأنّ المتصفّح لا يستطيع إرسال headers مخصّصة عند
-    أوّل تحميل صفحة. القوالب تحقن الـtoken في كلّ fetch لاحقاً. هذا نمط مشابه
-    لـJupyter notebook token authentication."""
-    path = request.url.path or "/"
-    if path in _AUTH_EXEMPT_EXACT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
-        return await call_next(request)
-    # GET على HTML pages (الجذر + /jobs/*): يمر بدون auth، لكن الـtoken يُحقَن
-    # في الـsession كي تستعمله الـfetch calls التالية.
-    if request.method == "GET" and not path.startswith("/api"):
-        return await call_next(request)
-    # API + state-changing methods: يجب توفّر token صحيح
-    provided = _extract_token(request)
-    if not provided or not _constant_time_eq(provided, _LOCAL_TOKEN):
-        return JSONResponse(
-            {"error": "unauthorized",
-             "hint": "Provide your SCT local token via Authorization: Bearer <token> "
-                     f"or ?token=<token>. Token file: ~/.sct/local_token"},
-            status_code=401,
-        )
-    return await call_next(request)
-
-
-def _constant_time_eq(a: str, b: str) -> bool:
-    """v1.10-A1: مقارنة ثابتة الزمن — يمنع timing attacks."""
-    import hmac
-    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
-
-
-# ============================================================
-# v1.10-A3: Global exception handler — يمنع leakage لرسائل الاستثناءات
-# الداخليّة (paths، table names، أحياناً frame locals عبر repr). كان النمط
-# السابق في 30+ موقع: `return JSONResponse({"error": str(e)[:300]}, 500)`.
-# الآن: الأخطاء غير المُتوقَّعة تُسجَّل بـtraceback كامل مع request_id فقط،
-# والـclient يحصل على رسالة عامّة + request_id لتتبّع.
-# ============================================================
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
-
-@app.exception_handler(Exception)
-async def _unhandled_exception_handler(request, exc):
-    """يمسك أيّ استثناء غير معالَج ⇒ يسجّل + يردّ generic 500.
-
-    الاستثناءات المتوقّعة (HTTPException, ValueError بـvalidation) لا تمرّ من
-    هنا — FastAPI/Starlette تتولّاها بـhandlers خاصّة."""
-    import traceback, uuid
-    rid = getattr(request.state, "request_id", None) or uuid.uuid4().hex[:12]
-    log = logging.getLogger("sct.webapp")
-    log.error(
-        f"[req={rid}] unhandled {type(exc).__name__} on {request.method} "
-        f"{request.url.path}\n{traceback.format_exc()}"
-    )
-    return JSONResponse(
-        {"error": "internal_error", "request_id": rid,
-         "hint": "Server log holds the traceback. Search by request_id."},
-        status_code=500,
-    )
-
-
-@app.exception_handler(StarletteHTTPException)
-async def _http_exception_handler(request, exc):
-    """HTTPException-derived: نُبقي status_code الأصلي + رسالة قصيرة آمنة."""
-    rid = getattr(request.state, "request_id", None) or ""
-    payload = {"error": exc.detail if isinstance(exc.detail, str) else "http_error"}
-    if rid:
-        payload["request_id"] = rid
-    return JSONResponse(payload, status_code=exc.status_code)
-
-
-def _tpl_ctx(extra: dict[str, Any] | None = None) -> dict[str, Any]:
-    """v1.10-A1: السياق المُشترَك لكلّ TemplateResponse — يحقن sct_token تلقائياً."""
-    ctx = {"sct_token": _LOCAL_TOKEN}
-    if extra:
-        ctx.update(extra)
-    return ctx
-
-
-# v1.10-B1: middleware لـcorrelation IDs — كلّ طلب يحصل على UUIDv4 يظهر في
-# كلّ log line يخصّ هذا الطلب. تتبّع debug عبر terminal واحد بحثاً برقم.
-@app.middleware("http")
-async def _correlation_id_middleware(request, call_next):
-    import uuid
-    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
-    request.state.request_id = rid
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = rid
-    return response
-
-
-# v1.10-B1: rate limiting خفيف — 120 طلب/دقيقة لكلّ IP، وحدّ خاصّ على /api/start
-# (10/ساعة) لمنع spawning crawlers بلا سيطرة. تنفيذ in-memory (سلّة + token bucket
-# مبسَّط) — لا dependency جديدة. كافٍ لأداة local، production يحتاج slowapi/redis.
-_RATE_BUCKETS: dict[str, tuple[float, int]] = {}
-_RATE_LOCK = __import__("threading").Lock()
-
-
-def _check_rate(ip: str, key: str, max_per_minute: int) -> bool:
-    """يُرجع True إن سُمح، False إن تُجاوز. token-bucket بسيط بـsecond-resolution."""
-    import time
-    now = time.time()
-    bk = f"{ip}|{key}"
-    with _RATE_LOCK:
-        last, count = _RATE_BUCKETS.get(bk, (now, 0))
-        # نفس النافذة (60s)؟
-        if now - last < 60.0:
-            count += 1
-            _RATE_BUCKETS[bk] = (last, count)
-            return count <= max_per_minute
-        # نافذة جديدة
-        _RATE_BUCKETS[bk] = (now, 1)
-        return True
-
-
-@app.middleware("http")
-async def _rate_limit_middleware(request, call_next):
-    path = request.url.path or "/"
-    if path.startswith("/static/") or path in ("/health", "/readyz"):
-        return await call_next(request)
-    ip = (request.client.host if request.client else "?")
-    # حدّ خاصّ على /api/start: 10/ساعة (= 0.16/دقيقة، نُسهّله إلى 1/min × 10) +
-    # حدّ عام 120/دقيقة على بقيّة الـAPI.
-    if path == "/api/start" and request.method == "POST":
-        if not _check_rate(ip, "start", max_per_minute=10):
-            return JSONResponse({"error": "rate_limited", "scope": "start"},
-                                status_code=429)
-    elif path.startswith("/api/"):
-        if not _check_rate(ip, "api", max_per_minute=120):
-            return JSONResponse({"error": "rate_limited", "scope": "api"},
-                                status_code=429)
-    return await call_next(request)
-
-
-# v1.09-B3: حماية CSRF — على أيّ POST، إن وُجد `Origin` ولم يُطابق مضيف الـapp،
-# نرفض الطلب. هذا يحمي من صفحة خبيثة في متصفّحك تستطيع POST إلى /api/start أو
-# /api/jobs/.../delete أو غيرها من endpoints تغيّر الحالة. localhost استثناء
-# (CLI/Cookie pasted URL لا يُرسل Origin → نسمح بها لأنّها ليست cross-origin).
-@app.middleware("http")
-async def _csrf_origin_guard(request, call_next):
-    if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
-        return await call_next(request)
-    origin = request.headers.get("origin") or ""
-    if not origin:
-        # cURL / fetch from localhost CLI لا يُرسل Origin — نسمح بها
-        return await call_next(request)
-    # نسمح فقط بـlocalhost (سواء بأيّ منفذ)
-    try:
-        from urllib.parse import urlparse
-        host = (urlparse(origin).hostname or "").lower()
-    except Exception:  # noqa: BLE001
-        host = ""
-    if host in ("127.0.0.1", "localhost", "::1"):
-        return await call_next(request)
-    return JSONResponse(
-        {"error": "Cross-origin POST blocked (CSRF protection). "
-                  "Open SCT via http://127.0.0.1:8000 in the same tab."},
-        status_code=403,
-    )
-
+from webapp.security import (  # noqa: E402,F401
+    LOCAL_TOKEN as _LOCAL_TOKEN,
+    _atomic_write_text,
+    _check_rate,
+    _constant_time_eq,
+    _extract_token,
+    register_exception_handlers,
+    register_middlewares,
+    tpl_ctx as _tpl_ctx,
+)
+register_middlewares(app)
+register_exception_handlers(app)
 
 runner = JobRunner()
 
@@ -267,139 +72,17 @@ runner = JobRunner()
 FINISHED_STATUSES = {"complete", "partial", "partial_max_pages", "done", "failed", "stopped"}
 
 # مجموعات ما يُجمَع (extraction) — تُعرض كأقسام قابلة للطيّ في الواجهة
-EXTRACTION_GROUPS = [
-    {"id": "content", "label": "الميتا والمحتوى", "items": [
-        {"key": "meta", "label": "الوسوم الوصفية (Title/Description/Robots)"},
-        {"key": "headings", "label": "العناوين (H1–H6)"},
-        {"key": "content", "label": "المحتوى وعدد الكلمات"},
-        {"key": "canonical", "label": "Canonical"},
-    ]},
-    {"id": "links_media", "label": "الروابط والوسائط", "items": [
-        {"key": "links", "label": "الروابط (داخلية/خارجية)"},
-        {"key": "images", "label": "الصور و alt"},
-    ]},
-    {"id": "social", "label": "السوشال والبيانات المنظمة", "items": [
-        {"key": "og", "label": "Open Graph / Twitter"},
-        {"key": "hreflang", "label": "Hreflang"},
-        {"key": "pagination", "label": "ترقيم الصفحات (rel=next/prev)"},
-        {"key": "schema", "label": "Schema.org"},
-    ]},
-    {"id": "technical", "label": "التقني والأمان", "items": [
-        {"key": "headers", "label": "ترويسات HTTP"},
-        {"key": "mixed_content", "label": "المحتوى المختلط (Mixed Content)"},
-        {"key": "resources", "label": "جرد الموارد (CSS/JS/خطوط/iframe)"},
-    ]},
-]
-
-OUTPUT_FORMATS = [
-    {"key": "html", "label": "HTML", "default": True},
-    {"key": "pdf", "label": "PDF", "default": True},
-    {"key": "excel", "label": "Excel", "default": True},
-    {"key": "csv", "label": "CSV", "default": True},
-    {"key": "json", "label": "JSON", "default": True},
-    {"key": "xml", "label": "XML", "default": False},
-]
-
-SECTIONS = [
-    {"key": "cover", "label": "الغلاف"},
-    {"key": "summary", "label": "الملخص التنفيذي"},
-    {"key": "issues", "label": "المشاكل حسب الأولوية"},
-    {"key": "problem_pages", "label": "صفحات بمشاكل"},
-    {"key": "redirects", "label": "التحويلات"},
-    {"key": "schema", "label": "Schema.org"},
-]
-SEVERITIES = ["🔴 Critical", "🟠 High", "🟡 Medium", "🟢 Low"]
-
-# v1.05: انتحال User-Agent لكشف مشاكل خاصّة بـbots (Cloudflare/WAF challenges)
-# الـUA الافتراضي «SEOCrawlerBot/1.0» (في crawler/http_client.py) يبقى عند `ua_preset=""`.
-_UA_PRESETS = {
-    "googlebot": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-    "googlebot-mobile": (
-        "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.6099.118 Mobile Safari/537.36 "
-        "(compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-    ),
-    "bingbot": "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
-}
-
-# سقف حجم ملف audit JSON الذي نحمّله في الذاكرة (المستكشف/إعادة بناء التقرير).
-# يمنع تعليق الخادم عند فتح أرشيف ضخم (مثل 1.7GB من زحف غير محدود قديم).
-MAX_AUDIT_JSON_MB = 300
-
-# تسميات معبّرة (عربي/إنجليزي) لملفات CSV المختصّة — تُعرض في لوحة النتائج.
-CSV_LABELS: dict[str, dict[str, str]] = {
-    "pages": {"ar": "كل الصفحات المزحوفة", "en": "All crawled pages"},
-    "all_links": {"ar": "كل الروابط (شبكة الروابط)", "en": "All links (link graph)"},
-    "inlinks": {"ar": "الروابط الواردة الداخلية", "en": "Internal inlinks"},
-    "outlinks_external": {"ar": "الروابط الصادرة الخارجية", "en": "External outlinks"},
-    "images": {"ar": "كل الصور", "en": "All images"},
-    "images_no_alt": {"ar": "صور بلا نص بديل (alt)", "en": "Images missing alt text"},
-    "images_no_dimensions": {"ar": "صور بلا أبعاد صريحة", "en": "Images missing dimensions"},
-    "headings": {"ar": "العناوين H1–H6", "en": "Headings (H1–H6)"},
-    "headers": {"ar": "ترويسات HTTP", "en": "HTTP response headers"},
-    "schema": {"ar": "البيانات المنظّمة Schema.org", "en": "Schema.org structured data"},
-    "redirects": {"ar": "التحويلات", "en": "Redirects"},
-    "redirect_chains": {"ar": "سلاسل التحويل", "en": "Redirect chains"},
-    "redirect_loops": {"ar": "حلقات التحويل", "en": "Redirect loops"},
-    "redirect_issues": {"ar": "مشاكل التحويلات", "en": "Redirect issues"},
-    "seo_issues": {"ar": "كل مشاكل SEO (حسب الأولوية)", "en": "All SEO issues (by priority)"},
-    "duplicates": {"ar": "محتوى مكرّر (عناوين/أوصاف/H1)", "en": "Duplicate content (titles/desc/H1)"},
-    "orphans": {"ar": "صفحات يتيمة", "en": "Orphan pages"},
-    "low_link_pages": {"ar": "صفحات قليلة الروابط الداخلية", "en": "Pages with few internal links"},
-    "thin_content": {"ar": "محتوى رقيق", "en": "Thin‑content pages"},
-    "pages_4xx": {"ar": "صفحات أخطاء 4xx", "en": "4xx error pages"},
-    "pages_5xx": {"ar": "صفحات أخطاء 5xx", "en": "5xx error pages"},
-    "pages_404_with_inlinks": {"ar": "صفحات 404 بروابط واردة", "en": "404 pages with inlinks"},
-    "url_issues": {"ar": "مشاكل الروابط (URL)", "en": "URL issues"},
-    "canonical_issues": {"ar": "مشاكل Canonical", "en": "Canonical issues"},
-    "security_issues": {"ar": "مشاكل ترويسات الأمان", "en": "Security header issues"},
-    "pagination": {"ar": "ترقيم الصفحات (next/prev)", "en": "Pagination (next/prev)"},
-    "pagination_issues": {"ar": "مشاكل ترقيم الصفحات", "en": "Pagination issues"},
-    "hreflang_issues": {"ar": "مشاكل hreflang", "en": "Hreflang issues"},
-    "resources": {"ar": "جرد الموارد", "en": "Resource inventory"},
-    "resource_issues": {"ar": "مشاكل الموارد", "en": "Resource issues"},
-    "resource_status": {"ar": "حالة HTTP للموارد", "en": "Resource HTTP status"},
-    "excluded_urls": {"ar": "روابط مستبعَدة (مع السبب)", "en": "Excluded URLs (with reason)"},
-    "priority_opportunities": {"ar": "أولويات الإصلاح", "en": "Priority opportunities"},
-    "ai_recommendations": {"ar": "توصيات الذكاء الاصطناعي", "en": "AI recommendations"},
-    "gsc_pages": {"ar": "GSC — صفحات", "en": "GSC — pages"},
-    "gsc_queries": {"ar": "GSC — استعلامات", "en": "GSC — queries"},
-    "ga4_landing_pages": {"ar": "GA4 — صفحات الهبوط", "en": "GA4 — landing pages"},
-    "ga4_channels": {"ar": "GA4 — القنوات", "en": "GA4 — channels"},
-    "lighthouse_import": {"ar": "استيراد Lighthouse", "en": "Lighthouse import"},
-    "js_diff": {"ar": "فرق التصيير (خام↔مُصيَّر)", "en": "JS render diff (raw↔rendered)"},
-    "custom_extraction": {"ar": "الاستخراج المخصّص", "en": "Custom extraction"},
-}
-
-
-def _label_for(rel: str, lang: str = "ar") -> str:
-    """تسمية معبّرة لملف ناتج حسب مساره النسبي."""
-    name = Path(rel).name
-    stem = Path(name).stem
-    low = name.lower()
-    if rel.startswith("csv/") and stem in CSV_LABELS:
-        return CSV_LABELS[stem][lang]
-    if low.endswith(".json"):
-        return "الأرشيف الكامل (JSON)" if lang == "ar" else "Full audit archive (JSON)"
-    if low.endswith(".xlsx"):
-        return "مصنّف Excel" if lang == "ar" else "Excel workbook"
-    if "_client" in low and low.endswith(".html"):
-        return "تقرير العميل (HTML)" if lang == "ar" else "Client report (HTML)"
-    if "_client" in low and low.endswith(".pdf"):
-        return "تقرير العميل (PDF)" if lang == "ar" else "Client report (PDF)"
-    if "_expert" in low and low.endswith(".html"):
-        return "تقرير الخبير (HTML)" if lang == "ar" else "Expert report (HTML)"
-    if "_expert" in low and low.endswith(".pdf"):
-        return "تقرير الخبير (PDF)" if lang == "ar" else "Expert report (PDF)"
-    if low.endswith(".html"):
-        return "التقرير (HTML)" if lang == "ar" else "Report (HTML)"
-    if low.endswith(".pdf"):
-        return "التقرير (PDF)" if lang == "ar" else "Report (PDF)"
-    if rel.startswith("xml/"):
-        return f"XML — {stem}"
-    if rel.startswith("csv/"):
-        return stem.replace("_", " ")
-    return name
+# v1.12.3 REFACTOR-app-routers: ثوابت + label_for نُقلت إلى webapp/constants.py
+from webapp.constants import (  # noqa: E402,F401
+    CSV_LABELS,
+    EXTRACTION_GROUPS,
+    MAX_AUDIT_JSON_MB,
+    OUTPUT_FORMATS,
+    SECTIONS,
+    SEVERITIES,
+    UA_PRESETS as _UA_PRESETS,
+    label_for as _label_for,
+)
 
 
 @app.get("/health")
@@ -987,18 +670,6 @@ def _probe_token_expired(token_path: Path) -> bool:
         return False
     except Exception:  # noqa: BLE001
         return True  # refresh فشل (غالباً invalid_grant) ⇒ منتهٍ
-
-
-def _atomic_write_text(target: Path, text: str, *, mode: int = 0o600) -> None:
-    """v1.09-B6: كتابة نصّ atomic (temp + os.replace) — يُستعمل لكلّ ملفّات
-    الـtokens كي لا يُتلِفها Ctrl-C أو crash في منتصف الكتابة."""
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    try:
-        os.chmod(tmp, mode)
-    except (OSError, NotImplementedError):
-        pass
-    os.replace(tmp, target)
 
 
 @app.get("/api/google/status")
