@@ -37,6 +37,17 @@ crawl:
     step_down: 0.25
     slow_ms: 3000
 
+  # v1.08: زحف على مرحلتين — Phase 1 يفحص الروابط الأساسيّة (sitemap +
+  # navigation + غيرها) ويُؤجّل الأنماط الضوضائيّة المعروفة (pagination_deep،
+  # /auth/login، تركيبيّات الفلاتر). بعد Phase 1 تظهر لوحة عرض الأعداد + زرّ
+  # Phase 2 لفحص المؤجَّلة.
+  deferred_crawl:
+    enabled: true
+    pagination_max: 3      # ?page=N أكبر من هذا يُؤجَّل
+    filter_max: 1          # تركيبيّات فلاتر أكثر تُؤجَّل
+    max_tracked: 50000     # سقف عدد المؤجَّلة المُسجَّلة
+    # phase2: تُضبط تلقائياً بـ--phase2 CLI flag — لا تعدّلها يدوياً.
+
 javascript:
   enabled: false
   wait_until: "networkidle"
@@ -159,6 +170,14 @@ integrations:
   awt:
     enabled: false
     csv_folder: "./external_data/awt"
+  # v1.04: روابط خلفيّة حيّة (Ahrefs API v3 / Majestic OpenApp) — مدفوع.
+  # المفتاح يُمرَّر عبر BACKLINKS_API_KEY env var (لا يُكتب على القرص).
+  # للحلّ المجاني للموقع الذي تملكه: استعمل awt أعلاه (CSV من Ahrefs Webmaster).
+  backlinks:
+    enabled: false
+    provider: "ahrefs"     # ahrefs | majestic
+    api_key: ""            # يُفضَّل تركه فارغاً واستعمال BACKLINKS_API_KEY env
+    timeout: 30
   # استيراد Lighthouse/PageSpeed JSON محلياً (بلا مفاتيح) — راجع docs/EXTERNAL_TOOLS_GUIDE
   lighthouse:
     enabled: false

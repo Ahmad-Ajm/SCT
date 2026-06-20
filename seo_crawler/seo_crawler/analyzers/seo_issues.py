@@ -371,10 +371,12 @@ def collect_seo_issues(
                 issue_type="Duplicate Titles",
                 description=f"{duplicate_data['duplicate_titles_count']} مجموعة بنفس Title",
                 affected_count=duplicate_data.get("pages_with_duplicate_title", 0),
+                # v1.09-B2: قراءة آمنة لـ`urls` — duplicate row قد لا يحويها (مالكها
+                # غيره أو تشكيلة قديمة)؛ بدل KeyError نمرّ بأمان.
                 affected_urls=[
                     urls
                     for d in duplicate_data.get("duplicate_titles", [])[:5]
-                    for urls in d["urls"]
+                    for urls in (d.get("urls") or [])
                 ],
                 recommendation="اجعل كل Title فريداً",
             )

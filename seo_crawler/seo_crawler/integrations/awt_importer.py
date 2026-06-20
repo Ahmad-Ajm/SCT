@@ -100,7 +100,8 @@ class AWTImporter:
             # محاولة قراءة بعدة encodings (AWT قد يستخدم UTF-8 أو UTF-16)
             for encoding in ["utf-8", "utf-8-sig", "utf-16", "cp1252"]:
                 try:
-                    df = pd.read_csv(file_path, encoding=encoding)
+                    # v1.09-B9: nrows cap لمنع OOM على CSV ضخم خبيث
+                    df = pd.read_csv(file_path, encoding=encoding, nrows=1_000_000)
                     log.info(
                         f"AWT: تم تحميل {dataset_name} - {len(df)} صف من {file_path.name}"
                     )

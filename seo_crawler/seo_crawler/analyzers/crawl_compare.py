@@ -90,7 +90,7 @@ def compare_crawls(old_audit: dict[str, Any], new_audit: dict[str, Any]) -> dict
 
 
 def compare_audit_files(old_path: str, new_path: str) -> dict[str, Any]:
-    """يحمّل ملفَّي تدقيق JSON ويقارنهما."""
-    old = json.loads(Path(old_path).read_text(encoding="utf-8"))
-    new = json.loads(Path(new_path).read_text(encoding="utf-8"))
+    """يحمّل ملفَّي تدقيق JSON ويقارنهما. v1.09-B9: utf-8-sig يتحمّل BOM."""
+    old = json.loads(Path(old_path).read_text(encoding="utf-8-sig"))
+    new = json.loads(Path(new_path).read_text(encoding="utf-8-sig"))
     return compare_crawls(old, new)

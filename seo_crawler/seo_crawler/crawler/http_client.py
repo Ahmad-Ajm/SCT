@@ -281,20 +281,44 @@ class HTTPClient:
         """
         طلب HEAD - يجلب headers فقط بدون body.
         مفيد للتحقق من status codes للروابط الخارجية.
+
+        v1.09-B5: حماية SSRF عبر إعادة التوجيه — `allow_redirects=True` الافتراضي
+        يتبع 3xx Location إلى أيّ مضيف، بما فيه `169.254.169.254` (cloud metadata).
+        نتبع redirects يدوياً ونفحص كلّ hop بـ`is_safe_remote_url`.
         """
         result = HTTPResponse(url=url)
 
+        # v1.09-B5: نُغلق auto-redirect ونديره يدوياً مع فحص أمنيّ على كلّ hop
+        from utils.helpers import is_safe_remote_url
         try:
             start_time = time.time()
-            response = self.session.head(
-                url,
-                timeout=self.timeout,
-                allow_redirects=self.follow_redirects,
-                verify=self.verify_ssl,
-            )
+            current_url = url
+            response = None
+            for _hop in range(6):  # أقصى 5 redirects (نفس قاعدة المتصفّحات)
+                safe, reason = is_safe_remote_url(current_url, False)
+                if not safe:
+                    result.error = f"SSRF-blocked redirect: {reason}"
+                    result.elapsed_ms = (time.time() - start_time) * 1000
+                    return result
+                response = self.session.head(
+                    current_url,
+                    timeout=self.timeout,
+                    allow_redirects=False,  # B5: نديره يدوياً
+                    verify=self.verify_ssl,
+                )
+                if not self.follow_redirects:
+                    break
+                if 300 <= response.status_code < 400 and response.headers.get("Location"):
+                    from urllib.parse import urljoin
+                    current_url = urljoin(current_url, response.headers["Location"])
+                    continue
+                break
+            if response is None:
+                result.error = "no response"
+                return result
             result.elapsed_ms = (time.time() - start_time) * 1000
             result.status_code = response.status_code
-            result.final_url = response.url
+            result.final_url = current_url
             result.headers = dict(response.headers)
             result.content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
             result.is_success = 200 <= response.status_code < 400

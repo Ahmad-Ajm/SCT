@@ -131,7 +131,9 @@ def validate_hreflang(pages: list[Any]) -> dict[str, Any]:
             # 5. التحقق من الصفحات المُشار إليها
             target_page = page_data_map.get(normalized_href)
             if target_page:
-                target_status = _attr(target_page, "status_code", 0)
+                # v1.09-B2: تحويل آمن
+                from analyzers._coerce import status_of
+                target_status = status_of(target_page)
                 target_robots = _attr(target_page, "meta_robots", "") or ""
                 target_x_robots = _attr(target_page, "x_robots_tag", "") or ""
 

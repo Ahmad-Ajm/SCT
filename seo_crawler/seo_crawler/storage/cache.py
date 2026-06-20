@@ -98,10 +98,27 @@ class APICache:
     def _make_key(
         self, api_name: str, request_url: str, params: dict[str, Any]
     ) -> str:
-        """إنشاء مفتاح فريد للـ cache."""
-        # ترتيب params لضمان نفس المفتاح بغض النظر عن الترتيب
+        """إنشاء مفتاح فريد للـ cache.
+
+        v1.09-B7: نمزج identity_tag (api_key أو أيّ هاش بصمة) في المفتاح كي لا
+        يستلم user A استجابة cached بمفتاح user B (مشاركة DB ⇒ leak محتمل).
+        يُستعمَل sha256 على api_key قبل المزج كي لا يكشف الـDB أيّ سلسلة سرّيّة.
+        """
         params_str = json.dumps(params, sort_keys=True, ensure_ascii=False)
-        raw = f"{api_name}|{request_url}|{params_str}"
+        # نُخرج api_key من params (إن كان) ونحوّله إلى هاش-بصمة قصير
+        identity = ""
+        for k in ("key", "api_key", "app_api_key"):
+            if k in (params or {}):
+                identity = hashlib.sha256(str(params[k]).encode("utf-8")).hexdigest()[:16]
+                # نُزيل المفتاح السرّي من string الـparams حتّى لو ما زال موجوداً في
+                # كائن `params` الأصلي (دفاع عميق)
+                params_str = json.dumps(
+                    {kk: vv for kk, vv in params.items() if kk not in (
+                        "key", "api_key", "app_api_key")},
+                    sort_keys=True, ensure_ascii=False,
+                )
+                break
+        raw = f"{api_name}|{identity}|{request_url}|{params_str}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(
@@ -194,8 +211,49 @@ class APICache:
 
                 log.debug(f"Cache SET: {api_name}/{request_url[:60]} (TTL: {ttl/86400:.1f} days)")
 
+                # v1.09-B7: تنفيذ max_size_mb (كان معرَّفاً ومُهمَلاً). نفحص كلّ
+                # 200 set، وعند التجاوز نُنظّف المنتهي ثم نحذف الأقدم.
+                self._set_counter = getattr(self, "_set_counter", 0) + 1
+                if self._set_counter % 200 == 0:
+                    try:
+                        self._enforce_size_cap(conn)
+                    except sqlite3.Error as e:
+                        log.debug(f"cache size cap check failed: {e}")
+
         except (sqlite3.Error, TypeError) as e:
             log.warning(f"خطأ في حفظ cache: {e}")
+
+    def _enforce_size_cap(self, conn) -> None:
+        """v1.09-B7: تنفيذ سقف max_size_mb. عند التجاوز:
+        1) ننظّف المنتهي الصلاحية أوّلاً (رخيص ومفيد).
+        2) إن بقي > max، نحذف 10% من الأقدم.
+        """
+        if not self.max_size_mb or self.max_size_mb <= 0:
+            return
+        try:
+            size_bytes = self.db_path.stat().st_size
+        except OSError:
+            return
+        if size_bytes <= self.max_size_mb * 1024 * 1024:
+            return
+        now = time.time()
+        conn.execute("DELETE FROM api_cache WHERE expires_at < ?", (now,))
+        # إن بقي كبيراً، نحذف 10% من الأقدم
+        try:
+            size_bytes_after = self.db_path.stat().st_size
+        except OSError:
+            return
+        if size_bytes_after > self.max_size_mb * 1024 * 1024:
+            count_row = conn.execute("SELECT COUNT(*) FROM api_cache").fetchone()
+            if count_row and count_row[0]:
+                to_drop = max(1, count_row[0] // 10)
+                conn.execute(
+                    "DELETE FROM api_cache WHERE cache_key IN ("
+                    "SELECT cache_key FROM api_cache ORDER BY cached_at ASC LIMIT ?)",
+                    (to_drop,),
+                )
+        conn.commit()
+        log.info(f"Cache size cap enforced ({self.max_size_mb}MB) — حُذف entries قديمة")
 
     def invalidate(
         self,

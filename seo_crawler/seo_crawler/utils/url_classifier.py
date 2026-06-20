@@ -112,10 +112,15 @@ class UrlClassifier:
                         pass
 
         # (ج) تركيبيات فلاتر — أكثر من filter_max فلتر متزامن
+        # v1.09-B8: قبل هذا التحديث كان `or` و`and` بترتيب precedence خاطئ:
+        #   `k.startswith(...) or k.endswith(...) or k in (...) and len(qs[k])>0`
+        # يُفسَّر كـ `A or B or (C and D)` — فحتّى `filter_brand=` فارغ يُحسب فلتر.
+        # نُعيد الكتابة بأقواس صريحة.
+        _filter_names = ("category", "brand", "tag", "color", "size", "price")
         filter_count = sum(
             1 for k in qs
-            if k.startswith("filter") or k.endswith("[]") or k in ("category", "brand", "tag", "color", "size")
-            and len(qs[k]) > 0
+            if (k.startswith("filter") or k.endswith("[]") or k in _filter_names)
+            and (qs.get(k) and len(qs[k]) > 0)
         )
         if self.filter_max > 0 and filter_count > self.filter_max:
             return (KIND_FILTER_COMBO, True)

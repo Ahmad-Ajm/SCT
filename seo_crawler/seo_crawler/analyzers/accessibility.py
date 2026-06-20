@@ -48,20 +48,22 @@ def load_axe_source(
         url = cdn_url or _DEFAULT_CDN
         try:
             import requests
-            resp = requests.get(url, timeout=30, stream=True)
-            if resp.status_code != 200:
-                log.warning("تعذّر جلب axe-core من CDN (HTTP %s)", resp.status_code)
-                return ""
-            chunks, total = [], 0
-            for ch in resp.iter_content(8192):
-                if not ch:
-                    continue
-                total += len(ch)
-                if total > _MAX_AXE_BYTES:
-                    log.warning("ملف axe-core من CDN يتجاوز الحدّ — تخطّي")
+            # v1.09-B9: استعمل context manager كي يُغلق الـresponse stream
+            # حتّى على نجاح/خطأ — لم يكن يُغلَق في الفرع الناجح ⇒ leak اتصالات.
+            with requests.get(url, timeout=30, stream=True) as resp:
+                if resp.status_code != 200:
+                    log.warning("تعذّر جلب axe-core من CDN (HTTP %s)", resp.status_code)
                     return ""
-                chunks.append(ch)
-            return b"".join(chunks).decode("utf-8", errors="replace")
+                chunks, total = [], 0
+                for ch in resp.iter_content(8192):
+                    if not ch:
+                        continue
+                    total += len(ch)
+                    if total > _MAX_AXE_BYTES:
+                        log.warning("ملف axe-core من CDN يتجاوز الحدّ — تخطّي")
+                        return ""
+                    chunks.append(ch)
+                return b"".join(chunks).decode("utf-8", errors="replace")
         except Exception as e:  # noqa: BLE001
             log.warning("تعذّر جلب axe-core من CDN: %s", e)
     return ""

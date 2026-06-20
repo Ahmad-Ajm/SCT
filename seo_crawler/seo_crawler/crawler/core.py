@@ -333,6 +333,14 @@ class Crawler:
         log.info(f"بدء الزحف: {self.start_url}")
         log.info(f"الدومين: {self.primary_domain}")
         log.info(f"الحد الأقصى: {self.crawl_config['max_pages']} صفحة")
+        # v1.09-B8: ميزات v1.08 (deferred classifier + Phase 2) غير مدعومة في
+        # الزاحف sync — async هو الافتراضي وحيث تُنفَّذ. ننبّه المستخدم بوضوح.
+        if (self.crawl_config.get("deferred_crawl", {}) or {}).get("enabled"):
+            log.warning(
+                "⚠️ deferred_crawl مفعَّل لكنّ الزاحف sync لا يدعمه. الزحفة ستفحص "
+                "كلّ الروابط (بما فيها pagination_deep و auth wrappers). استعمل "
+                "async (الافتراضي) للحصول على ميزات v1.08."
+            )
         log.info("=" * 60)
 
         self.stats.start_time = time.time()

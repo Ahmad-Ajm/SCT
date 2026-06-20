@@ -38,9 +38,12 @@ def detect_thin_content(
     critical_thin = []
     low_text_ratio = []
 
+    from analyzers._coerce import status_of  # v1.09-B2
+
     for page in pages:
-        # تخطّي الصفحات الفاشلة
-        if _get(page, "crawl_error") or _get(page, "status_code", 0) != 200:
+        # تخطّي الصفحات الفاشلة. v1.09-B2: status_code قد يكون string "200" من DB
+        # — مقارنة != 200 ستفلت كلّ شيء (نتائج فارغة بلا خطأ). نستعمل تحويلاً آمناً.
+        if _get(page, "crawl_error") or status_of(page) != 200:
             continue
 
         # تخطّي non-HTML

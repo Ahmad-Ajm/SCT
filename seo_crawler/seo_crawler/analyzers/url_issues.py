@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from typing import Any
+
+from analyzers._coerce import status_of  # v1.09-B2
 from urllib.parse import parse_qsl, urlparse
 
 
@@ -51,7 +53,7 @@ def analyze_url_issues(
 
     for page in pages:
         url = _get(page, "url", "")
-        status_code = int(_get(page, "status_code", 0) or 0)
+        status_code = status_of(page)
         if not url or status_code >= 400:
             continue
 

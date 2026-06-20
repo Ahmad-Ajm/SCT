@@ -342,16 +342,42 @@ async def run_crawl_async(
     return crawler
 
 
+def _find_phase2_deferred_csv(output_dir: str) -> Path | None:
+    """v1.09-B1: يبحث عن deferred_urls.csv من Phase 1 بطريقة تتحمّل
+    `timestamped_folder=true` (افتراضي): إن لم يوجد في output_dir الحالي، نبحث
+    في أحدث مجلّد شقيق (نفس parent) فيه `csv/deferred_urls.csv`."""
+    out = Path(output_dir)
+    direct = out / "csv" / "deferred_urls.csv"
+    if direct.exists():
+        return direct
+    parent = out.parent
+    if not parent.exists():
+        return None
+    # نُرتّب بحسب mtime تنازلياً ونعود إلى أحدث شقيق فيه deferred CSV
+    siblings = [d for d in parent.iterdir() if d.is_dir() and d != out]
+    siblings.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    for sib in siblings:
+        cand = sib / "csv" / "deferred_urls.csv"
+        if cand.exists():
+            log.info(f"Phase 2: تمّ العثور على deferred_urls.csv في شقيق: {cand}")
+            return cand
+    return None
+
+
 def _inject_phase2_seeds(crawler: Any, config: dict[str, Any]) -> None:
     """v1.08: قبل بدء الزحف في وضع Phase 2، نقرأ deferred_urls.csv من المهمّة
     السابقة ونضيفها كبذور إضافيّة. classifier.phase2_mode=True يعني أنّها تُعامَل
-    عاديّة بلا تأجيل."""
+    عاديّة بلا تأجيل.
+
+    v1.09-B1: يدعم timestamped_folder=true عبر البحث في أشقّاء الـoutput_dir
+    (كان مكسوراً افتراضياً قبل هذا الإصلاح)."""
     output_dir = config.get("output", {}).get("output_dir", "")
     if not output_dir:
         return
-    csv_path = Path(output_dir) / "csv" / "deferred_urls.csv"
-    if not csv_path.exists():
-        log.warning(f"Phase 2: deferred_urls.csv غير موجود في {csv_path}")
+    csv_path = _find_phase2_deferred_csv(output_dir)
+    if not csv_path:
+        log.warning(f"Phase 2: deferred_urls.csv غير موجود في {output_dir} ولا في أيّ "
+                    f"مجلّد شقيق — Phase 2 لن تُحقَن بذور.")
         return
     import csv as _csv
     try:
@@ -360,13 +386,23 @@ def _inject_phase2_seeds(crawler: Any, config: dict[str, Any]) -> None:
     except OSError as e:
         log.warning(f"Phase 2: تعذّر قراءة deferred_urls.csv: {e}")
         return
+    # v1.09-B5: فحص SSRF لكلّ URL مقروء من CSV (المستخدم قد يحرّره)
+    from utils.helpers import is_safe_remote_url
+    allow_private = bool(config.get("crawl", {}).get("allow_private_hosts", False))
     # نُضيفها إلى sitemap_seeds (تُسحب إلى الطابور كبذور مؤجَّلة عاديّة)
     added = 0
+    rejected = 0
     for u in urls:
-        if u and u not in crawler.sitemap_seeds:
-            crawler.sitemap_seeds.append(u)
-            added += 1
-    log.info(f"Phase 2: حُقن {added} رابط مؤجَّل سابقاً كبذور للزحف")
+        if not u or u in crawler.sitemap_seeds:
+            continue
+        safe, _reason = is_safe_remote_url(u, allow_private)
+        if not safe:
+            rejected += 1
+            continue
+        crawler.sitemap_seeds.append(u)
+        added += 1
+    log.info(f"Phase 2: حُقن {added} رابط مؤجَّل سابقاً كبذور للزحف"
+             + (f" (رفض {rejected} لعدم الأمان)" if rejected else ""))
 
 
 # ============================================================

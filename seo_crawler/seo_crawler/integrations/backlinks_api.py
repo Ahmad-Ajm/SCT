@@ -106,7 +106,8 @@ class AhrefsClient(_BaseBacklinks):
                     for it in items[:50]
                 ]
         except Exception as e:  # noqa: BLE001
-            log.debug(f"Ahrefs refdomains: {e}")
+            # v1.09-B9: warning بدل debug — العامل يحتاج إشارة عند فشل refdomains
+            log.warning(f"Ahrefs refdomains failed: {e}")
 
         # توزيع نصوص الروابط
         try:
@@ -123,7 +124,7 @@ class AhrefsClient(_BaseBacklinks):
                     for it in items[:30]
                 ]
         except Exception as e:  # noqa: BLE001
-            log.debug(f"Ahrefs anchors: {e}")
+            log.warning(f"Ahrefs anchors failed: {e}")
 
         return out
 
@@ -149,6 +150,9 @@ class MajesticClient(_BaseBacklinks):
             return {"error": "missing_api_key"}
 
         out: dict[str, Any] = {"provider": "majestic", "site_url": site_url}
+        # v1.09-B6: Majestic API لا يدعم Authorization header — المفتاح يبقى في
+        # query param بحكم القيد. نُؤكّد عدم تسجيل `r.url` أو `r.request.url` في أيّ
+        # log line: كل رسائل الفشل تستعمل `r.status_code` ونصّاً عاماً فقط.
         # 1) Overview
         try:
             r = requests.get(self.BASE, params={
@@ -208,7 +212,7 @@ class MajesticClient(_BaseBacklinks):
                     key=lambda x: (-x["trust_flow_max"], -x["backlinks"]),
                 )[:50]
         except Exception as e:  # noqa: BLE001
-            log.debug(f"Majestic topbacklinks: {e}")
+            log.warning(f"Majestic topbacklinks failed: {e}")
 
         return out
 

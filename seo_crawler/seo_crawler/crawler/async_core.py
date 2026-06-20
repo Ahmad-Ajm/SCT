@@ -428,7 +428,9 @@ class AsyncCrawler:
                 self.start_url not in self.queued_urls
                 and self.start_url not in self.visited
             ):
-                await self._enqueue(self.start_url, 0)
+                # v1.09-B1: start_url يجب أن يُزحَف دائماً حتّى لو طابق نمطاً
+                # مؤجَّلاً (مثل موقع رئيسيّته `?page=N` غير معتاد).
+                await self._enqueue(self.start_url, 0, bypass_classifier=True)
 
             # في وضع homepage لا نقرأ sitemap كبذور إطلاقاً،
             # لكننا ما زلنا نحلّله لأجل sitemap_diff فقط.
@@ -458,7 +460,9 @@ class AsyncCrawler:
                             and normalized not in self.queued_urls
                             and not self._should_skip_url(normalized)
                         ):
-                            await self._enqueue(normalized, 0)
+                            # v1.09-B1: روابط sitemap أساسيّة بحكم التعريف ⇒ تجاوز
+                            # classifier (sitemap هو مصدر «الحقيقة» للصفحات الفعليّة).
+                            await self._enqueue(normalized, 0, bypass_classifier=True)
                             sitemap_flood += 1
                     elif self.seed_strategy == "hybrid":
                         # بذور مؤجَّلة: تُسحب بعد نضوب الروابط المكتشفة
@@ -487,7 +491,10 @@ class AsyncCrawler:
             )
 
     async def _refill_from_sitemap(self) -> int:
-        """سحب دفعة من بذور sitemap إلى الطابور عند نضوب الروابط المكتشفة."""
+        """سحب دفعة من بذور sitemap إلى الطابور عند نضوب الروابط المكتشفة.
+
+        v1.09-B1: bypass_classifier=True — sitemap_seeds مصدرها sitemap (= أساسي)،
+        كذلك v1.08 Phase 2 يحقن `deferred_urls` السابقة في sitemap_seeds (يجب فحصها)."""
         added = 0
         async with self._seed_lock:
             while self._seed_index < len(self.sitemap_seeds):
@@ -499,7 +506,7 @@ class AsyncCrawler:
                     or self._should_skip_url(url)
                 ):
                     continue
-                await self._enqueue(url, 0)
+                await self._enqueue(url, 0, bypass_classifier=True)
                 added += 1
                 if added >= self.sitemap_batch:
                     break
@@ -507,20 +514,38 @@ class AsyncCrawler:
             increment("crawler.sitemap_refill", added)
         return added
 
-    async def _enqueue(self, url: str, depth: int, source_url: str = "") -> None:
+    async def _enqueue(
+        self, url: str, depth: int, source_url: str = "",
+        bypass_classifier: bool = False,
+    ) -> None:
         """إضافة URL للطابور مع تتبّع العمق. v1.08: قبل الإضافة، يُستشار المصنّف:
         إن كان الرابط من نوع «مؤجَّل» يُحفَظ في `self.deferred` بدل الطابور (للتقرير
-        + Phase 2). يُعطَّل التأجيل في phase2_mode أو إن deferred_enabled=False."""
-        if self.deferred_enabled and not self.phase2_mode:
+        + Phase 2). يُعطَّل التأجيل في phase2_mode أو إن deferred_enabled=False.
+
+        v1.09-B1: `bypass_classifier=True` يفرض تجاوز classifier — يُستعمل لـ:
+        - start_url (يجب أن يُزحَف دائماً حتّى لو طابق نمطاً مؤجَّلاً)
+        - URLs المُستأنَفة من DB (سبق أن نوينا زحفها — لا تُؤجَّل صامتاً)
+        - sitemap-flood (sitemap URLs أساسيّة بحكم التعريف)
+        """
+        if self.deferred_enabled and not self.phase2_mode and not bypass_classifier:
             kind, is_deferred = self.classifier.classify(url)
             if is_deferred:
-                if (url not in self.deferred
-                        and len(self.deferred) < self._deferred_cap):
-                    self.deferred[url] = {
-                        "kind": kind,
-                        "source_url": source_url or "",
-                        "depth": str(depth),
-                    }
+                if url in self.deferred:
+                    return
+                if len(self.deferred) >= self._deferred_cap:
+                    # v1.09-B1: لا نسقط بصمت — نسجّل تحذيراً واحداً عند بلوغ الحدّ
+                    if not getattr(self, "_deferred_cap_warned", False):
+                        log.warning(
+                            f"⚠️ deferred URL cap ({self._deferred_cap}) reached — "
+                            f"إضافيات لن تُسجَّل. ارفع crawl.deferred_crawl.max_tracked إن لزم.")
+                        self._deferred_cap_warned = True
+                    increment("crawler.deferred.cap_dropped")
+                    return
+                self.deferred[url] = {
+                    "kind": kind,
+                    "source_url": source_url or "",
+                    "depth": str(depth),
+                }
                 return
         await self.queue.put((url, depth))
         self.queued_urls.add(url)
@@ -543,7 +568,9 @@ class AsyncCrawler:
         restored = 0
         for url, depth in queued:
             if url not in self.visited and url not in self.queued_urls:
-                await self._enqueue(url, depth)
+                # v1.09-B1: URLs المُستأنَفة من DB سبق أن نوينا زحفها — لا نسمح
+                # للـclassifier بإلقائها في self.deferred صامتاً (كان bug خطير قبل v1.09).
+                await self._enqueue(url, depth, bypass_classifier=True)
                 restored += 1
         log.info(f"♻️  استئناف: {len(visited)} مزحوف، {restored} في الانتظار")
 

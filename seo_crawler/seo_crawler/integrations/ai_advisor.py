@@ -262,9 +262,21 @@ def build_audit_summary_for_ai(
             })
     top_issue_types.sort(key=lambda x: -int(x.get("affected_count", 0) or 0))
 
+    # v1.09-B6: strip query string من URLs قبل إرسالها للـLLM طرف ثالث.
+    # `?utm_source=…&email=…&session=…` لا يجب أن يخرج للـAPI الخارجي.
+    from urllib.parse import urlparse, urlunparse
+    def _strip_qs(u: str) -> str:
+        if not u:
+            return ""
+        try:
+            p = urlparse(u)
+            return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
+        except (ValueError, TypeError):
+            return u
+
     opps = (analysis.get("opportunities", {}) or {}).get("opportunities", []) or []
     top_opps = [{
-        "url": o.get("url", ""),
+        "url": _strip_qs(o.get("url", "")),
         "priority_score": o.get("priority_score", 0),
         "technical_issues": o.get("technical_issues", ""),
         "clicks": o.get("clicks", 0),

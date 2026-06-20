@@ -129,11 +129,16 @@ def load_google_credentials(
                 flow = InstalledAppFlow.from_client_secrets_file(str(p), scopes)
                 creds = flow.run_local_server(port=0)
             try:
-                tp.write_text(creds.to_json(), encoding="utf-8")
+                # v1.09-B6: كتابة atomic — write_text قد يتلف الـtoken عند Ctrl-C
+                # في منتصف الكتابة فيُجبر المستخدم على إعادة التفويض. نكتب إلى
+                # temp ثم os.replace (atomic على معظم نظم الملفّات).
+                tmp = tp.with_suffix(tp.suffix + ".tmp")
+                tmp.write_text(creds.to_json(), encoding="utf-8")
                 try:
-                    os.chmod(tp, 0o600)
+                    os.chmod(tmp, 0o600)
                 except (OSError, NotImplementedError):
                     pass
+                os.replace(tmp, tp)
             except OSError as e:
                 log.warning(f"تعذّر حفظ token الاعتماد: {e}")
         return creds

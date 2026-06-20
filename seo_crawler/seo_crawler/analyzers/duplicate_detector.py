@@ -37,9 +37,11 @@ def detect_duplicates(pages: list[PageData]) -> dict[str, Any]:
     h1_groups: dict[str, list[str]] = defaultdict(list)
     content_groups: dict[str, list[str]] = defaultdict(list)
 
+    from analyzers._coerce import status_of  # v1.09-B2
+
     for page in pages:
-        # تخطّي الصفحات الفاشلة
-        if _get(page, "crawl_error") or _get(page, "status_code", 0) != 200:
+        # تخطّي الصفحات الفاشلة. v1.09-B2: مقارنة آمنة مع status كـstring.
+        if _get(page, "crawl_error") or status_of(page) != 200:
             continue
 
         # تخطّي الصفحات NoIndex

@@ -65,15 +65,10 @@ class StateManager:
             extra_meta: بيانات إضافية (اختياري)
         """
         try:
-            # حفظ visited (set → list للـ JSON)
-            with open(self.visited_file, "w", encoding="utf-8") as f:
-                json.dump(list(visited), f, ensure_ascii=False, indent=2)
-
-            # حفظ queue
-            with open(self.queue_file, "w", encoding="utf-8") as f:
-                json.dump(queue, f, ensure_ascii=False, indent=2)
-
-            # حفظ meta
+            # v1.09-B7: كتابة atomic — Ctrl-C في منتصف الكتابة لا يجب أن يُتلف
+            # ملفّ JSON ⇒ يُسقط الـloader التالي ويفقد المستخدم كل الحالة.
+            self._atomic_json_write(self.visited_file, list(visited))
+            self._atomic_json_write(self.queue_file, queue)
             meta = {
                 "last_saved": time.time(),
                 "last_saved_readable": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -82,14 +77,28 @@ class StateManager:
             }
             if extra_meta:
                 meta.update(extra_meta)
-
-            with open(self.meta_file, "w", encoding="utf-8") as f:
-                json.dump(meta, f, ensure_ascii=False, indent=2)
-
+            self._atomic_json_write(self.meta_file, meta)
             log.debug(f"تم حفظ الحالة: {len(visited)} مزحوف، {len(queue)} في الانتظار")
 
         except Exception as e:
             log.error(f"فشل حفظ الحالة: {e}")
+
+    @staticmethod
+    def _atomic_json_write(target, data) -> None:
+        """v1.09-B7: temp + os.replace — يضمن إمّا الملفّ القديم سليم أو الجديد سليم،
+        ولا يحدث أبداً نصف JSON مكسور."""
+        import os
+        from pathlib import Path as _P
+        target = _P(target)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except (OSError, AttributeError):
+                pass
+        os.replace(tmp, target)
 
     def load(self) -> tuple[set[str], list[str]]:
         """

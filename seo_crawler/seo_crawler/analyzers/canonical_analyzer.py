@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+from analyzers._coerce import status_of  # v1.09-B2
 from utils.helpers import normalize_url
 
 
@@ -33,7 +34,7 @@ def analyze_canonicals(
         url = normalize_url(_get(page, "url", ""))
         if not url:
             continue
-        status_code = int(_get(page, "status_code", 0) or 0)
+        status_code = status_of(page)
         is_indexable = bool(_get(page, "is_indexable", False))
         canonical = normalize_url(_get(page, "canonical", "") or "") if _get(page, "canonical", "") else ""
 
@@ -54,7 +55,7 @@ def analyze_canonicals(
         if target is None:
             continue
 
-        target_status = int(_get(target, "status_code", 0) or 0)
+        target_status = status_of(target)
         target_indexable = bool(_get(target, "is_indexable", False))
         target_canonical = normalize_url(_get(target, "canonical", "") or "") if _get(target, "canonical", "") else ""
 

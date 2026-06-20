@@ -13,6 +13,7 @@ analyzers/broken_links.py
 from collections import defaultdict
 from typing import Any
 
+from analyzers._coerce import status_of  # v1.09-B2
 from crawler.core import PageData
 from utils.helpers import normalize_url
 
@@ -42,7 +43,7 @@ def detect_broken_links(
             "title": _get(page, "title", "") or "",
         }
         for page in pages
-        if 400 <= int(_get(page, "status_code", 0) or 0) < 500
+        if 400 <= status_of(page) < 500
     ]
 
     # === صفحات 5xx ===
@@ -54,7 +55,7 @@ def detect_broken_links(
             "title": _get(page, "title", "") or "",
         }
         for page in pages
-        if 500 <= int(_get(page, "status_code", 0) or 0) < 600
+        if 500 <= status_of(page) < 600
     ]
 
     # === فهرسة الروابط حسب الوجهة مرة واحدة (يتفادى O(n²) وعدم تطابق التطبيع) ===
@@ -67,7 +68,7 @@ def detect_broken_links(
     # === صفحات 404 لها inlinks (الأخطر!) ===
     pages_404_with_inlinks = []
     for page in pages:
-        if int(_get(page, "status_code", 0) or 0) != 404:
+        if status_of(page) != 404:
             continue
 
         page_url = _get(page, "url", "")

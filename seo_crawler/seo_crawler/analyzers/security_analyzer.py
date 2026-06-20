@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from analyzers._coerce import status_of  # v1.09-B2
+
 
 def _get(item: Any, key: str, default: Any = None) -> Any:
     if isinstance(item, dict):
@@ -49,7 +51,7 @@ def analyze_security(
     pages_checked = 0
 
     for page in pages:
-        status = int(_get(page, "status_code", 0) or 0)
+        status = status_of(page)
         if status != 200:
             continue
         url = _get(page, "url", "")

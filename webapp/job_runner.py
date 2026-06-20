@@ -14,6 +14,7 @@ webapp/job_runner.py
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import signal
@@ -22,6 +23,8 @@ import sys
 import threading
 import uuid
 from datetime import datetime
+
+log = logging.getLogger("sct.job_runner")
 from pathlib import Path
 from typing import Any, Optional
 
@@ -256,9 +259,24 @@ class JobRunner:
         # أسرار التكاملات تُمرَّر عبر البيئة فقط (ليست في ملف الإعداد على القرص)
         env.update(self._secret_env)
 
+        # v1.09-B4: حماية من argv injection — `mode` و`url` يأتيان من الـform.
+        # URL يبدأ بـ`--` يصبح CLI flag على main.py؛ mode غير قياسي يفسد الإخراج.
+        if mode not in ("audit", "competitor", "compare"):
+            mode = "audit"
         args = [sys.executable, str(MAIN_PY), "--config", str(cfg_path), "--mode", mode]
-        if overrides.get("url"):
-            args += ["--url", overrides["url"]]
+        raw_url = overrides.get("url") or ""
+        if raw_url:
+            from urllib.parse import urlparse
+            try:
+                _scheme = (urlparse(raw_url).scheme or "").lower()
+            except (ValueError, TypeError):
+                _scheme = ""
+            if _scheme in ("http", "https") and not raw_url.startswith("-"):
+                # نستعمل صيغة `--url=value` (argv عنصر واحد) — تمنع injection حتّى
+                # لو وصلت قيمة غير متوقّعة كـ`--malicious` بحيلة أخرى لاحقاً.
+                args.append(f"--url={raw_url}")
+            else:
+                log.warning(f"تجاهل url غير صالح أو يبدأ بشرطة: {raw_url!r}")
         if overrides.get("no_resume"):
             args.append("--no-resume")
         if overrides.get("skip_external"):
@@ -295,21 +313,33 @@ class JobRunner:
         """
         if not _valid_job_id(job_id):
             return {"ok": False, "error": "invalid job_id"}
+        # v1.09-B9: نمسك الـlock طوال عمليّة الفحص-والإطلاق. سابقاً كان يُحرَّر
+        # بعد الفحص قبل subprocess.Popen ⇒ طلبان متوازيان يمرّان كلاهما.
         with self._lock:
             self._sweep_finished()
             if self._procs:
                 return {"ok": False, "error": "active_job",
                         "active_job": next(iter(self._procs), None)}
+            # نضع placeholder سريع لمنع طلب موازٍ ثانٍ من المرور (سيُستبدل ببروسس
+            # حقيقي بعد قليل أسفل).
+            self._procs[job_id] = None  # type: ignore[assignment]
+        # v1.09-B9: إن فشلنا في أيّ pre-check، نُحرّر الـplaceholder من _procs
+        # كي لا يبقى job_id «نشطاً» وهميّاً يمنع المهام المستقبليّة.
+        def _cleanup_and_return(err: str) -> dict[str, Any]:
+            with self._lock:
+                self._procs.pop(job_id, None)
+            return {"ok": False, "error": err}
+
         job_dir = JOBS_DIR / job_id
         if not job_dir.exists():
-            return {"ok": False, "error": "job_not_found"}
+            return _cleanup_and_return("job_not_found")
         cfg_path = job_dir / "config.yaml"
         if not cfg_path.exists():
-            return {"ok": False, "error": "config_missing"}
+            return _cleanup_and_return("config_missing")
         # تحقّق من deferred_urls.csv قبل الإطلاق (يوفّر فشلاً سريعاً وواضحاً)
         deferred_csv = job_dir / "output" / "csv" / "deferred_urls.csv"
         if not deferred_csv.exists():
-            return {"ok": False, "error": "no_deferred_urls"}
+            return _cleanup_and_return("no_deferred_urls")
 
         meta = self._read_meta(job_dir)
         meta["status"] = "running"

@@ -42,8 +42,19 @@ class LighthouseImporter:
         log.info(f"تم استيراد {len(rows)} تقرير Lighthouse من {self.folder}")
         return rows
 
+    # v1.09-B4: سقف حجم لمنع DoS عبر ملفّات Lighthouse JSON ضخمة (مستخدم يضع
+    # GB-sized ملفّاً → OOM). تقارير Lighthouse الحقيقيّة <2MB عادةً.
+    _MAX_LIGHTHOUSE_MB = 100
+
     def _parse_one(self, path: Path) -> dict[str, Any] | None:
         try:
+            size_mb = path.stat().st_size / (1024 * 1024)
+            if size_mb > self._MAX_LIGHTHOUSE_MB:
+                log.warning(
+                    f"تخطّي {path.name}: حجمه {size_mb:.0f}MB يتجاوز السقف "
+                    f"({self._MAX_LIGHTHOUSE_MB}MB)"
+                )
+                return None
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError) as e:

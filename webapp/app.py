@@ -45,6 +45,34 @@ app = FastAPI(title="SCT — Simple Crawler Tool")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
+
+# v1.09-B3: حماية CSRF — على أيّ POST، إن وُجد `Origin` ولم يُطابق مضيف الـapp،
+# نرفض الطلب. هذا يحمي من صفحة خبيثة في متصفّحك تستطيع POST إلى /api/start أو
+# /api/jobs/.../delete أو غيرها من endpoints تغيّر الحالة. localhost استثناء
+# (CLI/Cookie pasted URL لا يُرسل Origin → نسمح بها لأنّها ليست cross-origin).
+@app.middleware("http")
+async def _csrf_origin_guard(request, call_next):
+    if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
+        return await call_next(request)
+    origin = request.headers.get("origin") or ""
+    if not origin:
+        # cURL / fetch from localhost CLI لا يُرسل Origin — نسمح بها
+        return await call_next(request)
+    # نسمح فقط بـlocalhost (سواء بأيّ منفذ)
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(origin).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        host = ""
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return await call_next(request)
+    return JSONResponse(
+        {"error": "Cross-origin POST blocked (CSRF protection). "
+                  "Open SCT via http://127.0.0.1:8000 in the same tab."},
+        status_code=403,
+    )
+
+
 runner = JobRunner()
 
 # حالات الانتهاء (لإغلاق بثّ SSE)
@@ -538,6 +566,11 @@ def _safe_under_jobs(path: str) -> Path | None:
 
 @app.get("/api/jobs/{job_id}/download/{kind}")
 async def download(job_id: str, kind: str):
+    # v1.09-B4: حماية path traversal — `job_id` يدخل tempfile prefix أدناه قبل أيّ
+    # تحقّق آخر؛ بدون هذا، `..\foo` ينشئ ملفّاً خارج tempdir على Windows.
+    from webapp.job_runner import _valid_job_id
+    if not _valid_job_id(job_id):
+        return JSONResponse({"error": "invalid job_id"}, status_code=400)
     # v1.04: kind=xml يجمع كلّ ملفّات مجلّد xml/ في ZIP واحد لأنّه عدّة ملفّات لا ملفّ واحد
     if kind == "xml":
         out = _job_output_dir(job_id)
@@ -740,11 +773,24 @@ def _probe_token_expired(token_path: Path) -> bool:
         return True
     try:
         creds.refresh(Request())
-        # نُعيد كتابة الـtoken المُحدَّث على القرص (refresh ينتج access_token جديداً)
-        token_path.write_text(creds.to_json(), encoding="utf-8")
+        # v1.09-B6: كتابة atomic — refresh ينتج access_token جديد، ولا نريد
+        # crash منتصف الكتابة أن يُتلف الـtoken بأكمله.
+        _atomic_write_text(token_path, creds.to_json())
         return False
     except Exception:  # noqa: BLE001
         return True  # refresh فشل (غالباً invalid_grant) ⇒ منتهٍ
+
+
+def _atomic_write_text(target: Path, text: str, *, mode: int = 0o600) -> None:
+    """v1.09-B6: كتابة نصّ atomic (temp + os.replace) — يُستعمل لكلّ ملفّات
+    الـtokens كي لا يُتلِفها Ctrl-C أو crash في منتصف الكتابة."""
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        os.chmod(tmp, mode)
+    except (OSError, NotImplementedError):
+        pass
+    os.replace(tmp, target)
 
 
 @app.get("/api/google/status")
@@ -822,13 +868,9 @@ async def google_authorize():
         from google_auth_oauthlib.flow import InstalledAppFlow
         flow = InstalledAppFlow.from_client_secrets_file(str(cs), _GOOGLE_SCOPES)
         creds = flow.run_local_server(port=0)  # يفتح المتصفح ويستقبل callback
+        # v1.09-B6: كتابة atomic لكلا الـtokens
         for name in ("gsc_token.json", "ga4_token.json"):
-            out = gd / name
-            out.write_text(creds.to_json(), encoding="utf-8")
-            try:
-                os.chmod(out, 0o600)
-            except (OSError, NotImplementedError):
-                pass
+            _atomic_write_text(gd / name, creds.to_json())
         return True
 
     try:
@@ -912,14 +954,10 @@ _PASTE_REDIRECT = "http://127.0.0.1:1/"  # لا نستمع — المتصفّح 
 
 
 def _save_google_tokens(gd: Path, creds: Any) -> None:
-    """يحفظ token موحّداً يغطّي GSC + GA4 (نفس موافقة /authorize)."""
+    """يحفظ token موحّداً يغطّي GSC + GA4 (نفس موافقة /authorize).
+    v1.09-B6: كتابة atomic (temp + os.replace) — crash لا يُتلف الـtoken."""
     for name in ("gsc_token.json", "ga4_token.json"):
-        out = gd / name
-        out.write_text(creds.to_json(), encoding="utf-8")
-        try:
-            os.chmod(out, 0o600)
-        except (OSError, NotImplementedError):
-            pass
+        _atomic_write_text(gd / name, creds.to_json())
 
 
 def _extract_oauth_code(pasted: str) -> str:
@@ -1523,6 +1561,15 @@ async def jobs_log_board(job_id: str, file: UploadFile = File(...), bot_only: in
     json_path = (meta.get("result") or {}).get("json")
     if not json_path or not Path(json_path).exists():
         return JSONResponse({"error": "no audit json for this job"}, status_code=404)
+
+    # v1.09-B4: حماية ذاكرة — قبل قراءة audit JSON نتحقّق من الحجم. كان مفقوداً
+    # في هذا الـendpoint فقط (الباقي يفحص). 1.7GB JSON يُسقط الخادم بـOOM.
+    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
+    if size_mb > MAX_AUDIT_JSON_MB:
+        return JSONResponse({
+            "error": f"audit JSON too large ({size_mb:.0f} MB) — re-run the crawl "
+                     f"with output.json_full=false to keep it light",
+        }, status_code=413)
 
     raw = await file.read()
     if len(raw) > _MAX_LOG_UPLOAD_MB * 1024 * 1024:

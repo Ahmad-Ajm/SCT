@@ -111,9 +111,10 @@ def analyze_redirects(
         if has_loop:
             redirect_loops.append(chain_entry)
 
-        # 302 بدلاً من 301
+        # 302 بدلاً من 301. v1.09-B2: status_code قد يكون "302" string من DB
+        from analyzers._coerce import int_or_zero
         for hop in chain_sorted:
-            if hop.get("status_code") == 302:
+            if int_or_zero(hop.get("status_code")) == 302:
                 temporary_redirects.append(
                     {
                         "from": hop.get("from_url", ""),

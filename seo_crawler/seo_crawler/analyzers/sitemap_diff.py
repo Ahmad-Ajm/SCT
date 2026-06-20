@@ -79,7 +79,9 @@ def diff_sitemap_vs_crawl(
                 return obj.get(name, default)
             return getattr(obj, name, default)
 
-        status = attr(page, "status_code", 0)
+        # v1.09-B2: تحويل آمن — DB rows قد تخزّن status كـstring أو None
+        from analyzers._coerce import status_of
+        status = status_of(page)
         is_indexable = attr(page, "is_indexable", True)
         is_redirect = attr(page, "is_redirect", False)
         canonical = attr(page, "canonical", "")
@@ -132,7 +134,9 @@ def diff_sitemap_vs_crawl(
                 return obj.get(name, default)
             return getattr(obj, name, default)
 
-        status = attr(page, "status_code", 0)
+        # v1.09-B2: تحويل آمن — DB rows قد تخزّن status كـstring أو None
+        from analyzers._coerce import status_of
+        status = status_of(page)
         is_indexable = attr(page, "is_indexable", True)
         depth = attr(page, "depth", 99)
 

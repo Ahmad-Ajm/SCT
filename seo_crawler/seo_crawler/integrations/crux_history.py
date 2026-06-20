@@ -78,8 +78,12 @@ class CrUXHistoryClient:
         if form_factor:
             body["formFactor"] = form_factor  # PHONE / DESKTOP / TABLET
         try:
+            # v1.09-B6: المفتاح في `X-goog-api-key` header (وليس في URL query)
+            # كي لا يُسجَّل في proxies/middleware/server logs.
             resp = requests.post(
-                _ENDPOINT, params={"key": self.api_key}, json=body, timeout=self.timeout
+                _ENDPOINT,
+                headers={"X-goog-api-key": self.api_key, "Content-Type": "application/json"},
+                json=body, timeout=self.timeout,
             )
             if resp.status_code != 200:
                 try:

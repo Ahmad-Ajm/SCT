@@ -51,6 +51,20 @@ def detect_bot(user_agent: str, bots: Optional[dict[str, str]] = None) -> str:
     return ""
 
 
+def _ts_newer(a: str, b: str) -> bool:
+    """v1.09-B9: مقارنة timestamps بنسق CLF بشكل صحيح (لا lex)."""
+    if not a:
+        return False
+    if not b:
+        return True
+    from datetime import datetime
+    fmt = "%d/%b/%Y:%H:%M:%S"
+    try:
+        return datetime.strptime(a[:20], fmt) > datetime.strptime(b[:20], fmt)
+    except (ValueError, IndexError):
+        return a > b  # احتياط
+
+
 def parse_log_line(line: str, bots: Optional[dict[str, str]] = None) -> Optional[dict[str, Any]]:
     """يُحلّل سطر سجلّ واحد (CLF/Combined). يعيد None لو لم يتطابق."""
     if not line or not line.strip():
@@ -128,8 +142,12 @@ def analyze_log(
             }
             per_url[key] = rec
         rec["hits"] += 1
-        if row["ts"] > rec["last_seen"]:
-            rec["last_seen"] = row["ts"]
+        # v1.09-B9: مقارنة timestamps بنسق CLF (`dd/Mon/YYYY:HH:MM:SS`) المقارنة
+        # المعجميّة (lex) خاطئة عبر حدود السنة/الشهر. نُحوّل إلى datetime للمقارنة
+        # ثمّ نخزّن النصّ الأصلي.
+        ts = row.get("ts") or ""
+        if _ts_newer(ts, rec["last_seen"]):
+            rec["last_seen"] = ts
         if row["bot"]:
             rec["bots"][row["bot"]] += 1
         rec["statuses"][row["status"]] += 1

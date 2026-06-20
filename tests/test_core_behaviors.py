@@ -1305,5 +1305,110 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(deferred_paths), 1, "auth wrapper should be deferred")
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# v1.09-B10: اختبارات لميزات v1.04 → v1.08 التي كانت بلا تغطية
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class V109BatchTests(unittest.TestCase):
+    """اختبارات تغطّي backlinks / classifier / probe_token / cache identity / deferred."""
+
+    def test_url_classifier_branches(self):
+        """التصنيف الصحيح لكلّ kind من الأنماط الـ5."""
+        from utils.url_classifier import (
+            UrlClassifier, KIND_SITEMAP, KIND_NAVIGATION,
+            KIND_PAGINATION_DEEP, KIND_REDIRECT_WRAPPER, KIND_FILTER_COMBO, KIND_OTHER,
+        )
+        sm = {"https://x.com/products/a"}
+        nav = {"https://x.com/categories"}
+        c = UrlClassifier(sitemap_urls=sm, navigation_urls=nav,
+                          pagination_max=3, filter_max=1)
+        cases = [
+            ("https://x.com/products/a", KIND_SITEMAP, False),
+            ("https://x.com/categories", KIND_NAVIGATION, False),
+            ("https://x.com/c?page=4", KIND_PAGINATION_DEEP, True),
+            ("https://x.com/c?page=3", KIND_OTHER, False),  # داخل الحدّ
+            ("https://x.com/auth/login?redirect_to=/x", KIND_REDIRECT_WRAPPER, True),
+            ("https://x.com/c?brand=a&color=b&size=c", KIND_FILTER_COMBO, True),
+            ("https://x.com/random/page", KIND_OTHER, False),
+        ]
+        for url, exp_kind, exp_deferred in cases:
+            k, d = c.classify(url)
+            self.assertEqual(
+                (k, d), (exp_kind, exp_deferred),
+                f"misclassified {url}: got ({k}, {d}), expected ({exp_kind}, {exp_deferred})",
+            )
+
+    def test_backlinks_provider_unknown_returns_none(self):
+        from integrations.backlinks_api import BacklinksProvider
+        self.assertIsNone(BacklinksProvider.create("notarealprovider", "k"))
+        self.assertIsNone(BacklinksProvider.create("", "k"))
+        # المعروف يُرجع كائناً (بدون استدعاء شبكة)
+        c = BacklinksProvider.create("ahrefs", "k")
+        self.assertIsNotNone(c)
+        self.assertEqual(c.name, "ahrefs")
+
+    def test_probe_token_expired_corrupt_file(self):
+        """v1.06: token تالف على القرص ⇒ يُعامَل كمنتهٍ (يطالب بإعادة التفويض)."""
+        import tempfile
+        from webapp.app import _probe_token_expired
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write("not json at all")
+            tmp = f.name
+        try:
+            self.assertTrue(_probe_token_expired(__import__("pathlib").Path(tmp)))
+        finally:
+            __import__("os").unlink(tmp)
+
+    def test_cache_key_differs_per_api_identity(self):
+        """v1.09-B7: مفاتيح cache تختلف بحسب api_key — منع leak عبر share."""
+        import tempfile, os
+        from storage.cache import APICache
+        # Windows يحتفظ بقفل DB حتّى إغلاق الاتصال — نُغلق قبل cleanup الـtempdir.
+        db_fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(db_fd)
+        try:
+            cache = APICache(db_path)
+            k1 = cache._make_key("ps", "https://x/y", {"key": "USER_A_KEY", "u": "1"})
+            k2 = cache._make_key("ps", "https://x/y", {"key": "USER_B_KEY", "u": "1"})
+            self.assertNotEqual(k1, k2)
+            k3 = cache._make_key("ps", "https://x/y", {"key": "USER_A_KEY", "u": "1"})
+            self.assertEqual(k1, k3)
+        finally:
+            try:
+                os.unlink(db_path)
+            except OSError:
+                pass
+
+    def test_inject_phase2_seeds_skips_missing_csv(self):
+        """v1.08 + v1.09-B1: غياب deferred_urls.csv لا يرمي exception."""
+        import tempfile
+        from seo_crawler.seo_crawler.main import _inject_phase2_seeds
+        crawler = type("FakeCrawler", (), {"sitemap_seeds": []})()
+        with tempfile.TemporaryDirectory() as d:
+            cfg = {"output": {"output_dir": d}}
+            _inject_phase2_seeds(crawler, cfg)
+            self.assertEqual(crawler.sitemap_seeds, [])  # بقي فارغاً، بلا exception
+
+    def test_ssrf_blocks_ipv4_mapped_ipv6(self):
+        """v1.09-B5: bypass عبر `::ffff:127.0.0.1` مغلق الآن."""
+        from utils.helpers import is_safe_remote_url
+        ok, _reason = is_safe_remote_url("http://[::ffff:127.0.0.1]/x", allow_private=False)
+        self.assertFalse(ok)
+        # وصحيح أنّ النطاقات العامّة تمرّ
+        ok2, _r = is_safe_remote_url("https://example.com/", allow_private=False)
+        self.assertTrue(ok2)
+
+    def test_status_of_handles_strings_and_none(self):
+        """v1.09-B2: status_of يتحمّل str/None/مشوّش بلا crash."""
+        from analyzers._coerce import status_of, is_4xx
+        self.assertEqual(status_of({"status_code": "404"}), 404)
+        self.assertEqual(status_of({"status_code": None}), 0)
+        self.assertEqual(status_of({"status_code": "301 Moved"}), 301)
+        self.assertEqual(status_of({}), 0)
+        self.assertTrue(is_4xx({"status_code": "404"}))
+        self.assertFalse(is_4xx({"status_code": "200"}))
+
+
 if __name__ == "__main__":
     unittest.main()

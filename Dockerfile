@@ -20,6 +20,13 @@ RUN python -m pip install --upgrade pip \
 # 2) كود المصدر (تستبعد .dockerignore البيانات/الأسرار)
 COPY . .
 
+# v1.09: تشغيل كمستخدم غير-root لتقليل blast radius لأي ثغرة في الحاوية.
+# webapp_jobs/ يحتاج كتابة ⇒ نُعطي ملكيّتها للمستخدم الجديد.
+RUN useradd --create-home --shell /bin/bash sct \
+    && mkdir -p /app/webapp_jobs \
+    && chown -R sct:sct /app
+USER sct
+
 # الواجهة المرئية
 EXPOSE 8000
 

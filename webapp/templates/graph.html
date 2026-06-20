@@ -114,6 +114,21 @@ function _renderBars(box, items, total) {
   });
 }
 
+// v1.09-B3: مساعدات escape — كانت غائبة سابقاً ⇒ XSS عبر نصّ URL مزحوف
+// (`<img src=x onerror=…>` في path يصبح JS قابل للتنفيذ ⇒ CSRF لحذف المهام).
+function _gvEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function _gvSafeUrl(u) {
+  // نسمح فقط بـhttp(s) — رفض javascript:/data: التي يستطيع المهاجم اقحامها
+  if (!u) return '#';
+  const s = String(u).trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  return '#';
+}
+
 function _renderTree(box, node, depth = 0) {
   if (!node) return;
   // ورقة (URL كامل بلا أبناء)
@@ -121,8 +136,17 @@ function _renderTree(box, node, depth = 0) {
   if (!hasKids && node.url) {
     const div = document.createElement('div');
     div.className = 'leaf' + (node.status >= 400 ? ' st-4' : (node.status >= 300 ? ' st-3' : ''));
-    div.innerHTML = '<a href="' + node.url + '" target="_blank" rel="noopener">' +
-      (node.name || '/') + '</a> <span class="cnt">[' + (node.status || '?') + ']</span>';
+    // v1.09-B3: textContent للنص + setAttribute مع safeUrl للـhref ⇒ لا XSS.
+    const a = document.createElement('a');
+    a.href = _gvSafeUrl(node.url);
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = node.name || '/';
+    div.appendChild(a);
+    const cnt = document.createElement('span');
+    cnt.className = 'cnt';
+    cnt.textContent = ' [' + (node.status || '?') + ']';
+    div.appendChild(cnt);
     box.appendChild(div);
     return;
   }
@@ -133,8 +157,15 @@ function _renderTree(box, node, depth = 0) {
   if (node.status >= 500) cls += ' st-5';
   else if (node.status >= 400) cls += ' st-4';
   else if (node.status >= 300) cls += ' st-3';
-  sum.innerHTML = '<span class="' + cls + '">' + (node.name || '/') + '/</span>' +
-    '<span class="cnt">' + node.count.toLocaleString() + ' ' + T('gv_pages_unit', 'صفحة') + '</span>';
+  // v1.09-B3: textContent بدل innerHTML — node.name من path مزحوف غير موثوق
+  const seg = document.createElement('span');
+  seg.className = cls;
+  seg.textContent = (node.name || '/') + '/';
+  sum.appendChild(seg);
+  const cnt = document.createElement('span');
+  cnt.className = 'cnt';
+  cnt.textContent = ' ' + (node.count || 0).toLocaleString() + ' ' + T('gv_pages_unit', 'صفحة');
+  sum.appendChild(cnt);
   det.appendChild(sum);
   const wrap = document.createElement('div');
   wrap.style.paddingInlineStart = '14px';

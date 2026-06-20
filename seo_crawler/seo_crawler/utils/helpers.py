@@ -239,12 +239,25 @@ def is_safe_remote_url(url: str, allow_private: bool = False) -> tuple[bool, str
     if allow_private:
         return True, ""
 
+    # v1.09-B5: تشخيص حرفي للـIP في host (`http://127.0.0.1` لا يحتاج DNS).
+    # كان الكود يعتمد فقط على getaddrinfo، والذي قد يرمي الـlookup لـDNS
+    # ويفتح ثغرة DNS-rebind. الفحص المباشر يُغلق هذا.
+    try:
+        # محاولة تفسير host كـIP literal — يلتقط `[::1]` و`127.1` وغيرهما
+        ip_literal = ipaddress.ip_address(host.strip("[]"))
+        if _is_unsafe_ip(ip_literal):
+            return False, f"عنوان داخلي/محجوز: {host}"
+    except ValueError:
+        pass  # ليس IP literal — نتابع لـDNS resolution
+
     # حلّ كل عناوين المضيف وافحصها
     try:
         infos = socket.getaddrinfo(host, None)
     except (socket.gaierror, UnicodeError, OSError):
-        # تعذّر الحل — نسمح به (سيفشل الجلب لاحقاً بأمان) لتفادي حجب نطاقات صحيحة
-        return True, ""
+        # v1.09-B5: DNS-fails-CLOSED (كان يفشل OPEN — ثغرة أمنيّة).
+        # نطاق لا يُحلّ ⇒ نرفض. إن كان النطاق صحيحاً لكنّ الشبكة ساقطة، الخطأ
+        # نفسه سيظهر عند الجلب لاحقاً، بدل فتح ثغرة SSRF احتمالاً.
+        return False, "تعذّر حلّ المضيف (DNS)"
 
     for info in infos:
         ip_str = info[4][0]
@@ -252,17 +265,27 @@ def is_safe_remote_url(url: str, allow_private: bool = False) -> tuple[bool, str
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
             continue
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
+        if _is_unsafe_ip(ip):
             return False, f"عنوان داخلي/محجوز: {ip_str}"
 
     return True, ""
+
+
+def _is_unsafe_ip(ip: "ipaddress._BaseAddress") -> bool:
+    """v1.09-B5: فحص شامل بما في ذلك IPv4-mapped IPv6 (`::ffff:127.0.0.1`).
+    الـbypass السابق: `ip.is_loopback` يُرجع False لـmapped IPv6 ⇒ يمرّ ⇒ SSRF.
+    """
+    # IPv6 يحوي عنوان IPv4 mapped → نفحصه أيضاً
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
 
 
 def get_domain(url: str) -> str:

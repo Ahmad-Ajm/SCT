@@ -157,6 +157,14 @@ class JSRenderer:
         """
         result = RenderedPage(url=url)
 
+        # v1.09-B5: حماية SSRF — Playwright يطيع المخطط الذي يُمرَّر له (file:// مرفوض
+        # بحكم scheme check)، لكنّ http(s)://internal يصل إلى loopback/metadata.
+        from utils.helpers import is_safe_remote_url
+        safe, reason = is_safe_remote_url(url, getattr(self, "allow_private_hosts", False))
+        if not safe:
+            result.error = f"SSRF-blocked: {reason}"
+            return result
+
         if not self._context:
             result.error = "Playwright not started"
             return result
@@ -277,6 +285,12 @@ class JSRendererAsync:
 
     async def render(self, url: str) -> "RenderedPage":
         result = RenderedPage(url=url)
+        # v1.09-B5: حماية SSRF (نفس فحص الزاحف العادي)
+        from utils.helpers import is_safe_remote_url
+        safe, reason = is_safe_remote_url(url, getattr(self, "allow_private_hosts", False))
+        if not safe:
+            result.error = f"SSRF-blocked: {reason}"
+            return result
         if not self._context:
             result.error = "renderer not started"
             return result

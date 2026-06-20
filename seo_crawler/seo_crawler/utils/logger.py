@@ -81,11 +81,20 @@ def get_logger(
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
-    # تجنّب تكرار الـ handlers
+    should_write_file = _file_output_enabled if file_output is None else file_output
+
+    # v1.09-B7: تجنّب تكرار الـ handlers — لكن لا نخرج قبل التحقّق من توفّر
+    # FileHandler إن كان مطلوباً. سابقاً: استدعاء ثانٍ بـfile_output=True يُرجع
+    # logger بلا file handler صامتاً (انعدام السجلّ المُلفي).
+    has_file_handler = any(
+        isinstance(h, logging.FileHandler) for h in (logger.handlers or [])
+    )
     if logger.handlers:
+        if should_write_file and not has_file_handler:
+            _add_file_handler(logger, log_dir)
+            _loggers[name] = logger
         return logger
 
-    should_write_file = _file_output_enabled if file_output is None else file_output
     if should_write_file:
         _add_file_handler(logger, log_dir)
 

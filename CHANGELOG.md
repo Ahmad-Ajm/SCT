@@ -4,6 +4,157 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.09 — 2026-06-19 (large audit batch)
+
+### Scope
+
+A parallel 4-agent adversarial audit of v1.03→v1.08.1 surfaced ~40 findings
+across crawler, webapp, analyzers, exporters, integrations, storage, tests,
+and docs. This release fixes every Critical + High finding and most of the
+Mediums in twelve focused batches (B1–B12). Test suite expanded
+70 → 77 passing.
+
+### Critical fixes
+
+- **B1 — Phase 2 was broken by default.** `_inject_phase2_seeds` looked for
+  `output/csv/deferred_urls.csv` in the *current* job's output dir, but with
+  the default `timestamped_folder=true` Phase 2 always runs from a fresh
+  output dir → CSV never found → Phase 2 silently a no-op. Now searches the
+  newest sibling output dir containing the CSV. Also validates each loaded
+  URL through `is_safe_remote_url` to close the user-edited-CSV SSRF window.
+- **B1 — `_restore_state` routed resumed URLs through the classifier.** URLs
+  the crawler had previously committed to fetching were re-classified on
+  resume → many landed in `self.deferred` instead of the queue, silently
+  stranding work. Likewise for `start_url` and `sitemap_seeds`. v1.09 adds a
+  `bypass_classifier=True` parameter to `_enqueue` and uses it at all three
+  call sites. Also emits a single warning + `crawler.deferred.cap_dropped`
+  metric when the `max_tracked` cap is hit (was silent drop).
+- **B2 — Status-code coercion crashed analyzers on DB-backed rows.**
+  `sitemap_diff`, `hreflang_validator`, `thin_content`, `duplicate_detector`,
+  `broken_links`, `canonical_analyzer`, `security_analyzer`, `url_issues`,
+  `redirect_analyzer` all assumed `int`. With `"301 Moved"` or `None` from a
+  resumed DB row they either crashed the whole report (TypeError on
+  comparison) or silently zeroed results (`!= 200` on string). New shared
+  helper `analyzers/_coerce.status_of()` handles all variants. `seo_issues.py`
+  also got a safe `d.get("urls") or []` on duplicate-rows dict access.
+- **B3 — Stored XSS in `graph.html` → CSRF pivot.** `_renderTree` used
+  `innerHTML` with `node.name`/`node.url` straight from crawled paths.
+  A malicious target site containing `/<img src=x onerror=fetch('/api/...')>`
+  in a URL path would execute JS in the auditor's browser, enabling CSRF
+  against `/api/jobs/delete-all`, `/api/start`, etc. v1.09 builds the tree
+  via `textContent` and validates URL schemes (http/https only).
+- **B3 — CSRF Origin guard.** New FastAPI middleware rejects POST/PUT/DELETE
+  requests whose `Origin` is set and not `127.0.0.1`/`localhost`/`::1`. CLI
+  callers (no Origin header) are unaffected.
+
+### High-severity security fixes
+
+- **B4 — subprocess argv injection.** `mode` is whitelisted to
+  `{audit, competitor, compare}` before reaching `main.py`. `url` is
+  validated as `http(s)://` and rejected if it starts with `--`. Uses
+  `--url=value` (single argv element) to prevent flag injection.
+- **B4 — `_valid_job_id` guard added** at the top of `download(kind=xml)`
+  where `job_id` interpolates into a tempfile prefix before any other check.
+- **B4 — `MAX_AUDIT_JSON_MB` guard added** to `/api/jobs/<id>/log-board`
+  (was the only audit-JSON-reading endpoint missing it).
+- **B4 — `lighthouse_importer` size cap (100MB).** Was an unbounded
+  `json.load` on user files → DoS vector.
+- **B5 — `is_safe_remote_url` SSRF hardening.** Now (a) rejects IPv4-mapped
+  IPv6 (`::ffff:127.0.0.1`) via a new `_is_unsafe_ip` helper, (b) fails
+  *closed* on DNS resolution errors (was failing *open*, allowing NXDOMAIN
+  → SSRF window), (c) checks IP literals directly before DNS lookup.
+- **B5 — JS renderer SSRF check.** Both sync + async `render(url)` now
+  consult `is_safe_remote_url` before `page.goto`.
+- **B5 — `http_client.head()` follows redirects manually**, validating each
+  hop via `is_safe_remote_url`. Previously `allow_redirects=True` could
+  follow a 3xx Location into `169.254.169.254/latest/...`.
+- **B6 — CrUX key moved from URL query to `X-goog-api-key` header.**
+- **B6 — Majestic key (forced by their API to be a query param) documented
+  with a code comment forbidding any `r.url` logging.**
+- **B6 — Google token writes now atomic** (temp + `os.replace`) — Ctrl-C
+  mid-write no longer truncates the token file. New `_atomic_write_text`
+  helper in `app.py`; `integrations/google_auth.py:131` switched to same
+  pattern.
+- **B6 — AI advisor PII strip.** `build_audit_summary_for_ai` strips the
+  query string from `top_opportunities[].url` before sending to the LLM,
+  removing `?session=`, `?email=`, `?utm_*`, etc.
+
+### Cleanup batch
+
+- **B7 — `config.example.yaml` drift fixed.** Added missing
+  `crawl.deferred_crawl.*` and `integrations.backlinks.*` blocks.
+- **B7 — `storage/cache.py` API identity in cache key.** SHA256-fingerprinted
+  `api_key` (or `app_api_key`) is mixed into `_make_key` so shared cache DBs
+  cannot leak one user's response to another user.
+- **B7 — `storage/cache.py` `max_size_mb` actually enforced.** New
+  `_enforce_size_cap` deletes expired entries first, then drops the oldest
+  10% if still over the cap. Runs every 200 `set()` calls.
+- **B7 — `utils/logger.py` file handler bug.** A second `get_logger(name)`
+  call with `file_output=True` now adds a `FileHandler` if one isn't already
+  attached. Previously the cached-logger short-circuit silently returned
+  console-only.
+- **B7 — `utils/state_manager.py` atomic JSON writes.** `_atomic_json_write`
+  helper: temp + fsync + `os.replace`. Ctrl-C during snapshot no longer
+  corrupts the visited/queue/meta files.
+- **B8 — `url_classifier` operator precedence bug.** `or`/`and` in the
+  filter-combo check were parenthesized wrongly, counting empty params
+  (`?filter_brand=` with no value) as filters. Explicit parens.
+- **B8 — Sync crawler warns** when `deferred_crawl.enabled` is set but the
+  sync path doesn't honor it (deferred classification is async-only).
+
+### Remaining mediums (B9)
+
+- **`log_analyzer`** — `last_seen` comparison parsed via
+  `datetime.strptime(..., "%d/%b/%Y:%H:%M:%S")` instead of lexicographic on
+  CLF strings (which was wrong across year/month boundaries).
+- **`accessibility.py`** — CDN fetch wrapped in `with requests.get(...)`
+  context manager so the streaming response always closes (previously
+  leaked on success path).
+- **`crawl_compare.py`** — `utf-8-sig` decoding tolerates BOM-prefixed
+  audit JSON files.
+- **`awt_importer.py`** — `pd.read_csv(..., nrows=1_000_000)` cap to
+  prevent OOM on malicious large CSV.
+- **`backlinks_api.py`** — three silent `log.debug` failures upgraded to
+  `log.warning` (Ahrefs refdomains, Ahrefs anchors, Majestic topbacklinks).
+- **`start_phase2` lock window** — placeholder `_procs[job_id] = None`
+  inserted under the lock prevents two parallel requests from both passing
+  the "no active job" check.
+
+### New tests (B10)
+
+Seven new tests added (`V109BatchTests`):
+- `test_url_classifier_branches` — all 6 kinds via classifier.
+- `test_backlinks_provider_unknown_returns_none` — factory error path.
+- `test_probe_token_expired_corrupt_file` — corrupt token treated as expired.
+- `test_cache_key_differs_per_api_identity` — B7 cache identity mixing.
+- `test_inject_phase2_seeds_skips_missing_csv` — graceful no-CSV handling.
+- `test_ssrf_blocks_ipv4_mapped_ipv6` — B5 SSRF bypass closed.
+- `test_status_of_handles_strings_and_none` — B2 coercion helper.
+
+### Docs + infra (B11)
+
+- **`SECURITY.md`** — new "v1.04+ surfaces" section documenting backlinks
+  egress, Google token rewrite, Phase 2 deferred CSV seed, CSRF origin check,
+  subprocess argv hardening, SSRF fixes, PII strip.
+- **`Dockerfile`** — non-root user `sct` with explicit ownership of
+  `/app/webapp_jobs`. Reduces blast radius of any container escape.
+- **`config.example.yaml`** — v1.08 `deferred_crawl` and v1.04 `backlinks`
+  blocks documented (see B7).
+
+### Verified
+
+```
+77/77 tests pass (5.5s)
+compileall clean
+node --check on inline JS clean
+Jinja render of index.html + job.html + graph.html clean
+SSRF helper now correctly rejects IPv4-mapped IPv6 and fails closed on NXDOMAIN
+```
+
+### Deferred (only remaining ROADMAP item)
+
+- **Single-file Windows `.exe` (PyInstaller)** — needs a Windows CI build host.
+
 ## v1.08.1 — 2026-06-19 (hotfix)
 
 ### Fixed — critical NameError in `_discover_new_links`
