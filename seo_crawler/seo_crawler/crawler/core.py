@@ -36,6 +36,8 @@ from crawler.robots_parser import RobotsParser
 from crawler.sitemap_parser import SitemapParser
 
 from utils.helpers import (
+    format_bytes,
+    format_duration,
     is_internal_url,
     is_safe_remote_url,
     matches_any_pattern,
@@ -43,6 +45,23 @@ from utils.helpers import (
 )
 from utils.logger import get_logger
 from utils.state_manager import StateManager
+
+# v1.11 (M-9): hoisted from per-page hot-loop in _extract_page_data().
+# جميع modules التالية pure-data بلا cycle مع crawler/.
+from extractors.canonical_extractor import extract_canonical
+from extractors.content_extractor import extract_content
+from extractors.custom_extractor import compile_rules, extract_custom
+from extractors.headers_extractor import extract_headers
+from extractors.headings_extractor import extract_headings
+from extractors.hreflang_extractor import extract_hreflang
+from extractors.images_extractor import extract_images
+from extractors.links_extractor import extract_links
+from extractors.meta_extractor import extract_meta
+from extractors.mixed_content import detect_mixed_content
+from extractors.og_extractor import extract_og_twitter
+from extractors.pagination_extractor import extract_pagination
+from extractors.resources_extractor import extract_resources
+from extractors.schema_extractor import extract_schema
 
 log = get_logger(__name__)
 
@@ -241,7 +260,6 @@ class Crawler:
         self.sitemap_urls_seen: list[str] = []
 
         # === Custom Extraction (الخطة #5) ===
-        from extractors.custom_extractor import compile_rules
         ce = config.get("custom_extraction", {}) or {}
         self.custom_rules = compile_rules(ce.get("rules")) if ce.get("enabled") else []
         self._custom_needs_html = any(r.get("type") == "regex" for r in self.custom_rules)
@@ -668,8 +686,6 @@ class Crawler:
         )
 
         if self._extract_enabled("meta"):
-            from extractors.meta_extractor import extract_meta
-
             meta = extract_meta(soup)
             page.title = meta["title"]
             page.title_length = meta["title_length"]
@@ -683,8 +699,6 @@ class Crawler:
             page.meta_generator = meta["meta_generator"]
 
         if self._extract_enabled("headings"):
-            from extractors.headings_extractor import extract_headings
-
             headings = extract_headings(soup)
             page.h1_count = headings["h1_count"]
             page.h1_text = headings["h1_text"]
@@ -697,29 +711,21 @@ class Crawler:
                 self.all_headings.append({"page_url": url, **heading})
 
         if self._extract_enabled("canonical"):
-            from extractors.canonical_extractor import extract_canonical
-
             canonical_data = extract_canonical(soup, response.headers, url)
             page.canonical = canonical_data["canonical"]
             page.canonical_in_header = canonical_data["in_header"]
             page.canonical_is_self = canonical_data["is_self"]
 
         if self._extract_enabled("hreflang"):
-            from extractors.hreflang_extractor import extract_hreflang
-
             page.hreflang_tags = extract_hreflang(soup, response.headers, url)
 
         if self._extract_enabled("pagination"):
-            from extractors.pagination_extractor import extract_pagination
-
             pg = extract_pagination(soup, response.headers, url)
             page.pagination_next = pg["pagination_next"]
             page.pagination_prev = pg["pagination_prev"]
             page.is_paginated = pg["is_paginated"]
 
         if self._extract_enabled("og"):
-            from extractors.og_extractor import extract_og_twitter
-
             og_data = extract_og_twitter(soup)
             page.og_title = og_data["og_title"]
             page.og_description = og_data["og_description"]
@@ -732,8 +738,6 @@ class Crawler:
             page.twitter_image = og_data["twitter_image"]
 
         if self._extract_enabled("schema"):
-            from extractors.schema_extractor import extract_schema
-
             schema_data = extract_schema(soup)
             page.schema_count = schema_data["count"]
             page.schema_types = schema_data["types"]
@@ -742,8 +746,6 @@ class Crawler:
                 self.all_schema.append({"page_url": url, **item})
 
         if self._extract_enabled("content"):
-            from extractors.content_extractor import extract_content
-
             content_data = extract_content(soup, response.size_bytes)
             page.word_count = content_data["word_count"]
             page.character_count = content_data["character_count"]
@@ -754,8 +756,6 @@ class Crawler:
             page.content_simhash = content_data.get("content_simhash", "")
 
         if self._extract_enabled("images"):
-            from extractors.images_extractor import extract_images
-
             images = extract_images(soup, url)
             page.images_count = len(images)
             page.images_without_alt_count = sum(1 for img in images if not img["alt"])
@@ -763,8 +763,6 @@ class Crawler:
                 self.all_images.append({"page_url": url, **img})
 
         if self._extract_enabled("links"):
-            from extractors.links_extractor import extract_links
-
             links = extract_links(soup, url, self.primary_domain, self.additional_domains)
             page.internal_links_count = sum(1 for link in links if link["is_internal"])
             page.external_links_count = sum(1 for link in links if not link["is_internal"])
@@ -777,8 +775,6 @@ class Crawler:
         self.stats.total_images += page.images_count
 
         if self._extract_enabled("headers"):
-            from extractors.headers_extractor import extract_headers
-
             headers_data = extract_headers(response.headers)
             page.server = headers_data["server"]
             page.cache_control = headers_data["cache_control"]
@@ -801,8 +797,6 @@ class Crawler:
             page.js_network_requests = js_data.get("js_network_requests", 0)
 
         if self._extract_enabled("mixed_content"):
-            from extractors.mixed_content import detect_mixed_content
-
             mixed = detect_mixed_content(soup, url)
             page.has_mixed_content = mixed["has_mixed_content"]
             page.mixed_content_urls = mixed.get("mixed_urls", [])
@@ -812,16 +806,12 @@ class Crawler:
 
         # === Custom Extraction (الخطة #5) ===
         if self.custom_rules:
-            from extractors.custom_extractor import extract_custom
-
             html_for_rules = str(soup) if self._custom_needs_html else ""
             vals = extract_custom(soup, html_for_rules, self.custom_rules)
             self.all_custom.append({"page_url": url, **vals})
 
         # === Resource Inventory (الخطة #3) — معطّل افتراضياً ===
         if self.extraction_config.get("extract_resources", False):
-            from extractors.resources_extractor import extract_resources
-
             self.all_resources.extend(
                 extract_resources(soup, url, self.primary_domain, self.additional_domains)
             )
@@ -949,7 +939,6 @@ class Crawler:
 
     def _print_summary(self) -> None:
         """طباعة ملخص الزحف."""
-        from utils.helpers import format_bytes, format_duration
 
         log.info("=" * 60)
         log.info("انتهى الزحف")

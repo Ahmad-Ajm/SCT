@@ -209,6 +209,7 @@ python -B -m unittest discover -s tests
 | Contributing / extending the tool | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [العربية](CONTRIBUTING_AR.md) |
 | Code of Conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) · [العربية](CODE_OF_CONDUCT_AR.md) |
 | Security policy | [`SECURITY.md`](SECURITY.md) |
+| Incident runbook (operators) | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) |
 | Release history | [`CHANGELOG.md`](CHANGELOG.md) |
 | What's planned | [`ROADMAP.md`](ROADMAP.md) |
 | External tool integrations (Lighthouse, ZAP) | [`docs/EXTERNAL_TOOLS_GUIDE.md`](docs/EXTERNAL_TOOLS_GUIDE.md) · [العربية](docs/EXTERNAL_TOOLS_GUIDE_AR.md) |

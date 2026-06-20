@@ -591,8 +591,8 @@ class AsyncCrawler:
                 self._persisted_visited |= new_visited
             queue_items = [(u, self._url_depth.get(u, 0)) for u in self.queued_urls]
             self.db.replace_queue(queue_items)
-        except Exception as e:
-            log.debug(f"تعذّر حفظ snapshot: {e}")
+        except Exception:
+            log.warning("تعذّر حفظ snapshot", exc_info=True)
 
     # ========================================================
     # === Main Crawl Loop ===

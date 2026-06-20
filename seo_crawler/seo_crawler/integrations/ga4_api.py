@@ -123,8 +123,8 @@ class GA4Client:
                 self._client = BetaAnalyticsDataClient()
             log.info("تمت المصادقة مع GA4 بنجاح")
             return True
-        except Exception as e:
-            log.error(f"فشل المصادقة مع GA4: {e}")
+        except Exception:
+            log.exception("فشل المصادقة مع GA4")
             return False
 
     def _date_range(self):

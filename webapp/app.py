@@ -42,6 +42,8 @@ sys.path.insert(0, str(ROOT / "seo_crawler" / "seo_crawler"))
 
 from webapp.job_runner import JobRunner  # noqa: E402
 
+log = logging.getLogger("sct.webapp")
+
 app = FastAPI(title="SCT — Simple Crawler Tool")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
@@ -1097,6 +1099,7 @@ async def google_authorize():
             status_code=500,
         )
     except Exception as e:
+        log.exception("setup endpoint failed")
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
 
     return JSONResponse({
@@ -1142,6 +1145,7 @@ async def google_gsc_sites():
         try:
             return {"sites": parse_gsc_sites(c.service.sites().list().execute())}
         except Exception as e:  # noqa: BLE001
+            log.exception("GSC sites list failed")
             return {"sites": [], "error": str(e)[:300]}
 
     return JSONResponse(await _run_conn_test(_run))
@@ -1212,6 +1216,7 @@ async def google_authorize_url():
         _paste_flow["flow"] = flow
         return JSONResponse({"auth_url": auth_url, "redirect_uri": _PASTE_REDIRECT})
     except Exception as e:  # noqa: BLE001
+        log.exception("OAuth flow init failed")
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
 
 
@@ -1236,6 +1241,7 @@ async def google_authorize_code(code: str = Form("")):
             "ga4_token": str(gd / "ga4_token.json"),
         })
     except Exception as e:  # noqa: BLE001
+        log.exception("OAuth code exchange failed")
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
 
 
@@ -1257,6 +1263,7 @@ def _run_setup_bg(tool: str) -> None:
         ok = r.returncode == 0
         msg = (r.stdout if ok else (r.stderr or r.stdout or "")) or ""
     except Exception as e:  # noqa: BLE001
+        log.exception("tool setup subprocess failed: %s", tool)
         ok, msg = False, f"{type(e).__name__}: {e}"
     with _setup_lock:
         _setup_state[tool] = {"running": False, "ok": ok, "message": msg[-600:]}
@@ -1294,6 +1301,7 @@ async def test_gsc(site_url: str = Form("")):
             sites = [s.get("siteUrl", "") for s in resp.get("siteEntry", [])]
             return {"ok": True, "sites": sites}
         except Exception as e:  # noqa: BLE001
+            log.exception("GSC sites().list test failed")
             return {"ok": False, "error": str(e)[:300]}
 
     res = await _run_conn_test(_run)
@@ -1327,6 +1335,7 @@ async def test_ga4(property_id: str = Form("")):
             c._run(dimensions=["date"], metrics=["sessions"], limit=1)
             return {"ok": True}
         except Exception as e:  # noqa: BLE001
+            log.exception("GA4 test run failed")
             return {"ok": False, "error": str(e)[:300]}
 
     return JSONResponse(await _run_conn_test(_run))
@@ -1559,6 +1568,7 @@ def _run_generate_bg(job_id: str, fmt: str, options: dict[str, Any]) -> None:
         meta["result"] = new_result
         runner._write_meta(Path(out_dir).parent, meta)
     except Exception as e:  # noqa: BLE001
+        log.exception("report regeneration failed")
         err = f"{type(e).__name__}: {str(e)[:300]}"
 
     with _gen_lock:
@@ -1760,6 +1770,7 @@ async def logs_analyze(file: UploadFile = File(...), bot_only: int = 1):
         res = analyze_log(text.splitlines(), bot_only=bool(bot_only))
         return JSONResponse(res)
     except Exception as e:  # noqa: BLE001
+        log.exception("log analyzer failed")
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
 
 
@@ -1811,6 +1822,7 @@ async def jobs_log_board(job_id: str, file: UploadFile = File(...), bot_only: in
         joined["log_summary"] = log_res.get("summary", {})
         return JSONResponse(joined)
     except Exception as e:  # noqa: BLE001
+        log.exception("log+audit join failed")
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
 
 
@@ -1873,6 +1885,7 @@ async def jobs_compare(
         from analyzers.crawl_compare import compare_audit_files
         res = compare_audit_files(path_a, path_b)
     except Exception as e:  # noqa: BLE001
+        log.exception("audit compare failed")
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
     res["old"] = {"job_id": job_id, "url": meta_a.get("url", "")}
     res["new"] = {"job_id": other, "url": meta_b.get("url", "")}

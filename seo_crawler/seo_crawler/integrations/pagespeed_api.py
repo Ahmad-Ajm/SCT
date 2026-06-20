@@ -205,7 +205,7 @@ class PageSpeedClient:
                 return {"url": url, "strategy": strategy, "error": last_error}
             except Exception as e:
                 self._record_error(url, "other")
-                log.debug(f"خطأ في PageSpeed لـ {url}: {e}")
+                log.warning("PageSpeed unexpected error for %s", url, exc_info=True)
                 return {"url": url, "strategy": strategy, "error": str(e)[:200]}
 
         return {"url": url, "strategy": strategy, "error": last_error}

@@ -993,8 +993,8 @@ def run_integrations(crawler, config, mode: CrawlMode, cache=None):
                 # خارج حصّة GSC الاعتيادية.
                 try:
                     results["gsc_page_queries"] = client.get_pages_with_queries()
-                except Exception as e:  # noqa: BLE001
-                    log.warning(f"  GSC page+query fetch skipped: {e}")
+                except Exception:  # noqa: BLE001
+                    log.warning("  GSC page+query fetch skipped", exc_info=True)
                 # حالة الفهرسة الحقيقية لكل رابط (IMP-2) — اختياري، يحترم الحصّة عبر سقف
                 if gsc_config.get("url_inspection"):
                     inspect_max = int(gsc_config.get("inspect_max_urls", 50))
@@ -1565,8 +1565,8 @@ def run_export(crawler, analysis, integrations, external_check, output_dir, conf
             sm = SitemapGenerator(str(output_dir), base_url=base).generate(pages)
             for i, fpath in enumerate(sm.get("files", [])):
                 exported_files["sitemap" if i == 0 else f"sitemap_{i}"] = fpath
-        except Exception as e:  # noqa: BLE001
-            log.error(f"Sitemap generation failed: {e}")
+        except Exception:  # noqa: BLE001
+            log.exception("Sitemap generation failed")
 
     gauge("export.files", len(exported_files))
     return exported_files
@@ -2150,8 +2150,8 @@ async def main_async(args, config: dict[str, Any]):
                     log.info(
                         f"→ Internal-link opportunities: "
                         f"{analysis['internal_link_opportunities']['count']} صفحة")
-            except Exception as e:  # noqa: BLE001
-                log.error(f"GSC insights failed: {e}")
+            except Exception:  # noqa: BLE001
+                log.exception("GSC insights failed")
 
             # === التقرير الموحّد: دمج تقني + GSC + GA4 وحساب الأولويات ===
             try:
@@ -2173,8 +2173,8 @@ async def main_async(args, config: dict[str, Any]):
                     f"opportunities {analysis['opportunities']['total_with_issues']} | "
                     f"priority do-now {analysis['priority']['summary'].get('do_now', 0)}"
                 )
-            except Exception as e:
-                log.error(f"Unified report build failed: {e}")
+            except Exception:
+                log.exception("Unified report build failed")
                 analysis["unified_rows"] = []
                 analysis["opportunities"] = {}
                 analysis["priority"] = {}

@@ -4,6 +4,139 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.11 — 2026-06-20 (debuggability, hot-path imports, operator docs)
+
+### Scope
+
+Follow-up to v1.10's 58-prompt audit, scoped to the remaining Medium/Low
+findings that don't require structural refactoring. A multi-agent scouting
+workflow mapped 25 high-value `log.error → log.exception` conversions,
+13+ hot-loop inline imports in `crawler/core.py`, and operator-doc gaps.
+Larger refactors (services/ split, webapp router split, test-file split)
+were deferred to v1.12 because the workflow flagged them as "ship in a
+clean tree after v1.11 lands". Test suite still **91/91 passing**.
+
+### Debuggability — log.exception across 9 files (M-10 follow-up)
+
+17 sites converted from `log.error(f"...: {e}")` (or silent `log.warning`)
+to `log.exception(...)` / `log.warning(..., exc_info=True)`. Every site
+was chosen because a traceback materially helps triage:
+
+- `utils/state_manager.py` — save / load / load_meta now emit a stack on
+  failure. Lost resume-state is one of the worst debugging hot-spots.
+- `crawler/robots_parser.py` — robots fetch/parse failure now logs the
+  underlying SSL/HTTP/parser exception.
+- `crawler/js_renderer.py` — sync + async Playwright start failures and
+  per-page render failures now carry a stack.
+- `crawler/http_client.py` — the catch-all after specific
+  `Timeout/ConnectionError/RequestException` branches now logs the stack
+  for genuinely "unexpected" errors.
+- `crawler/async_core.py` — DB snapshot save was demoted to `log.debug`
+  with no trace; promoted to `log.warning(exc_info=True)`.
+- `integrations/ga4_api.py` — GA4 authenticate() failure now logs a stack.
+- `integrations/pagespeed_api.py` — final "other" exception bucket logs
+  a stack instead of `log.debug` with truncated string.
+- `checkers/external_links_checker.py` — catch-all that previously bumped
+  a metric without any log line now also writes a warning + stack.
+- `seo_crawler/main.py` — sitemap generation, GSC insights, unified
+  report build, GSC page+query fetch all log stacks.
+- `webapp/app.py` — module-level `log = logging.getLogger("sct.webapp")`
+  added; 10 endpoint handlers now log a stack before returning their
+  500 (Google OAuth flow, OAuth code exchange, GSC sites list, GSC test,
+  GA4 test, tool setup subprocess, report regeneration, log analyzer,
+  log+audit join, audit compare). The truncated `str(e)[:300]` returned
+  to the client stays the same — the stack lands in the server log keyed
+  by `request_id`.
+
+### Performance hygiene — hot-loop inline imports hoisted (M-9)
+
+`seo_crawler/crawler/core.py` previously re-executed 13 `from extractors.X
+import Y` statements inside `_extract_page_data()`, once per crawled page.
+None of them had a cycle risk with `crawler/`. v1.11 hoists them to the
+module top alongside the existing `crawler.*` and `utils.helpers` imports:
+
+- `extract_meta`, `extract_headings`, `extract_canonical`, `extract_hreflang`,
+  `extract_pagination`, `extract_og_twitter`, `extract_schema`,
+  `extract_content`, `extract_images`, `extract_links`, `extract_headers`,
+  `detect_mixed_content`, `extract_custom`, `extract_resources`.
+- `compile_rules` (was inside `Crawler.__init__`) hoisted too.
+- `format_bytes` / `format_duration` (was inside a stats-print) hoisted.
+
+This removes ~14 redundant import-cache lookups per page. On a 10,000-page
+crawl that's 140,000 lookups eliminated. Not a giant win individually, but
+a clear stylistic improvement and the workflow explicitly recommended it.
+
+### Operator docs — `docs/RUNBOOK.md` (L-5)
+
+New 8-scenario incident runbook for SCT operators. Each scenario uses a
+**Symptoms → Diagnosis → Fix** structure with concrete shell and
+PowerShell commands, plus verbatim expected log lines. Covers: Google
+OAuth `invalid_grant` (the 7-day Testing-mode expiry), missing/wrong
+`~/.sct/local_token`, `/readyz` 503 (filesystem write-probe failing),
+port 8000 already in use, Phase 2 button failures (4 distinct causes),
+residual `database is locked` cases after v1.10's busy_timeout, disk-full
+cleanup via `/api/jobs/delete-all`, and CSP/security-headers scanner
+complaints (with the explicit "SCT is single-user local, not a hardened
+public web app" framing). Linked from README.md.
+
+### USER_GUIDE updates — deferred-URL panel (L-4)
+
+Both `docs/USER_GUIDE.md` (English) and `docs/USER_GUIDE_AR.md` (Arabic)
+get a new section documenting the v1.08 two-phase crawl: why it exists
+(the 14,553 `/auth/login?redirect_to=...` case in plain language, no
+client name needed), what the amber panel shows (kinds + counters +
+samples + Phase 2 button + CSV download), when to run Phase 2 vs skip
+it (decision table), where `deferred_urls.csv` lands, the configurable
+`pagination_max` / `filter_max` thresholds, and the sync-crawler caveat.
+
+### Dockerfile — multi-stage (M-12)
+
+`Dockerfile` is now multi-stage. Stage 1 (builder) installs requirements
++ ensures Chromium. Stage 2 (runtime) uses the **same** Playwright base
+image — slimming the runtime to `python:slim` would force re-downloading
+Chromium and re-installing libnss/libatk/fonts, rarely worth it and
+fragile across Playwright versions. The split isolates the pip cache and
+any future build dependencies (gcc, headers for source wheels) from the
+final image. v1.09's non-root `sct` user, v1.10's HEALTHCHECK against
+`/health`, and the original `CMD` are all preserved. Header comment
+documents the design choice.
+
+### Lockfile generation — `tools/freeze_lock.bat` (L-3)
+
+System `pip freeze` captures every host-installed package, not just
+SCT's dependencies. The new helper creates a temporary clean venv,
+installs only `requirements.txt`, and freezes the resulting closed set
+into `requirements.lock.txt` — a true reproducible lockfile. Documented
+inline.
+
+### Deferred to v1.12
+
+Per the multi-agent scouting workflow's explicit recommendation:
+
+- **`seo_crawler/main.py` → `services/` split** (2,300 LOC, 13 modules
+  proposed): orchestrator extractions (compare, integrations-only,
+  cli.py) require multi-batch verification and are best done against
+  a clean tree.
+- **`webapp/app.py` → 9 router split** (2,085 LOC): middleware ordering
+  + SSE smoke test + exception-handler conversion are subtle; deserves
+  its own release.
+- **`tests/test_core_behaviors.py` → 6 file split** (1,414 LOC): needs
+  a shared `conftest.py` for fixtures first.
+
+These extractions are mapped, risk-rated, and ordered in the v1.11
+scouting workflow output — ready for v1.12 to apply.
+
+### Test status
+
+```
+Ran 91 tests in 7.4s
+OK
+```
+
+No test changes in v1.11 — all changes are behavior-preserving.
+
+---
+
 ## v1.10 — 2026-06-20 (58-prompt deep audit response)
 
 ### Scope

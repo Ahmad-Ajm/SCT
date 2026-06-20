@@ -244,6 +244,7 @@ class ExternalLinksChecker:
                         result["error"] = f"{type(e).__name__}: {str(e)[:100]}"
                         result["is_broken"] = True
                         increment("external_links.unexpected_errors")
+                        log.warning("external link check unexpected error %s", url, exc_info=True)
 
                 if pbar:
                     pbar.update(1)

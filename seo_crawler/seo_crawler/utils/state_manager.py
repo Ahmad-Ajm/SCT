@@ -80,8 +80,8 @@ class StateManager:
             self._atomic_json_write(self.meta_file, meta)
             log.debug(f"تم حفظ الحالة: {len(visited)} مزحوف، {len(queue)} في الانتظار")
 
-        except Exception as e:
-            log.error(f"فشل حفظ الحالة: {e}")
+        except Exception:
+            log.exception("فشل حفظ الحالة")
 
     @staticmethod
     def _atomic_json_write(target, data) -> None:
@@ -123,8 +123,8 @@ class StateManager:
                 f"تم استرجاع الحالة: {len(visited)} مزحوف، {len(queue)} في الانتظار"
             )
 
-        except Exception as e:
-            log.error(f"فشل استرجاع الحالة: {e}")
+        except Exception:
+            log.exception("فشل استرجاع الحالة")
 
         return visited, queue
 
@@ -136,8 +136,8 @@ class StateManager:
         try:
             with open(self.meta_file, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception as e:
-            log.error(f"فشل قراءة meta: {e}")
+        except Exception:
+            log.exception("فشل قراءة meta")
             return {}
 
     def clear(self) -> None:

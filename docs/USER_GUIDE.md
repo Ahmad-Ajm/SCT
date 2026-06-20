@@ -413,3 +413,87 @@ If the key/library is missing or the call fails, the crawl still completes norma
 - Secret keys live in `.env` / local per‑job config (gitignored) and are passed to the crawl
   process via environment variables — never committed.
 - No PII is collected from GA4 or sent to the AI provider.
+
+
+## Two-phase crawl: the deferred-URL panel
+
+Since v1.08, SCT runs in **two optional phases** instead of asking you upfront how
+many pages to crawl (a number you usually can't guess before seeing the site). During
+Phase 1 the crawler **classifies every discovered URL on the fly** and quietly
+**defers** patterns that are known to waste crawl budget. When Phase 1 finishes, a
+panel shows you exactly what was set aside — grouped by reason — and you decide
+whether to spend more time on Phase 2.
+
+This panel is on by default. Turn it off with `crawl.deferred_crawl.enabled: false`
+in `config.yaml` to revert to the v1.07 behavior (every discovered URL is queued
+immediately).
+
+### What gets deferred (and why)
+
+| Kind | Trigger | Why it's deferred |
+|------|---------|-------------------|
+| `pagination_deep` | `?page=N` (or `p=`, `pg=`) with **N > 3** | Same template, same SEO target — the first 3 pages already surface any template-level issue. |
+| `redirect_wrapper` | `/auth/login?redirect_to=…`, `/login?next=…`, and similar wrappers | Cloudflare / WAF usually returns 403 to bots on these, so the request just burns budget. |
+| `filter_combination` | More than one `?filter[]=` / `category=` / `brand=` etc. on the same URL | Cartesian explosion of facets — the same products under different filters. |
+
+URLs declared in the **sitemap** and the **start URL** itself are always primary —
+they are never deferred. Everything that doesn't match a rule (`other`) is also
+primary by default.
+
+Two advanced knobs in `config.yaml` let you tune the classifier:
+`crawl.deferred_crawl.pagination_max` (default `3`) and
+`crawl.deferred_crawl.filter_max` (default `1`).
+
+### What you see after Phase 1
+
+A new amber panel appears on the job page between the status block and the download
+buttons:
+
+> 🔍 **Discovered URLs not crawled in Phase 1**
+> The primary URLs have been crawled. The URLs below were deferred because they
+> typically waste crawl budget without adding unique SEO value.
+>
+> [📄 Deep pagination] [🚪 Auth wrappers] [🧪 Filter combinations]
+>
+> [🔁 Run Phase 2 (crawl deferred)] [⬇️ Download deferred list (CSV)] [Show samples]
+
+Each card shows the count for its kind and (on **Show samples**) up to 10 example
+URLs. The counts come from `deferred_summary` in `audit.json`, falling back to the
+CSV when the summary isn't present.
+
+### Running Phase 2
+
+Clicking **🔁 Run Phase 2** re-launches the crawler in `--phase2` mode against the
+**same job directory**:
+
+- Deferred URLs become the new seeds.
+- The classifier is disabled (so nothing gets deferred a second time).
+- Results merge into the same `audit.json`, the same CSVs, and the same reports.
+- No new job ID is created — same job, deeper data.
+- The Phase 1 log is preserved; Phase 2 appends to it.
+
+You can also do this from the CLI: `python main.py --phase2` against an existing
+output directory toggles `crawl.deferred_crawl.phase2 = True` and uses
+`deferred_urls.csv` as seeds via the same Phase 2 path.
+
+### Where the deferred data lives
+
+- **`csv/deferred_urls.csv`** is always written next to `excluded_urls.csv` — one
+  row per deferred URL with its `kind` and the URL that introduced it. You can open
+  it, filter it, or feed it into another tool even without running Phase 2.
+- **`audit.json`** gains two new keys: `deferred_urls` (the full list) and
+  `deferred_summary` (per-kind counts plus 10 samples each).
+- The web endpoints `GET /api/jobs/{id}/deferred` (read the summary) and
+  `POST /api/jobs/{id}/phase2` (start Phase 2) back the panel buttons.
+
+### Backward compatibility
+
+- Jobs completed before v1.08 work unchanged — they simply don't show the panel,
+  because their `audit.json` has no `deferred_summary` and the API returns an empty
+  payload.
+- Old configs keep working: missing `crawl.deferred_crawl` blocks fall back to the
+  v1.08 defaults.
+- The **synchronous** crawler (`--sync`) does **not** honor deferred classification
+  — it's async-only. SCT prints a warning if you set `deferred_crawl.enabled: true`
+  together with `--sync`.
+

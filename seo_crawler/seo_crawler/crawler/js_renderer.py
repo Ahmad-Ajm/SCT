@@ -128,8 +128,8 @@ class JSRenderer:
             log.info(f"تم بدء Playwright {self.browser_type}")
             return True
 
-        except Exception as e:
-            log.error(f"فشل بدء Playwright: {e}")
+        except Exception:
+            log.exception("فشل بدء Playwright")
             return False
 
     def stop(self) -> None:
@@ -214,7 +214,7 @@ class JSRenderer:
 
         except Exception as e:
             result.error = f"Render failed: {type(e).__name__}: {str(e)[:200]}"
-            log.warning(f"{url}: {result.error}")
+            log.warning("%s: %s", url, result.error, exc_info=True)
 
         return result
 
@@ -278,8 +278,8 @@ class JSRendererAsync:
             self._context = await self._browser.new_context(user_agent=self.user_agent)
             log.info("✅ بدأ مُصيّر JS (async): %s", self.browser_name)
             return True
-        except Exception as e:
-            log.error("فشل بدء مُصيّر JS: %s", e)
+        except Exception:
+            log.exception("فشل بدء مُصيّر JS")
             await self.stop()
             return False
 

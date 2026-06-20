@@ -273,7 +273,7 @@ class HTTPClient:
 
         except Exception as e:
             result.error = f"Unexpected error: {type(e).__name__}: {str(e)[:100]}"
-            log.error(f"{url}: {result.error}")
+            log.exception("%s: unexpected http_client error", url)
 
         return result
 

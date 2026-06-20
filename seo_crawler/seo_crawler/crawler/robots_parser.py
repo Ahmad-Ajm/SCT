@@ -109,8 +109,8 @@ class RobotsParser:
 
             return True
 
-        except Exception as e:
-            log.warning(f"فشل تحميل robots.txt: {e}")
+        except Exception:
+            log.warning("فشل تحميل robots.txt", exc_info=True)
             self._loaded = False
             return False
 
