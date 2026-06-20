@@ -4,6 +4,112 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.12 — 2026-06-20 (high-severity deps + supply-chain hardening + services/ leaves)
+
+### Scope
+
+v1.11 audit's 6 must-do findings split into three categories: **3 dependency/
+supply-chain** fixes (DEP-1, DEP-6, DEP-12, plus DEP-2/3/5 bonus) and the
+**3 structural refactors** (services/ extraction, app.py routers, tests split).
+v1.12 ships ALL the must-do dep fixes plus the first ~22% of the services
+extraction (8 leaf modules under `seo_crawler/services/`). The remaining
+refactors continue in v1.12.x with the same green-test-gate discipline.
+
+All 91 tests still pass.
+
+### High-severity dependency + supply-chain fixes
+
+**DEP-1 — Playwright base image bump** (`Dockerfile`). From
+`v1.47.0-jammy` (October 2024, 21 months stale at v1.12 release) to
+`v1.55.0-noble`. Picks up ~21 months of Chromium V8/Blink security patches,
+moves the OS layer to Ubuntu Noble (24.04 LTS, jammy nears EoL). The
+multi-stage `dist-packages` copy path updated from `python3.10` to
+`python3.12` to match the new base.
+
+**DEP-2 — playwright Python pin updated** to match new base
+(`playwright>=1.55.0,<2.0`).
+
+**DEP-3 — aiohttp bumped** from `3.10.11` (EoL branch) to `>=3.12.13,<4.0`.
+Picks up the 2024-2025 CVE fixes.
+
+**DEP-5 — jinja2 bumped** from `3.1.4` to `>=3.1.6,<4.0` to pick up the
+sandbox-escape CVE-2025-27516 fix.
+
+**DEP-6 — python-multipart bumped** from `0.0.12` to `>=0.0.18,<1.0` to
+address CVE-2024-53981, an unauthenticated CPU-DoS via malformed multipart
+boundary on FastAPI form endpoints.
+
+**DEP-12 — `utils/auto_install.py` flipped to opt-in.** Previously enabled
+by default (could be disabled with `SCT_NO_AUTO_INSTALL=1`). The audit
+flagged it as a supply-chain risk: it installed unpinned latest versions
+from PyPI for an allowlist that included lxml/aiohttp/requests/PyYAML,
+silently defeating `requirements.txt` pinning and creating dev/prod skew
+(writes fail under Docker `USER sct`). v1.12 inverts the default: auto-
+install is **disabled** unless `SCT_AUTO_INSTALL=1` is set. Missing
+optional extras now log a clear actionable error naming the package and
+the exact `pip install …` command instead of silently fetching it. The
+`SCT_NO_AUTO_INSTALL` variable is still recognized but is now a no-op
+(disabled is the default). README updated.
+
+### REFACTOR-services — first 8 modules under `seo_crawler/services/`
+
+`seo_crawler/main.py` shrinks from **2,339 LOC** to **1,834 LOC** (−22%).
+The v1.11 scouting workflow's recommended Tier-0/Tier-1 leaves are now
+in place; main.py re-exports every public name for backward-compatibility
+so `tests/test_core_behaviors.py:454` and any external code that imports
+`DatabaseBackedCrawler`/`emit_phase`/`load_config`/etc. from `main` keeps
+working without modification.
+
+| Module | Tier | LOC | Contents |
+|---|---|---:|---|
+| `services/progress_service.py` | 0 leaf | 57 | `emit_phase` (used by 7+ sites) |
+| `services/deferred_service.py` | 0 leaf | 45 | `deferred_list`, `deferred_summary` (Phase 2 UI) |
+| `services/integrations_summary.py` | 0 leaf | 48 | `gsc_summary`, `ga4_summary` |
+| `services/export_helpers.py` | 1 leaf | 186 | 11 pure flatten helpers for run_export + integrations_only |
+| `services/config_service.py` | 1 | 99 | `load_config`, `setup_output_dir`, `validate_config`, `slugify_label`, `configure_target_site` |
+| `services/db_facade.py` | 1 | 75 | `DatabaseBackedCrawler` + `AttrDict` (read-only DB facade) |
+| `services/ai_service.py` | 1 | 54 | `run_ai_analysis` (Phase 3.5, optional AI advisor) |
+| `services/crawl_service.py` | 2 mid | 115 | `run_crawl_sync`, `run_crawl_async`, `inject_phase2_seeds`, `find_phase2_deferred_csv` |
+
+`services/__init__.py` documents the Tier hierarchy. Each module gets its
+own `log = get_logger(__name__)` so log records show service-of-origin
+(per the v1.11 scout's risk-rated guidance). `from __future__ import
+annotations` is preserved on every file so `TYPE_CHECKING`-only types
+keep resolving.
+
+### Continuing in v1.12.x
+
+These mid-tier and orchestrator extractions remain mapped + risk-rated in
+the v1.11 scouting workflow output but are scheduled across follow-up
+v1.12.x patches with a green-test-gate between each. Doing them all in
+one PR would have produced a ~1,600-LOC diff with no checkpoint, which
+the scout explicitly warned against:
+
+- `services/analysis_service.py` (run_analysis, ~260 LOC)
+- `services/external_check_service.py` (run_external_links_check +
+  run_resource_status_check, ~210 LOC)
+- `services/integrations_service.py` (run_integrations + _MinimalCrawler,
+  ~230 LOC)
+- `services/export_service.py` (run_export, ~410 LOC — highest-risk, last)
+- `services/integrations_only_service.py` (~74 LOC)
+- `services/compare_service.py` (~155 LOC)
+- `seo_crawler/cli.py` (main + main_async)
+- REFACTOR-app-routers (webapp/app.py → 9 APIRouters, separate PR series)
+- REFACTOR-tests-split (test_core_behaviors.py → 6 files + conftest.py)
+
+### Test status
+
+```
+Ran 91 tests in 5.4s
+OK
+```
+
+No test changes in v1.12 base — all changes are behavior-preserving.
+Tests use `from main import DatabaseBackedCrawler` which still works via
+the re-export.
+
+---
+
 ## v1.11 — 2026-06-20 (debuggability, hot-path imports, operator docs)
 
 ### Scope

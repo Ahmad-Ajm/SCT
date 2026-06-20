@@ -43,7 +43,7 @@ Arabic documentation is available in [README_ar.md](README_ar.md).
   grouped into Do now / Needs developer / Needs platform / Needs content / Do later.
 - Sitemap generator, adaptive crawl throttle, and e-commerce platform presets
   (Zid / Salla / Shopify / WooCommerce).
-- Auto-install of optional requirements (allowlisted; disable with `SCT_NO_AUTO_INSTALL=1`).
+- Optional-requirement gating (auto-install is now opt-in via `SCT_AUTO_INSTALL=1` after v1.12; default behavior is to log a clear error naming the missing extra and the exact `pip install …` command).
 - Results explorer (filter/sort/search) and full settings editable from the UI.
 - CSV, JSON, optional Excel, and HTML/PDF report exports.
 - Integrated local Web UI (FastAPI + HTMX + SSE) with live crawl monitoring.

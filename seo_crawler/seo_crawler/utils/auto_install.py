@@ -1,18 +1,26 @@
 """
 utils/auto_install.py
 =====================
-تثبيت تلقائي للمتطلبات الاختيارية عند الحاجة (IMP-16).
+تثبيت اختياري للمتطلبات الاختيارية عند الحاجة (IMP-16).
 
-عندما تحتاج الأداة مكتبة اختيارية غير مثبّتة، نُثبّتها تلقائياً (بإعلام المستخدم، دون طلب
-موافقة) بدل أن تفشل الميزة بصمت. حدّ الأمان: يقتصر التثبيت على **قائمة معروفة مسبقاً
-لمكتبات الأداة الاختيارية** (لا حزم عشوائية)، والتثبيت محلي عبر `pip` لنفس مفسّر بايثون.
+v1.12 DEP-12 — تغيير سياسة الافتراضي إلى **معطَّل**:
+سابقاً كان التثبيت مفعّلاً افتراضياً (يقتصر على قائمة بيضاء معروفة). المراجعة الأمنيّة
+رأت أنّ ذلك:
+- يُبطل ضوابط الـpin في requirements.txt (يجلب الإصدار latest غير المُختبَر)
+- ينشئ dev/prod skew (يفشل تحت Docker USER sct لعدم صلاحيّة الكتابة)
+- يفتح ناقل supply-chain (إن اخترق مهاجم ميرور PyPI أو سجّل typosquat)
+
+السلوك الجديد: التثبيت **معطَّل افتراضياً** ويُعاد رسالة خطأ واضحة تسمّي الحزمة.
+لتفعيله صراحةً في بيئة تطوير: SCT_AUTO_INSTALL=1.
+
+متغيّر SCT_NO_AUTO_INSTALL لا يزال مدعوماً للتوافق العكسي لكنّه الآن لا يفعل شيئاً
+لأنّ التعطيل صار افتراضياً.
 
 الاستخدام:
     from utils.auto_install import ensure_package
     if ensure_package("openpyxl"):
         import openpyxl
-
-التعطيل: ضع متغيّر البيئة SCT_NO_AUTO_INSTALL=1 (يبقى الاستيراد يُحاوَل، لكن بلا تثبيت).
+    # في حال غياب openpyxl: log.error واضح، ولن يُثبَّت إلا إذا ضُبط SCT_AUTO_INSTALL=1.
 """
 
 from __future__ import annotations
@@ -49,7 +57,9 @@ _attempted: set[str] = set()
 
 
 def is_auto_install_enabled() -> bool:
-    return not os.environ.get("SCT_NO_AUTO_INSTALL")
+    """v1.12 DEP-12: opt-in via SCT_AUTO_INSTALL=1 (default: DISABLED).
+    SCT_NO_AUTO_INSTALL لا يزال مفهوماً لكن لا أثر له لأنّ التعطيل صار افتراضياً."""
+    return os.environ.get("SCT_AUTO_INSTALL", "").strip() in ("1", "true", "yes", "on")
 
 
 def ensure_package(
@@ -80,9 +90,11 @@ def ensure_package(
 
     enabled = is_auto_install_enabled() if auto is None else bool(auto)
     if not enabled:
-        log.warning(
-            f"مكتبة {import_name} غير مثبّتة والتثبيت التلقائي معطّل "
-            f"(ثبّتها يدوياً: pip install {resolved_pip})"
+        log.error(
+            "مكتبة اختيارية مطلوبة غير مثبّتة: %s\n"
+            "  للتثبيت يدوياً (موصى به):  pip install %s\n"
+            "  أو لتفعيل التثبيت التلقائي في بيئة تطوير: SCT_AUTO_INSTALL=1",
+            import_name, resolved_pip,
         )
         return False
 

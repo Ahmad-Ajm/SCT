@@ -6,7 +6,7 @@
 
 # === الزحف الأساسي ===
 requests>=2.32.4,<3.0       # HTTP requests (sync)
-aiohttp==3.10.11            # HTTP requests (async - للسرعة 5-10x)
+aiohttp>=3.12.13,<4.0       # HTTP requests (async). v1.12 DEP-3: 3.10.x is EoL; 3.12+ has 2024-2025 CVE fixes.
 beautifulsoup4==4.12.3      # تحليل HTML
 lxml==5.3.0                 # محرّك تحليل سريع (يحتاجه bs4)
 urllib3==2.2.3              # معالجة URLs
@@ -19,7 +19,7 @@ defusedxml==0.7.1           # XML parsing آمن (حماية من XXE attacks)
 # === JavaScript Rendering ===
 # يحتاج تثبيت إضافي بعد pip:
 # playwright install chromium
-playwright==1.47.0          # متصفح بدون واجهة لتنفيذ JS
+playwright>=1.55.0,<2.0     # متصفح بدون واجهة لتنفيذ JS. v1.12 DEP-2: matches the updated Docker base image (was 1.47.0, 21 months stale).
 
 # === معالجة البيانات ===
 pandas==2.2.3               # DataFrame وتنظيم البيانات
@@ -36,8 +36,8 @@ python-dotenv==1.0.1        # قراءة ملف .env للمفاتيح السري
 # === الواجهة المرئية (Web UI) ===
 fastapi==0.115.5            # خادم الواجهة (API + صفحات)
 uvicorn[standard]==0.32.1   # تشغيل ASGI
-jinja2==3.1.4               # قوالب HTML للواجهة
-python-multipart==0.0.12    # استقبال نماذج الـ form
+jinja2>=3.1.6,<4.0          # قوالب HTML للواجهة. v1.12 DEP-5: 3.1.6 fixes sandbox-escape CVE-2025-27516.
+python-multipart>=0.0.18,<1.0  # استقبال نماذج الـ form. v1.12 DEP-6: ≥0.0.18 fixes CVE-2024-53981 (unauthenticated CPU DoS via malformed boundary).
 # ملاحظة: تقرير PDF يستخدم Playwright (مذكور أعلاه) — نفّذ playwright install chromium
 
 # === تكاملات Google APIs (اختياري - يُفعَّل عند توفّر المفاتيح) ===

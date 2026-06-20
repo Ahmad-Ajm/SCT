@@ -21,7 +21,7 @@
 # ════════════════════════════════════════════════════════════════════════════
 # Stage 1 — builder: نُثبّت المتطلبات ونضمن وجود Chromium.
 # ════════════════════════════════════════════════════════════════════════════
-FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy AS builder
+FROM mcr.microsoft.com/playwright/python:v1.55.0-noble AS builder
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -43,7 +43,7 @@ RUN python -m pip install --upgrade pip \
 # Stage 2 — runtime: نفس الصورة الأساسية (Chromium + libs جاهزة)،
 # لكن ننسخ فقط site-packages والـexecutables من الـbuilder + كود المصدر.
 # ════════════════════════════════════════════════════════════════════════════
-FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy AS runtime
+FROM mcr.microsoft.com/playwright/python:v1.55.0-noble AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -52,9 +52,9 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # ننقل حزم Python المُثبّتة من الـbuilder بدلاً من إعادة تشغيل pip.
-# المسارات قياسيّة في صورة Playwright (Python 3.10 على jammy).
+# المسارات قياسيّة في صورة Playwright (Python 3.12 على noble).
 COPY --from=builder /usr/lib/python3/dist-packages /usr/lib/python3/dist-packages
-COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=builder /usr/local/lib/python3.12/dist-packages /usr/local/lib/python3.12/dist-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # كود المصدر (.dockerignore يستبعد البيانات/الأسرار).

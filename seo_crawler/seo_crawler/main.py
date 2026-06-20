@@ -83,115 +83,13 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-def _gsc_summary(integrations: dict[str, Any]) -> dict[str, Any]:
-    """ملخّص GSC للتقرير (إجماليات + أعلى الصفحات/الاستعلامات)."""
-    pages = (integrations or {}).get("gsc_pages") or []
-    queries = (integrations or {}).get("gsc_queries") or []
-    if not pages and not queries:
-        return {}
-    total_clicks = sum(int(p.get("clicks", 0) or 0) for p in pages)
-    total_impr = sum(int(p.get("impressions", 0) or 0) for p in pages)
-    avg_ctr = round(total_clicks / total_impr * 100, 2) if total_impr else 0
-    avg_pos = round(sum(float(p.get("position", 0) or 0) for p in pages) / len(pages), 2) if pages else 0
-    return {
-        "total_clicks": total_clicks,
-        "total_impressions": total_impr,
-        "avg_ctr": avg_ctr,
-        "avg_position": avg_pos,
-        "pages_count": len(pages),
-        "top_pages": sorted(pages, key=lambda x: int(x.get("clicks", 0) or 0), reverse=True)[:20],
-        "top_queries": sorted(queries, key=lambda x: int(x.get("clicks", 0) or 0), reverse=True)[:20],
-    }
-
-
-def _ga4_summary(integrations: dict[str, Any]) -> dict[str, Any]:
-    """ملخّص GA4 للتقرير (إجماليات + أعلى صفحات الهبوط + القنوات)."""
-    landing = (integrations or {}).get("ga4_landing_pages") or []
-    channels = (integrations or {}).get("ga4_channels") or []
-    if not landing and not channels:
-        return {}
-    total_sessions = sum(int(p.get("sessions", 0) or 0) for p in landing)
-    total_users = sum(int(p.get("users", 0) or 0) for p in landing)
-    return {
-        "total_sessions": total_sessions,
-        "total_users": total_users,
-        "landing_pages_count": len(landing),
-        "top_landing_pages": sorted(landing, key=lambda x: int(x.get("sessions", 0) or 0), reverse=True)[:20],
-        "channels": sorted(channels, key=lambda x: int(x.get("sessions", 0) or 0), reverse=True),
-    }
-
-
-def _deferred_list(crawler: Any) -> list[dict[str, Any]]:
-    """v1.08: يُسطّح dict الـdeferred إلى قائمة للتصدير في audit JSON و CSV."""
-    d = getattr(crawler, "deferred", None) or {}
-    out: list[dict[str, Any]] = []
-    for url, info in d.items():
-        out.append({
-            "url": url,
-            "kind": info.get("kind", "other"),
-            "source_url": info.get("source_url", ""),
-            "depth": info.get("depth", ""),
-        })
-    return out
-
-
-def _deferred_summary(crawler: Any) -> dict[str, Any]:
-    """v1.08: ملخّص الـdeferred (counts بحسب kind + 10 أمثلة لكلّ نوع) — هذا ما
-    تعرضه واجهة المهمّة في «لوحة الروابط المؤجَّلة» بعد Phase 1."""
-    d = getattr(crawler, "deferred", None) or {}
-    by_kind: dict[str, int] = {}
-    samples: dict[str, list[str]] = {}
-    for url, info in d.items():
-        k = info.get("kind", "other")
-        by_kind[k] = by_kind.get(k, 0) + 1
-        s = samples.setdefault(k, [])
-        if len(s) < 10:
-            s.append(url)
-    return {
-        "total": len(d),
-        "by_kind": by_kind,
-        "samples": samples,
-        "phase2_available": len(d) > 0,
-    }
-
-
-def emit_phase(crawler: Any, status: str, **extra: Any) -> None:
-    """كتابة حالة المرحلة الحالية لملف التقدّم (للواجهة المرئية).
-
-    ندمج مع آخر ملف تقدّم حتى لا نخسر عدادات مثل الطابور أو الروابط
-    المفحوصة عند الانتقال بين المراحل.
-    """
-    pf = os.environ.get("SCT_PROGRESS_FILE")
-    if not pf:
-        return
-    st = getattr(crawler, "stats", None)
-    data: dict[str, Any] = {}
-    try:
-        if os.path.exists(pf):
-            with open(pf, "r", encoding="utf-8") as f:
-                data = json.load(f) or {}
-    except (OSError, json.JSONDecodeError):
-        data = {}
-
-    elapsed = getattr(st, "duration_seconds", None) if st else None
-    data = {
-        **data,
-        "status": status,
-        "pages_crawled": getattr(st, "pages_crawled", 0) if st else 0,
-        "pages_failed": getattr(st, "pages_failed", 0) if st else 0,
-        "pages_skipped": getattr(st, "pages_skipped", 0) if st else 0,
-        **extra,
-    }
-    if elapsed is not None:
-        data["elapsed_seconds"] = round(elapsed, 1)
-        data["pages_per_second"] = round(getattr(st, "pages_per_second", 0), 2)
-    try:
-        tmp = pf + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        os.replace(tmp, pf)
-    except OSError:
-        pass
+# v1.12 REFACTOR-services: نُقلت الـhelpers إلى services/ — نُعيد تصديرها هنا
+# للتوافق العكسي (tests/test_core_behaviors.py وأيّ كود خارجي).
+from services.deferred_service import deferred_list as _deferred_list
+from services.deferred_service import deferred_summary as _deferred_summary
+from services.integrations_summary import ga4_summary as _ga4_summary
+from services.integrations_summary import gsc_summary as _gsc_summary
+from services.progress_service import emit_phase
 
 
 # ============================================================
@@ -199,146 +97,15 @@ def emit_phase(crawler: Any, status: str, **extra: Any) -> None:
 # ============================================================
 
 
-def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
-    config_file = Path(config_path)
-    if not config_file.exists():
-        log.error(f"Config file not found: {config_path}")
-        sys.exit(1)
-    try:
-        with open(config_file, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        log.error(f"YAML parse error: {e}")
-        sys.exit(1)
-
-
-def setup_output_dir(config: dict[str, Any], mode_name: str) -> Path:
-    base_dir = Path(config["output"]["output_dir"])
-    if config["output"].get("timestamped_folder", True):
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        output_dir = base_dir / f"{mode_name}_{timestamp}"
-    else:
-        output_dir = base_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-    log.info(f"Output directory: {output_dir}")
-    return output_dir
-
-
-def validate_config(config: dict[str, Any]) -> list[str]:
-    """v1.10-C1 (M-8): فحص بنيوي للإعدادات عند startup — يكتشف أخطاء واضحة قبل
-    بدء زحفة 3 ساعات تفشل في النصف. يُرجع قائمة تحذيرات (فارغة = OK)."""
-    warnings: list[str] = []
-    site = config.get("site") or {}
-    crawl = config.get("crawl") or {}
-    # site.start_url
-    su = site.get("start_url", "")
-    if not isinstance(su, str) or not su.startswith(("http://", "https://")):
-        warnings.append(f"site.start_url ينقصه أو يبدأ بـscheme غير صحيح: {su!r}")
-    # crawl.max_pages
-    mp = crawl.get("max_pages")
-    if mp is not None and (not isinstance(mp, int) or mp < 0):
-        warnings.append(f"crawl.max_pages يجب أن يكون int غير سالب: {mp!r}")
-    # crawl.concurrent_requests
-    cr = crawl.get("concurrent_requests")
-    if cr is not None and (not isinstance(cr, int) or cr < 1 or cr > 100):
-        warnings.append(f"crawl.concurrent_requests يجب أن يكون 1..100: {cr!r}")
-    # crawl.delay_seconds
-    ds = crawl.get("delay_seconds")
-    if ds is not None and (not isinstance(ds, (int, float)) or ds < 0):
-        warnings.append(f"crawl.delay_seconds يجب أن يكون رقم غير سالب: {ds!r}")
-    # crawl.seed_strategy
-    ss = crawl.get("seed_strategy")
-    if ss is not None and ss not in ("homepage", "sitemap", "hybrid"):
-        warnings.append(f"crawl.seed_strategy غير معروف: {ss!r}")
-    # crawl.deferred_crawl.pagination_max
-    dc = crawl.get("deferred_crawl") or {}
-    pm = dc.get("pagination_max")
-    if pm is not None and (not isinstance(pm, int) or pm < 0):
-        warnings.append(f"crawl.deferred_crawl.pagination_max يجب أن يكون int>=0: {pm!r}")
-    return warnings
-
-
-def slugify_label(value: str) -> str:
-    slug = "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip())
-    slug = "_".join(part for part in slug.split("_") if part)
-    return slug or "site"
-
-
-def configure_target_site(config: dict[str, Any], url: str) -> None:
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.netloc:
-        raise ValueError(f"Invalid site URL: {url}")
-    # حماية SSRF على رابط البداية قبل أي طلب (يشمل جلب robots.txt الذي يسبق
-    # فحص SSRF لكل رابط). يُسمح بالمضيفين الخاصين فقط عند crawl.allow_private_hosts.
-    from utils.helpers import is_safe_remote_url
-    allow_private = bool(config.get("crawl", {}).get("allow_private_hosts", False))
-    safe, reason = is_safe_remote_url(url, allow_private)
-    if not safe:
-        raise ValueError(f"Unsafe site URL ({reason}): {url}")
-    config["site"]["start_url"] = url
-    config["site"]["domain"] = parsed.netloc
-
-
-class DatabaseBackedCrawler:
-    """Read-only crawler facade for --analyze-only without importing crawl engines."""
-
-    def __init__(self, db: CrawlDatabase):
-        self.db = db
-        self.sitemap_parser = None
-        # كاش للـ getters: القاعدة ثابتة في وضع analyze-only، فنبنيها مرة واحدة
-        # ونعيد نسخة سطحية لكل مرحلة بدل إعادة SELECT * في كل استدعاء.
-        self._getter_cache: dict[str, list[Any]] = {}
-        # روابط sitemap المحفوظة من جلسة الزحف (لـ sitemap_diff في analyze-only)
-        try:
-            self.sitemap_urls_seen = db.get_meta("sitemap_urls", []) or []
-        except Exception:
-            self.sitemap_urls_seen = []
-
-    def _memo_db(self, key: str, builder) -> list[Any]:
-        cached = self._getter_cache.get(key)
-        if cached is None:
-            cached = builder()
-            self._getter_cache[key] = cached
-        return list(cached)
-
-    def get_pages(self) -> list[dict[str, Any]]:
-        return self._memo_db("pages", lambda: [AttrDict(row) for row in self.db.get_all_pages()])
-
-    def get_links(self) -> list[dict[str, Any]]:
-        return self._memo_db("links", lambda: list(self.db.get_all_links()))
-
-    def get_images(self) -> list[dict[str, Any]]:
-        return self._memo_db("images", lambda: list(self.db.get_all_images()))
-
-    def get_headings(self) -> list[dict[str, Any]]:
-        return self._memo_db("headings", lambda: list(self.db.get_all_headings()))
-
-    def get_schema(self) -> list[dict[str, Any]]:
-        return self._memo_db("schema", lambda: list(self.db.get_all_schema()))
-
-    def get_headers(self) -> list[dict[str, Any]]:
-        return self._memo_db("headers", lambda: list(self.db.get_all_headers()))
-
-    def get_redirects(self) -> list[dict[str, Any]]:
-        return self._memo_db("redirects", lambda: list(self.db.get_all_redirects()))
-
-    def get_stats(self) -> SimpleNamespace:
-        pages = self.get_pages()
-        return SimpleNamespace(
-            pages_crawled=len(pages),
-            pages_failed=sum(1 for page in pages if page.get("crawl_error")),
-            pages_skipped=0,
-            status_codes={},
-            duration_seconds=0,
-            pages_per_second=0,
-        )
-
-
-class AttrDict(dict):
-    """Dictionary row that also supports attribute access for legacy analyzers."""
-
-    def __getattr__(self, name: str) -> Any:
-        return self.get(name, "")
+# v1.12 REFACTOR-services: config + db facade نُقلا إلى services/ — re-export.
+from services.config_service import (
+    configure_target_site,
+    load_config,
+    setup_output_dir,
+    slugify_label,
+    validate_config,
+)
+from services.db_facade import AttrDict, DatabaseBackedCrawler
 
 
 # ============================================================
@@ -346,97 +113,13 @@ class AttrDict(dict):
 # ============================================================
 
 
-def run_crawl_sync(config: dict[str, Any]) -> Crawler:
-    from crawler.core import Crawler
-
-    log.info("=" * 60)
-    log.info("Phase 1: Crawling (Sync)")
-    log.info("=" * 60)
-    with span("phase.crawl.sync", url=config["site"].get("start_url", "")):
-        crawler = Crawler(config)
-        crawler.run()
-    return crawler
-
-
-async def run_crawl_async(
-    config: dict[str, Any], db: CrawlDatabase | None = None
-) -> AsyncCrawler:
-    from crawler.async_core import AsyncCrawler
-
-    log.info("=" * 60)
-    is_phase2 = bool((config.get("crawl", {}).get("deferred_crawl", {}) or {}).get("phase2"))
-    log.info(f"{'Phase 2' if is_phase2 else 'Phase 1'}: Crawling (Async)")
-    log.info("=" * 60)
-    with span("phase.crawl.async", url=config["site"].get("start_url", ""), use_db=bool(db)):
-        crawler = AsyncCrawler(config, db=db)
-        # v1.08: في Phase 2، حقن الـdeferred URLs المحفوظة سابقاً كبذور إضافيّة
-        if is_phase2:
-            _inject_phase2_seeds(crawler, config)
-        await crawler.run()
-    return crawler
-
-
-def _find_phase2_deferred_csv(output_dir: str) -> Path | None:
-    """v1.09-B1: يبحث عن deferred_urls.csv من Phase 1 بطريقة تتحمّل
-    `timestamped_folder=true` (افتراضي): إن لم يوجد في output_dir الحالي، نبحث
-    في أحدث مجلّد شقيق (نفس parent) فيه `csv/deferred_urls.csv`."""
-    out = Path(output_dir)
-    direct = out / "csv" / "deferred_urls.csv"
-    if direct.exists():
-        return direct
-    parent = out.parent
-    if not parent.exists():
-        return None
-    # نُرتّب بحسب mtime تنازلياً ونعود إلى أحدث شقيق فيه deferred CSV
-    siblings = [d for d in parent.iterdir() if d.is_dir() and d != out]
-    siblings.sort(key=lambda d: d.stat().st_mtime, reverse=True)
-    for sib in siblings:
-        cand = sib / "csv" / "deferred_urls.csv"
-        if cand.exists():
-            log.info(f"Phase 2: تمّ العثور على deferred_urls.csv في شقيق: {cand}")
-            return cand
-    return None
-
-
-def _inject_phase2_seeds(crawler: Any, config: dict[str, Any]) -> None:
-    """v1.08: قبل بدء الزحف في وضع Phase 2، نقرأ deferred_urls.csv من المهمّة
-    السابقة ونضيفها كبذور إضافيّة. classifier.phase2_mode=True يعني أنّها تُعامَل
-    عاديّة بلا تأجيل.
-
-    v1.09-B1: يدعم timestamped_folder=true عبر البحث في أشقّاء الـoutput_dir
-    (كان مكسوراً افتراضياً قبل هذا الإصلاح)."""
-    output_dir = config.get("output", {}).get("output_dir", "")
-    if not output_dir:
-        return
-    csv_path = _find_phase2_deferred_csv(output_dir)
-    if not csv_path:
-        log.warning(f"Phase 2: deferred_urls.csv غير موجود في {output_dir} ولا في أيّ "
-                    f"مجلّد شقيق — Phase 2 لن تُحقَن بذور.")
-        return
-    import csv as _csv
-    try:
-        with open(csv_path, "r", encoding="utf-8", newline="") as f:
-            urls = [row.get("url", "").strip() for row in _csv.DictReader(f) if row.get("url")]
-    except OSError as e:
-        log.warning(f"Phase 2: تعذّر قراءة deferred_urls.csv: {e}")
-        return
-    # v1.09-B5: فحص SSRF لكلّ URL مقروء من CSV (المستخدم قد يحرّره)
-    from utils.helpers import is_safe_remote_url
-    allow_private = bool(config.get("crawl", {}).get("allow_private_hosts", False))
-    # نُضيفها إلى sitemap_seeds (تُسحب إلى الطابور كبذور مؤجَّلة عاديّة)
-    added = 0
-    rejected = 0
-    for u in urls:
-        if not u or u in crawler.sitemap_seeds:
-            continue
-        safe, _reason = is_safe_remote_url(u, allow_private)
-        if not safe:
-            rejected += 1
-            continue
-        crawler.sitemap_seeds.append(u)
-        added += 1
-    log.info(f"Phase 2: حُقن {added} رابط مؤجَّل سابقاً كبذور للزحف"
-             + (f" (رفض {rejected} لعدم الأمان)" if rejected else ""))
+# v1.12 REFACTOR-services: crawl helpers نُقلت إلى services/crawl_service.py
+from services.crawl_service import (
+    find_phase2_deferred_csv as _find_phase2_deferred_csv,
+    inject_phase2_seeds as _inject_phase2_seeds,
+    run_crawl_async,
+    run_crawl_sync,
+)
 
 
 # ============================================================
@@ -917,43 +600,8 @@ async def run_resource_status_check(crawler, config, mode: CrawlMode) -> dict[st
     return {"resource_status": results, "broken_resources_status": broken}
 
 
-def run_ai_analysis(analysis: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    """مستشار الذكاء الاصطناعي (اختياري) — يقرأ ملخّص التدقيق ويقترح تحسينات.
-
-    مطفأ افتراضياً. المفتاح من الإعداد المحلي أو متغيّر البيئة AI_API_KEY (لا يُخزَّن
-    في المستودع). يتعامل بلطف عند غياب المفتاح/المكتبة أو فشل الشبكة.
-    """
-    ai_cfg = (config.get("integrations", {}) or {}).get("ai", {}) or {}
-    if not ai_cfg.get("enabled"):
-        return {}
-
-    from integrations.ai_advisor import AIAdvisor, build_audit_summary_for_ai
-
-    advisor = AIAdvisor(
-        provider=ai_cfg.get("provider", "openai"),
-        api_key=ai_cfg.get("api_key") or os.getenv("AI_API_KEY", ""),
-        model=ai_cfg.get("model", ""),
-        base_url=ai_cfg.get("base_url", ""),
-        timeout=int(ai_cfg.get("timeout", 60)),
-        language=config.get("report", {}).get("language", "ar"),
-        allow_private=bool(ai_cfg.get("allow_private", False)),
-    )
-    site_url = config.get("site", {}).get("start_url", "")
-    summary = build_audit_summary_for_ai(
-        analysis, site_url=site_url,
-        max_opportunities=int(ai_cfg.get("max_opportunities", 15)),
-    )
-
-    log.info("=" * 60)
-    log.info("Phase 3.5: AI Advisor (%s)", ai_cfg.get("provider", "openai"))
-    log.info("=" * 60)
-    with span("phase.ai_advisor", provider=ai_cfg.get("provider", "")):
-        result = advisor.analyze(summary)
-    if result.get("error"):
-        log.warning("→ AI advisor unavailable: %s", result["error"])
-    else:
-        log.info("→ AI advisor: %d recommendation(s)", len(result.get("recommendations", [])))
-    return result
+# v1.12 REFACTOR-services: AI advisor نُقل إلى services/ai_service.py
+from services.ai_service import run_ai_analysis
 
 
 # ============================================================
@@ -1624,173 +1272,20 @@ def summarize_crawler_result(label: str, url: str, crawler) -> dict[str, Any]:
     }
 
 
-def _get_value(item: Any, key: str, default: Any = None) -> Any:
-    if isinstance(item, dict):
-        return item.get(key, default)
-    return getattr(item, key, default)
-
-
-def _flatten_pagespeed(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """تسطيح نتائج PageSpeed إلى صفوف CSV (المقاييس الأساسية + تقييم CrUX)."""
-    rows: list[dict[str, Any]] = []
-    for r in results or []:
-        if not isinstance(r, dict) or r.get("error"):
-            if isinstance(r, dict) and r.get("error"):
-                rows.append({"url": r.get("url"), "strategy": r.get("strategy"),
-                             "error": r.get("error")})
-            continue
-        def _cat(field: str) -> str:
-            v = r.get(field) or {}
-            return v.get("category", "") if isinstance(v, dict) else ""
-        rows.append({
-            "url": r.get("url"),
-            "strategy": r.get("strategy"),
-            "performance": r.get("performance_score"),
-            "accessibility": r.get("accessibility_score"),
-            "best_practices": r.get("best_practices_score"),
-            "seo": r.get("seo_score"),
-            "lcp_lab_ms": r.get("lcp_lab_ms"),
-            "cls_lab": r.get("cls_lab"),
-            "tbt_lab_ms": r.get("tbt_lab_ms"),
-            "crux_overall": r.get("crux_overall"),
-            "lcp_field": _cat("lcp_field"),
-            "cls_field": _cat("cls_field"),
-            "inp_field": _cat("inp_field"),
-        })
-    return rows
-
-
-def _flatten_pagespeed_opportunities(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """البيانات العميقة: «فرص التحسين» لكل صفحة (ما الذي يُبطئها وكم تُوفّر)."""
-    rows: list[dict[str, Any]] = []
-    for r in results or []:
-        if not isinstance(r, dict) or r.get("error"):
-            continue
-        url, strat = r.get("url"), r.get("strategy")
-        for o in r.get("opportunities", []) or []:
-            rows.append({
-                "url": url,
-                "strategy": strat,
-                "opportunity": o.get("title"),
-                "savings_ms": o.get("savings_ms"),
-                "savings_kb": round((o.get("savings_bytes") or 0) / 1024, 1),
-                "id": o.get("id"),
-                "description": o.get("description"),
-            })
-    return rows
-
-
-def _flatten_pagespeed_table(results: list[dict[str, Any]], table: str) -> list[dict[str, Any]]:
-    """يجمع صفوف جدول Lighthouse منظّم (audits/network_requests/js_treemap) عبر كل النتائج."""
-    rows: list[dict[str, Any]] = []
-    for r in results or []:
-        if isinstance(r, dict):
-            rows.extend((r.get("lighthouse_tables") or {}).get(table) or [])
-    return rows
-
-
-def _flatten_pagespeed_failed_audits(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """يجمع التدقيقات الفاشلة (مشاكل حقيقية) عبر كل النتائج."""
-    rows: list[dict[str, Any]] = []
-    for r in results or []:
-        if isinstance(r, dict):
-            rows.extend(r.get("failed_audits") or [])
-    return rows
-
-
-def _export_pagespeed_tables(ps_data, exporter, files: dict, log_each: bool = False) -> None:
-    """يصدّر الجداول المنظّمة الأربعة لـ PageSpeed كملفات CSV (IMP-17أ)."""
-    table_files = [
-        ("pagespeed_audits", "audits"),
-        ("pagespeed_network_requests", "network_requests"),
-        ("pagespeed_js_treemap", "js_treemap"),
-    ]
-    for key, table in table_files:
-        rows = _flatten_pagespeed_table(ps_data, table)
-        if rows:
-            files[key] = exporter._export(f"{key}.csv", rows)
-            if log_each:
-                log.info(f"  ✓ {key}.csv ({len(rows)} صفوف)")
-    failed = _flatten_pagespeed_failed_audits(ps_data)
-    if failed:
-        files["pagespeed_failed_audits"] = exporter._export(
-            "pagespeed_failed_audits.csv", failed)
-        if log_each:
-            log.info(f"  ✓ pagespeed_failed_audits.csv ({len(failed)} صفوف)")
-
-
-def _flatten_accessibility(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """ملخّص الوصولية لكل صفحة: عدد المخالفات + توزيعها حسب الأثر."""
-    rows: list[dict[str, Any]] = []
-    for s in items or []:
-        if not isinstance(s, dict):
-            continue
-        bi = s.get("by_impact", {}) or {}
-        rows.append({
-            "url": s.get("url"),
-            "violations": s.get("violations_count", 0),
-            "nodes": s.get("nodes_total", 0),
-            "critical": bi.get("critical", 0),
-            "serious": bi.get("serious", 0),
-            "moderate": bi.get("moderate", 0),
-            "minor": bi.get("minor", 0),
-        })
-    return rows
-
-
-def _flatten_accessibility_issues(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """كل مخالفة وصولية على حدة (صف لكل قاعدة axe فاشلة لكل صفحة)."""
-    rows: list[dict[str, Any]] = []
-    for s in items or []:
-        if isinstance(s, dict):
-            rows.extend(s.get("violations", []) or [])
-    return rows
-
-
-def _flatten_cannibalization(cann: dict[str, Any]) -> list[dict[str, Any]]:
-    """يحوّل مجموعات تكلّس الكلمات إلى صف لكل (استعلام، صفحة متنافِسة)."""
-    rows: list[dict[str, Any]] = []
-    for g in (cann or {}).get("cannibalization", []) or []:
-        for p in g.get("competing_pages", []) or []:
-            rows.append({
-                "query": g.get("query"),
-                "competing_pages_count": g.get("pages_count"),
-                "query_total_impressions": g.get("total_impressions"),
-                "page": p.get("page"),
-                "clicks": p.get("clicks"),
-                "impressions": p.get("impressions"),
-                "position": p.get("position"),
-            })
-    return rows
-
-
-def _integrations_for_json(integrations: dict[str, Any]) -> dict[str, Any]:
-    """نسخة من التكاملات بلا الجداول الكبيرة (lighthouse_tables) لإبقاء JSON خفيفاً.
-
-    الجداول الكاملة في CSV؛ نُبقي failed_audits (صغير ومفيد للوحة/التقرير)."""
-    if not isinstance(integrations, dict) or not integrations.get("pagespeed"):
-        return integrations
-    lean = dict(integrations)
-    lean["pagespeed"] = [
-        ({k: v for k, v in r.items() if k != "lighthouse_tables"}
-         if isinstance(r, dict) else r)
-        for r in integrations["pagespeed"]
-    ]
-    return lean
-
-
-def _flatten_hreflang_issues(hv: dict[str, Any]) -> list[dict[str, Any]]:
-    """تحويل نتائج التحقق من hreflang إلى صفوف CSV موحّدة (عمود issue + التفاصيل)."""
-    categories = (
-        "non_reciprocal", "points_to_404", "points_to_noindex", "invalid_format",
-        "missing_self_reference", "missing_x_default", "duplicated_languages",
-        "lang_mismatch",
-    )
-    rows: list[dict[str, Any]] = []
-    for category in categories:
-        for item in hv.get(category, []) or []:
-            rows.append({"issue": category, **item})
-    return rows
+# v1.12 REFACTOR-services: export helpers نُقلت إلى services/export_helpers.py
+from services.export_helpers import (
+    export_pagespeed_tables as _export_pagespeed_tables,
+    flatten_accessibility as _flatten_accessibility,
+    flatten_accessibility_issues as _flatten_accessibility_issues,
+    flatten_cannibalization as _flatten_cannibalization,
+    flatten_hreflang_issues as _flatten_hreflang_issues,
+    flatten_pagespeed as _flatten_pagespeed,
+    flatten_pagespeed_failed_audits as _flatten_pagespeed_failed_audits,
+    flatten_pagespeed_opportunities as _flatten_pagespeed_opportunities,
+    flatten_pagespeed_table as _flatten_pagespeed_table,
+    get_value as _get_value,
+    integrations_for_json as _integrations_for_json,
+)
 
 
 class _MinimalCrawler:
