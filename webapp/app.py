@@ -45,8 +45,17 @@ from webapp.job_runner import JobRunner  # noqa: E402
 log = logging.getLogger("sct.webapp")
 
 app = FastAPI(title="SCT — Simple Crawler Tool")
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+
+# v1.12.4 REFACTOR-app-routers: runner/templates/path helpers نُقلت إلى webapp/deps.py
+from webapp.deps import (  # noqa: E402
+    FINISHED_STATUSES,
+    _job_output_dir,
+    _safe_output_file,
+    _safe_under_jobs,
+    runner,
+    templates,
+)
 
 
 # ============================================================
@@ -66,10 +75,15 @@ from webapp.security import (  # noqa: E402,F401
 register_middlewares(app)
 register_exception_handlers(app)
 
-runner = JobRunner()
-
-# حالات الانتهاء (لإغلاق بثّ SSE)
-FINISHED_STATUSES = {"complete", "partial", "partial_max_pages", "done", "failed", "stopped"}
+# v1.12.4 REFACTOR-app-routers: pages + logs + connections + setup routers
+from webapp.routers.pages import router as pages_router  # noqa: E402
+from webapp.routers.logs import router as logs_router  # noqa: E402
+from webapp.routers.connections import router as connections_router  # noqa: E402
+from webapp.routers.setup import router as setup_router  # noqa: E402
+app.include_router(pages_router)
+app.include_router(logs_router)
+app.include_router(connections_router)
+app.include_router(setup_router)
 
 # مجموعات ما يُجمَع (extraction) — تُعرض كأقسام قابلة للطيّ في الواجهة
 # v1.12.3 REFACTOR-app-routers: ثوابت + label_for نُقلت إلى webapp/constants.py
@@ -103,17 +117,6 @@ async def readyz():
         return JSONResponse({"status": "ready"})
     except OSError as e:
         return JSONResponse({"status": "not_ready", "reason": str(e)[:120]}, status_code=503)
-
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse(
-        "index.html",
-        _tpl_ctx({"request": request, "jobs": runner.list_jobs()[:15],
-         "groups": EXTRACTION_GROUPS, "formats": OUTPUT_FORMATS,
-         "sections": SECTIONS, "severities": SEVERITIES,
-         "active_job": runner.active_job()}),
-    )
 
 
 @app.post("/api/start")
@@ -290,14 +293,6 @@ async def start(request: Request):
     return JSONResponse({"job_id": job_id})
 
 
-@app.get("/jobs/{job_id}", response_class=HTMLResponse)
-async def job_page(request: Request, job_id: str):
-    meta = runner.meta(job_id)
-    return templates.TemplateResponse(
-        "job.html", _tpl_ctx({"request": request, "job_id": job_id, "meta": meta})
-    )
-
-
 @app.get("/api/jobs/{job_id}/progress")
 async def job_progress(job_id: str):
     return JSONResponse({"meta": runner.meta(job_id), "progress": runner.progress(job_id)})
@@ -444,17 +439,6 @@ async def job_report(
     return JSONResponse(report)
 
 
-def _safe_under_jobs(path: str) -> Path | None:
-    """يتأكّد أن الملف داخل مجلد المهام (دفاع عميق ضد قراءة ملفات عشوائية)."""
-    from webapp.job_runner import JOBS_DIR
-    try:
-        rp = Path(path).resolve()
-        rp.relative_to(JOBS_DIR.resolve())
-        return rp if rp.exists() else None
-    except (ValueError, OSError):
-        return None
-
-
 @app.get("/api/jobs/{job_id}/download/{kind}")
 async def download(job_id: str, kind: str):
     # v1.09-B4: حماية path traversal — `job_id` يدخل tempfile prefix أدناه قبل أيّ
@@ -500,28 +484,6 @@ async def view_html(job_id: str):
     if not safe:
         return JSONResponse({"error": "no html report"}, status_code=404)
     return FileResponse(str(safe), media_type="text/html")
-
-
-def _job_output_dir(job_id: str) -> Path | None:
-    """مجلد مخرجات المهمة بعد التحقّق من صيغة المعرّف."""
-    from webapp.job_runner import JOBS_DIR, _valid_job_id
-    if not _valid_job_id(job_id):
-        return None
-    out = (JOBS_DIR / job_id / "output").resolve()
-    return out if out.exists() else None
-
-
-def _safe_output_file(job_id: str, rel: str) -> Path | None:
-    """يحوّل مساراً نسبياً إلى ملف داخل مجلد مخرجات المهمة بأمان (منع traversal)."""
-    out = _job_output_dir(job_id)
-    if not out:
-        return None
-    try:
-        target = (out / rel).resolve()
-        target.relative_to(out)            # يجب أن يبقى داخل output/
-        return target if target.is_file() else None
-    except (ValueError, OSError):
-        return None
 
 
 @app.get("/api/jobs/{job_id}/files")
@@ -633,13 +595,8 @@ _GOOGLE_SCOPES = [
 ]
 
 
-def _google_dir() -> Path:
-    """مجلد آمن لحفظ ملف client_secret والـtokens (خارج Git)."""
-    from webapp.job_runner import JOBS_DIR
-    d = JOBS_DIR / "_google"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
+# v1.12.4 REFACTOR-app-routers: _google_dir نُقل إلى webapp/deps.py
+from webapp.deps import _google_dir, _run_conn_test  # noqa: E402,F401
 
 def _probe_token_expired(token_path: Path) -> bool:
     """v1.06: يفحص بسرعة ما إن كان token Google منتهي الصلاحية (يحاول refresh صامتاً).
@@ -916,285 +873,9 @@ async def google_authorize_code(code: str = Form("")):
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
 
 
-# تثبيت المتطلبات يعمل في الخلفية ثم نستفسر عن الحالة — لأنّ التثبيت قد يستغرق
-# دقائق (تنزيل من الإنترنت) فيسقط اتصال fetch المتصفّح («Failed to fetch») إن انتظرناه.
-_SETUP_CMDS = {
-    "ga4_lib": [sys.executable, "-m", "pip", "install", "google-analytics-data"],
-    "playwright": [sys.executable, "-m", "playwright", "install", "chromium"],
-}
-_setup_state: dict[str, dict[str, Any]] = {}
-_setup_lock = __import__("threading").Lock()
-
-
-def _run_setup_bg(tool: str) -> None:
-    import subprocess
-    cmd = _SETUP_CMDS[tool]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
-        ok = r.returncode == 0
-        msg = (r.stdout if ok else (r.stderr or r.stdout or "")) or ""
-    except Exception as e:  # noqa: BLE001
-        log.exception("tool setup subprocess failed: %s", tool)
-        ok, msg = False, f"{type(e).__name__}: {e}"
-    with _setup_lock:
-        _setup_state[tool] = {"running": False, "ok": ok, "message": msg[-600:]}
-
-
-async def _run_conn_test(fn, timeout: float = 45.0) -> dict:
-    """يشغّل اختبار اتصال محجوب (شبكة) في خيط مع مهلة قصوى.
-
-    اختبارات الاتصال غير تفاعلية (لا تفتح متصفّح OAuth) ومحدودة بمهلة، كي لا يتعلّق
-    الطلب إلى ما لا نهاية (كان اختبار GA4 يفتح تدفّق OAuth ويتعلّق حتى إيقاف الخادم)."""
-    loop = asyncio.get_event_loop()
-    try:
-        return await asyncio.wait_for(loop.run_in_executor(None, fn), timeout=timeout)
-    except asyncio.TimeoutError:
-        return {"ok": False, "error": f"انتهت مهلة الاختبار ({int(timeout)}ث) — تحقّق من الشبكة/الصلاحيات."}
-
-
-@app.post("/api/test/gsc")
-async def test_gsc(site_url: str = Form("")):
-    """اختبار اتصال GSC: يصادق ويسرد المواقع التي يملك الحساب صلاحيتها — يكشف فوراً
-    إن كان موقع العميل متاحاً أم يحتاج منحه صلاحية."""
-    gd = _google_dir()
-    cs = gd / "client_secret.json"
-    if not cs.exists():
-        return JSONResponse({"ok": False, "error": "لم يُربط Google بعد (ارفع client_secret ثم «وافق»)."})
-
-    def _run():
-        from integrations.gsc_api import GSCClient
-        c = GSCClient(credentials_path=str(cs), site_url=site_url or "https://example.com/")
-        # غير تفاعلي: لا نفتح متصفّح موافقة هنا — التفويض يتم عبر زرّ «وافق» فقط
-        if not c.authenticate(allow_interactive=False):
-            return {"ok": False, "error": "لم يُكمَل التفويض بعد — اضغط «وافق بحسابي» أولاً."}
-        try:
-            resp = c.service.sites().list().execute()
-            sites = [s.get("siteUrl", "") for s in resp.get("siteEntry", [])]
-            return {"ok": True, "sites": sites}
-        except Exception as e:  # noqa: BLE001
-            log.exception("GSC sites().list test failed")
-            return {"ok": False, "error": str(e)[:300]}
-
-    res = await _run_conn_test(_run)
-    if res.get("ok") and site_url:
-        target = site_url.rstrip("/")
-        res["site_accessible"] = any(
-            (s or "").rstrip("/") == target or target in (s or "")
-            for s in res.get("sites", [])
-        )
-    return JSONResponse(res)
-
-
-@app.post("/api/test/ga4")
-async def test_ga4(property_id: str = Form("")):
-    """اختبار اتصال GA4: محاولة تقرير صغير على property_id."""
-    if not property_id.strip():
-        return JSONResponse({"ok": False, "error": "أدخل GA4 property_id."})
-    gd = _google_dir()
-    cs = gd / "client_secret.json"
-    if not cs.exists():
-        return JSONResponse({"ok": False, "error": "لم يُربط Google بعد (ارفع client_secret ثم «وافق»)."})
-
-    def _run():
-        from integrations.ga4_api import GA4Client
-        c = GA4Client(property_id=property_id.strip(), credentials_file=str(cs))
-        # غير تفاعلي: لا نفتح متصفّح موافقة هنا (كان يتعلّق الطلب) — التفويض عبر زرّ «وافق»
-        if not c.authenticate(allow_interactive=False):
-            return {"ok": False, "error": "لم يُكمَل التفويض بعد — اضغط «وافق بحسابي»، وتأكّد من "
-                                          "تثبيت مكتبة GA4 وأن الحساب مُضاف للـProperty."}
-        try:
-            c._run(dimensions=["date"], metrics=["sessions"], limit=1)
-            return {"ok": True}
-        except Exception as e:  # noqa: BLE001
-            log.exception("GA4 test run failed")
-            return {"ok": False, "error": str(e)[:300]}
-
-    return JSONResponse(await _run_conn_test(_run))
-
-
-@app.post("/api/test/pagespeed")
-async def test_pagespeed(api_key: str = Form("")):
-    """اختبار مفتاح PageSpeed بفحص صفحة معروفة."""
-    if not api_key.strip():
-        return JSONResponse({"ok": False, "error": "أدخل مفتاح PageSpeed API."})
-
-    def _run():
-        from integrations.pagespeed_api import PageSpeedClient
-        c = PageSpeedClient(api_key=api_key.strip(), timeout=60)
-        r = c.audit("https://www.google.com/", strategy="mobile", categories=["performance"])
-        return {"ok": False, "error": r["error"]} if r.get("error") else {"ok": True}
-
-    return JSONResponse(await _run_conn_test(_run, timeout=75.0))
-
-
-@app.post("/api/setup/{tool}")
-async def setup_install(tool: str):
-    """يبدأ تثبيت متطلّب في الخلفية ويعود فوراً (راجع الحالة عبر /api/setup/{tool}/status)."""
-    if tool not in _SETUP_CMDS:
-        return JSONResponse({"error": "أداة غير معروفة"}, status_code=404)
-    with _setup_lock:
-        cur = _setup_state.get(tool)
-        if cur and cur.get("running"):
-            return JSONResponse({"started": False, "running": True})
-        _setup_state[tool] = {"running": True, "ok": None, "message": ""}
-    import threading
-    threading.Thread(target=_run_setup_bg, args=(tool,), daemon=True).start()
-    return JSONResponse({"started": True, "running": True})
-
-
-@app.get("/api/setup/{tool}/status")
-async def setup_status(tool: str):
-    if tool not in _SETUP_CMDS:
-        return JSONResponse({"error": "أداة غير معروفة"}, status_code=404)
-    with _setup_lock:
-        st = _setup_state.get(tool) or {"running": False, "ok": None, "message": ""}
-    return JSONResponse(st)
-
-
-# === v1.02: شريط جاهزية المتطلبات الاختيارية ===
-# نسبر التوفّر مرّة واحدة بعد الإقلاع ونُخزّن النتيجة. يُعاد السبر فقط عند طلب صريح أو بعد
-# تثبيت ناجح كي لا نُدخل تأخيراً في كل تحميل صفحة (في بعض الأنظمة استيراد playwright
-# بطيء — قد يأخذ ~300ms).
-_REQUIREMENTS_PROBES = {
-    "excel": ("openpyxl", None),                       # مكتبة Python
-    "ga4": ("google.analytics.data_v1beta", None),     # مكتبة Python
-    "pdf": ("playwright", "chromium_present"),         # Python + متصفّح Chromium مثبَّت
-}
-_requirements_cache: dict[str, dict[str, Any]] | None = None
-
-
-def _probe_requirements() -> dict[str, dict[str, Any]]:
-    """يُعيد قاموساً {tool: {present, version, note}} لكل متطلّب اختياري."""
-    import importlib
-    out: dict[str, dict[str, Any]] = {}
-    for tool, (module_name, extra_check) in _REQUIREMENTS_PROBES.items():
-        info: dict[str, Any] = {"present": False, "version": None, "note": ""}
-        try:
-            mod = importlib.import_module(module_name)
-            info["present"] = True
-            info["version"] = getattr(mod, "__version__", None) or ""
-        except ImportError:
-            out[tool] = info
-            continue
-        # فحص إضافي خاص بـ Playwright: متصفّح Chromium مثبَّت فعلاً؟
-        if extra_check == "chromium_present":
-            try:
-                from playwright.sync_api import sync_playwright
-                with sync_playwright() as p:
-                    info["present"] = bool(p.chromium.executable_path)
-                    if not info["present"]:
-                        info["note"] = "playwright OK but chromium not installed"
-            except Exception:  # noqa: BLE001
-                # حتى لو فشل الفحص العميق نُبقي info كما هو (المكتبة موجودة على الأقلّ)
-                info["note"] = "chromium check failed"
-        out[tool] = info
-    return out
-
-
-@app.get("/api/requirements")
-async def get_requirements(refresh: int = 0):
-    """v1.02: حالة المتطلبات الاختيارية للواجهة (Excel/GA4/PDF Chromium)."""
-    global _requirements_cache
-    if _requirements_cache is None or refresh:
-        loop = asyncio.get_event_loop()
-        _requirements_cache = await loop.run_in_executor(None, _probe_requirements)
-    return JSONResponse({"items": _requirements_cache})
-
-
-# === v1.02: خدمة وثائق المشروع كـMarkdown للواجهة (روابط «دليل…») ===
-_DOCS_MAP = {
-    "oauth_setup": ("OAUTH_SETUP.md", "إعداد OAuth و Google Cloud — SCT"),
-    "ga4_property_id": ("GA4_PROPERTY_ID.md", "اكتشاف GA4 property_id — SCT"),
-}
-
-
-@app.get("/docs/{name}")
-async def serve_doc(name: str):
-    """يخدم ملفّاً من مجلّد docs/ كـHTML مُبسَّط (للروابط من واجهة البرنامج)."""
-    entry = _DOCS_MAP.get(name)
-    if not entry:
-        return JSONResponse({"error": "doc not found"}, status_code=404)
-    fname, title = entry
-    fpath = ROOT / "docs" / fname
-    if not fpath.exists():
-        return JSONResponse({"error": "doc file missing on disk"}, status_code=404)
-    try:
-        md = fpath.read_text(encoding="utf-8")
-    except OSError:
-        return JSONResponse({"error": "read error"}, status_code=500)
-    # تحويل Markdown مبسَّط جدّاً (بلا تبعيات): ندعم # و## و```code``` و**bold** والروابط.
-    body = _md_to_html(md)
-    html = f"""<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
-<title>{title}</title>
-<style>body{{max-width:800px;margin:30px auto;padding:0 20px;font-family:Segoe UI,Tahoma,Arial,sans-serif;line-height:1.7;color:#1f2937;background:#f9fafb}}
-h1,h2,h3{{color:#1F4E79}}h1{{border-bottom:2px solid #1F4E79;padding-bottom:8px}}
-pre{{background:#111827;color:#f9fafb;padding:14px;border-radius:8px;overflow:auto;direction:ltr;text-align:left;font-size:.88rem}}
-code{{background:#e2e8f0;padding:1px 6px;border-radius:4px;font-size:.9em;direction:ltr;display:inline-block}}
-a{{color:#1F4E79}}ol,ul{{padding-inline-start:22px}}</style>
-</head><body>{body}</body></html>"""
-    return HTMLResponse(html)
-
-
-def _md_to_html(md: str) -> str:
-    """محوّل Markdown بسيط بلا تبعيات (يكفي لوثائقنا القصيرة)."""
-    import re as _re
-    out: list[str] = []
-    in_code = False
-    code_buf: list[str] = []
-    for line in md.splitlines():
-        if line.startswith("```"):
-            if in_code:
-                out.append("<pre><code>" + "\n".join(code_buf) + "</code></pre>")
-                code_buf = []
-                in_code = False
-            else:
-                in_code = True
-            continue
-        if in_code:
-            code_buf.append(_html_escape(line))
-            continue
-        if line.startswith("### "):
-            out.append("<h3>" + _inline_md(line[4:]) + "</h3>")
-        elif line.startswith("## "):
-            out.append("<h2>" + _inline_md(line[3:]) + "</h2>")
-        elif line.startswith("# "):
-            out.append("<h1>" + _inline_md(line[2:]) + "</h1>")
-        elif _re.match(r"^\s*[-*]\s+", line):
-            text = _re.sub(r"^\s*[-*]\s+", "", line)
-            if out and out[-1] == "</ul>":
-                out.pop()
-                out.append("<li>" + _inline_md(text) + "</li></ul>")
-            elif out and out[-1].endswith("</li></ul>"):
-                out[-1] = out[-1][:-5] + "<li>" + _inline_md(text) + "</li></ul>"
-            else:
-                out.append("<ul><li>" + _inline_md(text) + "</li></ul>")
-        elif _re.match(r"^\s*\d+\.\s+", line):
-            text = _re.sub(r"^\s*\d+\.\s+", "", line)
-            if out and out[-1].endswith("</li></ol>"):
-                out[-1] = out[-1][:-5] + "<li>" + _inline_md(text) + "</li></ol>"
-            else:
-                out.append("<ol><li>" + _inline_md(text) + "</li></ol>")
-        elif line.strip() == "":
-            out.append("")
-        else:
-            out.append("<p>" + _inline_md(line) + "</p>")
-    return "\n".join(out)
-
-
-def _html_escape(s: str) -> str:
-    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-
-
-def _inline_md(s: str) -> str:
-    """دعم **bold**، `code`، [text](url)."""
-    import re as _re
-    s = _html_escape(s)
-    s = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
-    s = _re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
-    s = _re.sub(r"\[(.+?)\]\(([^)]+)\)",
-                r'<a href="\2" target="_blank" rel="noopener">\1</a>', s)
-    return s
-
+# v1.12.4 REFACTOR-app-routers: setup + requirements + docs نُقلت إلى
+#   webapp/routers/setup.py (POST/GET /api/setup/{tool}, GET /api/requirements,
+#                            GET /docs/{name})
 
 # === v1.02: توليد التقارير عند الطلب — بدل توليد الكل أثناء الزحف ===
 # الزحف يُنتج دائماً CSV+JSON (سريعة ورخيصة)؛ HTML/PDF/Excel/XML تُطلَب من زرّ منفصل
@@ -1370,13 +1051,6 @@ _PAGE_FIELDS = [
 ]
 
 
-@app.get("/jobs/{job_id}/explore", response_class=HTMLResponse)
-async def explore_page(request: Request, job_id: str):
-    return templates.TemplateResponse(
-        "explore.html", _tpl_ctx({"request": request, "job_id": job_id})
-    )
-
-
 @app.get("/api/jobs/{job_id}/pages")
 async def job_pages(job_id: str):
     """إرجاع صفوف الصفحات (حقول مختارة) للتصفية في المتصفح."""
@@ -1403,100 +1077,6 @@ async def job_pages(job_id: str):
     return JSONResponse({"pages": rows, "count": len(rows)})
 
 
-@app.get("/jobs/{job_id}/board", response_class=HTMLResponse)
-async def board_page(request: Request, job_id: str):
-    """لوحة العمل التفاعلية (Action Board) — تعرض أولويات الإصلاح مجمّعةً وقابلةً للتصفية."""
-    return templates.TemplateResponse(
-        "board.html", _tpl_ctx({"request": request, "job_id": job_id})
-    )
-
-
-@app.get("/logs", response_class=HTMLResponse)
-async def logs_page(request: Request):
-    """صفحة تحليل ملفات سجلّ الخادم (Apache/Nginx) لاستخراج زحف Googlebot."""
-    return templates.TemplateResponse("logs.html", _tpl_ctx({"request": request}))
-
-
-# سقف رفع ملف اللوغ (يُقرأ كاملاً للذاكرة بعد الـupload — الـstreaming بداخل التحليل)
-_MAX_LOG_UPLOAD_MB = 500
-
-
-@app.post("/api/logs/analyze")
-async def logs_analyze(file: UploadFile = File(...), bot_only: int = 1):
-    """يستقبل ملف log (CLF/Combined) ويُرجع ملخّص زحف البوتات + قائمة per-URL."""
-    # نقرأ كاملاً (FastAPI/Starlette لا يدعم streaming قراءة سهلاً من UploadFile)؛
-    # نطبّق سقف الحجم حتى لا تستنزف الذاكرة على ملفات هائلة.
-    raw = await file.read()
-    if len(raw) > _MAX_LOG_UPLOAD_MB * 1024 * 1024:
-        return JSONResponse(
-            {"error": f"الملف أكبر من الحدّ ({_MAX_LOG_UPLOAD_MB}MB) — قسّمه أو رفع الحدّ."},
-            status_code=413,
-        )
-    try:
-        text = raw.decode("utf-8", errors="replace")
-    except Exception:  # noqa: BLE001
-        return JSONResponse({"error": "تعذّر فكّ ترميز الملف"}, status_code=400)
-    try:
-        from analyzers.log_analyzer import analyze_log
-        res = analyze_log(text.splitlines(), bot_only=bool(bot_only))
-        return JSONResponse(res)
-    except Exception as e:  # noqa: BLE001
-        log.exception("log analyzer failed")
-        return JSONResponse({"error": str(e)[:300]}, status_code=500)
-
-
-@app.post("/api/jobs/{job_id}/log-board")
-async def jobs_log_board(job_id: str, file: UploadFile = File(...), bot_only: int = 1):
-    """v1.04: يستقبل ملفّ سجلّ خادم ويضمّه مع نتائج الزحف الحاليّة لإظهار:
-    - ميزانية Google المهدورة (404/5xx يزحفها كثيراً)
-    - صفحات عالية القيمة بمشاكل (Google يهتمّ بها + لها أخطاء)
-    - صفحات يتيمة يكتشفها Google ولم يكتشفها زاحفنا
-    - أولويّات معاد ترجيحها بتكرار Google
-    """
-    import json as _json
-    meta = runner.meta(job_id)
-    json_path = (meta.get("result") or {}).get("json")
-    if not json_path or not Path(json_path).exists():
-        return JSONResponse({"error": "no audit json for this job"}, status_code=404)
-
-    # v1.09-B4: حماية ذاكرة — قبل قراءة audit JSON نتحقّق من الحجم. كان مفقوداً
-    # في هذا الـendpoint فقط (الباقي يفحص). 1.7GB JSON يُسقط الخادم بـOOM.
-    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
-    if size_mb > MAX_AUDIT_JSON_MB:
-        return JSONResponse({
-            "error": f"audit JSON too large ({size_mb:.0f} MB) — re-run the crawl "
-                     f"with output.json_full=false to keep it light",
-        }, status_code=413)
-
-    raw = await file.read()
-    if len(raw) > _MAX_LOG_UPLOAD_MB * 1024 * 1024:
-        return JSONResponse(
-            {"error": f"الملف أكبر من الحدّ ({_MAX_LOG_UPLOAD_MB}MB)"},
-            status_code=413,
-        )
-    try:
-        text = raw.decode("utf-8", errors="replace")
-    except Exception:  # noqa: BLE001
-        return JSONResponse({"error": "تعذّر فكّ الترميز"}, status_code=400)
-
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            audit = _json.load(f)
-    except (OSError, ValueError):
-        return JSONResponse({"error": "audit JSON unreadable"}, status_code=500)
-
-    try:
-        from analyzers.log_analyzer import analyze_log, join_log_with_audit
-        log_res = analyze_log(text.splitlines(), bot_only=bool(bot_only))
-        joined = join_log_with_audit(log_res.get("per_url", []), audit)
-        # نُمرّر ملخّص اللوغ نفسه (لعرضه في البطاقات العلويّة)
-        joined["log_summary"] = log_res.get("summary", {})
-        return JSONResponse(joined)
-    except Exception as e:  # noqa: BLE001
-        log.exception("log+audit join failed")
-        return JSONResponse({"error": str(e)[:300]}, status_code=500)
-
-
 @app.get("/api/jobs/list")
 async def jobs_list_with_audit():
     """قائمة المهام السابقة التي لديها audit JSON — لاختيار «المقارنة مع»."""
@@ -1516,14 +1096,6 @@ async def jobs_list_with_audit():
             "status": m.get("status", ""),
         })
     return JSONResponse({"jobs": out, "count": len(out)})
-
-
-@app.get("/jobs/{job_id}/compare", response_class=HTMLResponse)
-async def compare_page(request: Request, job_id: str):
-    """صفحة مقارنة زمنية: تختار مهمّة أخرى وتعرض المُصلَح/الجديد/الباقي."""
-    return templates.TemplateResponse(
-        "compare.html", _tpl_ctx({"request": request, "job_id": job_id})
-    )
 
 
 @app.get("/api/jobs/{job_id}/compare")
@@ -1586,14 +1158,6 @@ async def job_url_detail(job_id: str, url: str = ""):
     from reporting.url_detail import build_url_detail
     return JSONResponse(build_url_detail(audit, url.strip()))
 
-
-@app.get("/jobs/{job_id}/graph", response_class=HTMLResponse)
-async def graph_page(request: Request, job_id: str):
-    """v1.04: صفحة تصوير الزحف — شجرة URL + توزيع العمق/الحالة + رسم بياني للروابط
-    على المواقع الصغيرة (<500 صفحة)."""
-    return templates.TemplateResponse(
-        "graph.html", _tpl_ctx({"request": request, "job_id": job_id})
-    )
 
 
 @app.get("/api/jobs/{job_id}/graph")
