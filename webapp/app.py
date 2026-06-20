@@ -50,7 +50,9 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")
 # v1.12.4 REFACTOR-app-routers: runner/templates/path helpers نُقلت إلى webapp/deps.py
 from webapp.deps import (  # noqa: E402
     FINISHED_STATUSES,
+    _google_dir,
     _job_output_dir,
+    _run_conn_test,
     _safe_output_file,
     _safe_under_jobs,
     runner,
@@ -75,15 +77,19 @@ from webapp.security import (  # noqa: E402,F401
 register_middlewares(app)
 register_exception_handlers(app)
 
-# v1.12.4 REFACTOR-app-routers: pages + logs + connections + setup routers
+# v1.12.4/v1.12.5 REFACTOR-app-routers: pages/logs/connections/setup/analytics/downloads
 from webapp.routers.pages import router as pages_router  # noqa: E402
 from webapp.routers.logs import router as logs_router  # noqa: E402
 from webapp.routers.connections import router as connections_router  # noqa: E402
 from webapp.routers.setup import router as setup_router  # noqa: E402
+from webapp.routers.analytics import router as analytics_router  # noqa: E402
+from webapp.routers.downloads import router as downloads_router  # noqa: E402
 app.include_router(pages_router)
 app.include_router(logs_router)
 app.include_router(connections_router)
 app.include_router(setup_router)
+app.include_router(analytics_router)
+app.include_router(downloads_router)
 
 # مجموعات ما يُجمَع (extraction) — تُعرض كأقسام قابلة للطيّ في الواجهة
 # v1.12.3 REFACTOR-app-routers: ثوابت + label_for نُقلت إلى webapp/constants.py
@@ -405,188 +411,9 @@ async def jobs_delete_all():
     return JSONResponse(runner.delete_all_jobs())
 
 
-@app.post("/api/jobs/{job_id}/report")
-async def job_report(
-    job_id: str,
-    language: str = Form("ar"),
-    client_name: str = Form(""),
-    audience: str = Form("expert"),
-    make_pdf: bool = Form(True),
-):
-    """إعادة بناء تقرير HTML/PDF بخيارات مخصّصة من نتائج مهمة منتهية."""
-    meta = runner.meta(job_id)
-    result = meta.get("result", {})
-    json_path = result.get("json")
-    if not json_path or not Path(json_path).exists():
-        return JSONResponse({"error": "no audit json for this job"}, status_code=404)
-    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
-    if size_mb > MAX_AUDIT_JSON_MB:
-        return JSONResponse({
-            "error": f"audit JSON too large ({size_mb:.0f} MB) to rebuild from; "
-                     f"re-run the crawl with the current version (smaller JSON) "
-                     f"or set a page limit",
-        }, status_code=413)
+# v1.12.5 REFACTOR-app-routers: download endpoints (report/download/view/files/
+# download-file/download-all) -> webapp/routers/downloads.py.
 
-    from exporters.report_builder import build_report_from_json
-
-    out_dir = str(Path(json_path).parent)
-    if audience not in ("client", "expert", "both"):
-        audience = "expert"
-    options = {"language": language, "client_name": client_name, "audience": audience}
-    report = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: build_report_from_json(json_path, out_dir, options, make_pdf)
-    )
-    return JSONResponse(report)
-
-
-@app.get("/api/jobs/{job_id}/download/{kind}")
-async def download(job_id: str, kind: str):
-    # v1.09-B4: حماية path traversal — `job_id` يدخل tempfile prefix أدناه قبل أيّ
-    # تحقّق آخر؛ بدون هذا، `..\foo` ينشئ ملفّاً خارج tempdir على Windows.
-    from webapp.job_runner import _valid_job_id
-    if not _valid_job_id(job_id):
-        return JSONResponse({"error": "invalid job_id"}, status_code=400)
-    # v1.04: kind=xml يجمع كلّ ملفّات مجلّد xml/ في ZIP واحد لأنّه عدّة ملفّات لا ملفّ واحد
-    if kind == "xml":
-        out = _job_output_dir(job_id)
-        if not out:
-            return JSONResponse({"error": "no output"}, status_code=404)
-        xml_dir = out / "xml"
-        if not xml_dir.exists():
-            return JSONResponse({"error": "xml folder not built yet"}, status_code=404)
-        tmp = tempfile.NamedTemporaryFile(prefix=f"sct_{job_id}_xml_", suffix=".zip", delete=False)
-        tmp.close()
-        def _build():
-            with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-                for p in sorted(xml_dir.glob("*.xml")):
-                    if p.is_file():
-                        zf.write(p, arcname=f"xml/{p.name}")
-        await asyncio.get_event_loop().run_in_executor(None, _build)
-        return FileResponse(
-            tmp.name, media_type="application/zip",
-            filename=f"sct_{job_id}_xml.zip",
-            background=BackgroundTask(lambda: os.path.exists(tmp.name) and os.unlink(tmp.name)),
-        )
-
-    meta = runner.meta(job_id)
-    path = (meta.get("result", {}) or {}).get(kind)
-    safe = _safe_under_jobs(path) if path else None
-    if not safe:
-        return JSONResponse({"error": "file not found"}, status_code=404)
-    return FileResponse(str(safe), filename=safe.name)
-
-
-@app.get("/api/jobs/{job_id}/view")
-async def view_html(job_id: str):
-    meta = runner.meta(job_id)
-    path = (meta.get("result", {}) or {}).get("html")
-    safe = _safe_under_jobs(path) if path else None
-    if not safe:
-        return JSONResponse({"error": "no html report"}, status_code=404)
-    return FileResponse(str(safe), media_type="text/html")
-
-
-@app.get("/api/jobs/{job_id}/files")
-async def job_files(job_id: str, lang: str = "ar"):
-    """قائمة كل الملفات الناتجة مع تسمية معبّرة وحجم — للتنزيل المنفصل/الجماعي."""
-    out = _job_output_dir(job_id)
-    if not out:
-        return JSONResponse({"files": [], "error": "no output"}, status_code=404)
-    lang = "en" if str(lang).lower().startswith("en") else "ar"
-    groups: dict[str, str] = {
-        "report": "التقارير" if lang == "ar" else "Reports",
-        "workbook": "Excel",
-        "archive": "الأرشيف" if lang == "ar" else "Archive",
-        "data": "بيانات CSV" if lang == "ar" else "CSV data",
-        "xml": "XML",
-    }
-    files = []
-    for p in sorted(out.rglob("*")):
-        if not p.is_file():
-            continue
-        rel = p.relative_to(out).as_posix()
-        low = rel.lower()
-        if low.endswith((".html", ".pdf")):
-            group = "report"
-        elif low.endswith(".xlsx"):
-            group = "workbook"
-        elif low.endswith(".json"):
-            group = "archive"
-        elif rel.startswith("xml/"):
-            group = "xml"
-        elif rel.startswith("csv/") or low.endswith(".csv"):
-            group = "data"
-        else:
-            group = "data"
-        files.append({
-            "rel": rel,
-            "label": _label_for(rel, lang),
-            "size": p.stat().st_size,
-            "group": group,
-        })
-    return JSONResponse({"files": files, "groups": groups})
-
-
-@app.get("/api/jobs/{job_id}/download-file")
-async def download_file(job_id: str, rel: str):
-    """تنزيل ملف ناتج محدّد عبر مساره النسبي داخل مجلد المخرجات."""
-    safe = _safe_output_file(job_id, rel)
-    if not safe:
-        return JSONResponse({"error": "file not found"}, status_code=404)
-    return FileResponse(str(safe), filename=safe.name)
-
-
-@app.get("/api/jobs/{job_id}/download-all")
-async def download_all(job_id: str, only: str = ""):
-    """تنزيل كل المخرجات (أو مجموعة مختارة عبر only=rel1,rel2) كملف ZIP واحد."""
-    out = _job_output_dir(job_id)
-    if not out:
-        return JSONResponse({"error": "no output"}, status_code=404)
-
-    wanted: set[str] | None = None
-    if only.strip():
-        wanted = set()
-        for rel in only.split(","):
-            safe = _safe_output_file(job_id, rel.strip())
-            if safe:
-                wanted.add(safe.relative_to(out).as_posix())
-        if not wanted:
-            return JSONResponse({"error": "no valid files selected"}, status_code=400)
-
-    tmp = tempfile.NamedTemporaryFile(prefix=f"sct_{job_id}_", suffix=".zip", delete=False)
-    tmp.close()
-
-    def _build_zip() -> None:
-        with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-            for p in sorted(out.rglob("*")):
-                if not p.is_file():
-                    continue
-                rel = p.relative_to(out).as_posix()
-                if wanted is not None and rel not in wanted:
-                    continue
-                zf.write(p, arcname=rel)
-
-    try:
-        # الضغط متزامن وقد يكون كبيراً — ننفّذه في خيط منفصل كي لا نجمّد حلقة الأحداث.
-        await asyncio.get_event_loop().run_in_executor(None, _build_zip)
-    except OSError:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
-        return JSONResponse({"error": "failed to build archive"}, status_code=500)
-
-    return FileResponse(
-        tmp.name,
-        media_type="application/zip",
-        filename=f"sct_{job_id}_outputs.zip",
-        background=BackgroundTask(lambda: os.path.exists(tmp.name) and os.unlink(tmp.name)),
-    )
-
-
-# ============================================================
-# === ربط Google (GA4 + GSC) من الواجهة بدلاً من سطر الأوامر
-# ============================================================
 
 # نطاقات OAuth (قراءة فقط) لكلتا الخدمتين
 _GOOGLE_SCOPES = [
@@ -594,9 +421,6 @@ _GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/analytics.readonly",    # Analytics 4
 ]
 
-
-# v1.12.4 REFACTOR-app-routers: _google_dir نُقل إلى webapp/deps.py
-from webapp.deps import _google_dir, _run_conn_test  # noqa: E402,F401
 
 def _probe_token_expired(token_path: Path) -> bool:
     """v1.06: يفحص بسرعة ما إن كان token Google منتهي الصلاحية (يحاول refresh صامتاً).
@@ -1042,292 +866,6 @@ async def jobs_generate_status(job_id: str, fmt: str):
         }
     return JSONResponse(st)
 
+# v1.12.5 REFACTOR-app-routers: analytics endpoints + _build_graph_payload نُقلت
+# إلى webapp/routers/analytics.py.
 
-# --- مستكشف النتائج: تصفية/فرز/بحث (الخطة #2) ---
-_PAGE_FIELDS = [
-    "url", "status_code", "is_indexable", "depth", "content_type", "title",
-    "title_length", "meta_description_length", "h1_count", "canonical",
-    "word_count", "internal_links_count", "external_links_count",
-]
-
-
-@app.get("/api/jobs/{job_id}/pages")
-async def job_pages(job_id: str):
-    """إرجاع صفوف الصفحات (حقول مختارة) للتصفية في المتصفح."""
-    import json as _json
-    meta = runner.meta(job_id)
-    json_path = meta.get("result", {}).get("json")
-    if not json_path or not Path(json_path).exists():
-        return JSONResponse({"pages": [], "error": "no audit json"}, status_code=404)
-    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
-    if size_mb > MAX_AUDIT_JSON_MB:
-        return JSONResponse({
-            "pages": [],
-            "error": f"audit JSON too large ({size_mb:.0f} MB) to load in the explorer; "
-                     f"open output/csv/pages.csv instead",
-        }, status_code=413)
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            audit = _json.load(f)
-    except (OSError, ValueError):
-        return JSONResponse({"pages": [], "error": "read error"}, status_code=500)
-    rows = []
-    for p in audit.get("pages", []):
-        rows.append({k: p.get(k) for k in _PAGE_FIELDS})
-    return JSONResponse({"pages": rows, "count": len(rows)})
-
-
-@app.get("/api/jobs/list")
-async def jobs_list_with_audit():
-    """قائمة المهام السابقة التي لديها audit JSON — لاختيار «المقارنة مع»."""
-    out = []
-    for m in runner.list_jobs() or []:
-        if not isinstance(m, dict):
-            continue
-        jid = m.get("job_id") or ""
-        json_path = ((m.get("result") or {}) or {}).get("json") or ""
-        if not jid or not json_path or not Path(json_path).exists():
-            continue
-        out.append({
-            "job_id": jid,
-            "url": m.get("url", ""),
-            "mode": m.get("mode", ""),
-            "started_at": m.get("started_at", ""),
-            "status": m.get("status", ""),
-        })
-    return JSONResponse({"jobs": out, "count": len(out)})
-
-
-@app.get("/api/jobs/{job_id}/compare")
-async def jobs_compare(
-    job_id: str,
-    with_: str = Query("", alias="with"),
-):
-    """مقارنة زمنية بين زحفتين لنفس الموقع (compare_crawls)."""
-    other = (with_ or "").strip()
-    if not other:
-        return JSONResponse({"error": "missing 'with' job id"}, status_code=400)
-    meta_a = runner.meta(job_id)
-    meta_b = runner.meta(other)
-    if not meta_a or not meta_b:
-        return JSONResponse({"error": "job not found"}, status_code=404)
-    path_a = (meta_a.get("result") or {}).get("json")
-    path_b = (meta_b.get("result") or {}).get("json")
-    if not path_a or not Path(path_a).exists() or not path_b or not Path(path_b).exists():
-        return JSONResponse({"error": "audit json missing for one of the jobs"},
-                            status_code=404)
-    # حارس الحجم: لا نحمّل ملفات ضخمة
-    for p in (path_a, path_b):
-        size_mb = Path(p).stat().st_size / (1024 * 1024)
-        if size_mb > MAX_AUDIT_JSON_MB:
-            return JSONResponse({
-                "error": f"audit JSON too large ({size_mb:.0f} MB) — set "
-                         f"output.json_full=false to keep it light",
-            }, status_code=413)
-    try:
-        from analyzers.crawl_compare import compare_audit_files
-        res = compare_audit_files(path_a, path_b)
-    except Exception as e:  # noqa: BLE001
-        log.exception("audit compare failed")
-        return JSONResponse({"error": str(e)[:300]}, status_code=500)
-    res["old"] = {"job_id": job_id, "url": meta_a.get("url", "")}
-    res["new"] = {"job_id": other, "url": meta_b.get("url", "")}
-    return JSONResponse(res)
-
-
-@app.get("/api/jobs/{job_id}/url-detail")
-async def job_url_detail(job_id: str, url: str = ""):
-    """تفاصيل شاملة لرابط واحد (الزحف + GSC + GA4 + PageSpeed + الأولوية + الوصولية)."""
-    import json as _json
-    if not url.strip():
-        return JSONResponse({"error": "missing url"}, status_code=400)
-    meta = runner.meta(job_id)
-    json_path = meta.get("result", {}).get("json")
-    if not json_path or not Path(json_path).exists():
-        return JSONResponse({"error": "no audit json"}, status_code=404)
-    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
-    if size_mb > MAX_AUDIT_JSON_MB:
-        return JSONResponse({
-            "error": f"audit JSON too large ({size_mb:.0f} MB); open output/csv/pages.csv instead",
-        }, status_code=413)
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            audit = _json.load(f)
-    except (OSError, ValueError):
-        return JSONResponse({"error": "read error"}, status_code=500)
-    from reporting.url_detail import build_url_detail
-    return JSONResponse(build_url_detail(audit, url.strip()))
-
-
-
-@app.get("/api/jobs/{job_id}/graph")
-async def jobs_graph(job_id: str):
-    """يبني تمثيل شجريّ + توزيعات + قائمة جوار للروابط الداخلية من audit JSON."""
-    import json as _json
-    meta = runner.meta(job_id)
-    json_path = (meta.get("result") or {}).get("json")
-    if not json_path or not Path(json_path).exists():
-        return JSONResponse({"error": "no audit json"}, status_code=404)
-    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
-    if size_mb > MAX_AUDIT_JSON_MB:
-        return JSONResponse({
-            "error": f"audit JSON too large ({size_mb:.0f} MB); use pages.csv instead",
-        }, status_code=413)
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            audit = _json.load(f)
-    except (OSError, ValueError):
-        return JSONResponse({"error": "read error"}, status_code=500)
-    return JSONResponse(_build_graph_payload(audit))
-
-
-def _build_graph_payload(audit: dict[str, Any]) -> dict[str, Any]:
-    """v1.04: يحوّل audit JSON إلى:
-    - tree: شجرة URL هرميّة من مسارات pages (الأنفع للمستخدم العام)
-    - by_depth / by_status: توزيع للرسم البياني
-    - graph: nodes+edges للروابط الداخلية (يُحدّ على 500 عقدة للحفاظ على أداء المتصفّح)
-    """
-    from urllib.parse import urlparse
-    pages = audit.get("pages") or []
-    links = audit.get("links") or []
-    site_url = (audit.get("site_config") or {}).get("start_url", "")
-    domain = urlparse(site_url).netloc or ""
-
-    # --- توزيعات depth + status ---
-    from collections import Counter
-    by_depth = Counter()
-    by_status = Counter()
-    for p in pages:
-        d = p.get("depth") if isinstance(p, dict) else getattr(p, "depth", None)
-        s = p.get("status_code") if isinstance(p, dict) else getattr(p, "status_code", None)
-        if d is not None:
-            by_depth[int(d)] += 1
-        if s is not None:
-            by_status[str(s)] += 1
-
-    # --- شجرة URL هرميّة (path segments) ---
-    # كلّ عقدة: {"name": segment, "count": pages_under, "status": worst_status, "children": {...}}
-    root: dict[str, Any] = {"name": "/", "count": 0, "status": None, "children": {}}
-    for p in pages:
-        url = p.get("url") if isinstance(p, dict) else getattr(p, "url", "")
-        status = p.get("status_code") if isinstance(p, dict) else getattr(p, "status_code", None)
-        parsed = urlparse(url)
-        segments = [s for s in parsed.path.split("/") if s]
-        cur = root
-        cur["count"] += 1
-        for seg in segments:
-            children = cur["children"]
-            if seg not in children:
-                children[seg] = {"name": seg, "count": 0, "status": None, "children": {}}
-            cur = children[seg]
-            cur["count"] += 1
-            # نُسجّل الحالة الأسوأ في الفرع (404 يُحجب الفرع كأحمر)
-            if status:
-                cur_st = cur["status"]
-                if not cur_st or (isinstance(status, int) and status >= 400 and
-                                  (not isinstance(cur_st, int) or status > cur_st)):
-                    cur["status"] = status
-        # ورقة: نضع الـURL الكامل عند نهاية المسار
-        cur["url"] = url
-        cur["status"] = status
-
-    def _to_array(node):
-        children = node.pop("children", {}) or {}
-        node["children"] = sorted(
-            (_to_array(c) for c in children.values()),
-            key=lambda x: (-x["count"], x["name"]),
-        )
-        return node
-    tree = _to_array(root)
-
-    # --- قائمة جوار للروابط الداخلية (محدودة للحفاظ على أداء المتصفّح) ---
-    MAX_GRAPH_NODES = 500
-    nodes_idx: dict[str, int] = {}
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, int]] = []
-    truncated = False
-
-    def _ensure_node(url: str, status=None, depth=None) -> int:
-        if url in nodes_idx:
-            return nodes_idx[url]
-        if len(nodes) >= MAX_GRAPH_NODES:
-            return -1
-        nodes_idx[url] = len(nodes)
-        nodes.append({
-            "id": len(nodes),
-            "url": url,
-            "label": (urlparse(url).path or "/")[:40],
-            "status": status,
-            "depth": depth,
-        })
-        return nodes_idx[url]
-
-    # نُضيف صفحات الزحف أوّلاً (الأولوية للأكثر إنلِنكاً)
-    for p in pages[:MAX_GRAPH_NODES]:
-        url = p.get("url") if isinstance(p, dict) else getattr(p, "url", "")
-        if url:
-            _ensure_node(
-                url,
-                p.get("status_code") if isinstance(p, dict) else getattr(p, "status_code", None),
-                p.get("depth") if isinstance(p, dict) else getattr(p, "depth", None),
-            )
-    if len(pages) > MAX_GRAPH_NODES:
-        truncated = True
-
-    for link in (links or [])[:5000]:
-        if not isinstance(link, dict):
-            continue
-        if link.get("is_internal") in (False, "False", "false", 0, "0"):
-            continue
-        src = link.get("from_url") or link.get("source_url")
-        dst = link.get("to_url") or link.get("target_url")
-        if not src or not dst:
-            continue
-        si = nodes_idx.get(src)
-        di = nodes_idx.get(dst)
-        if si is None or di is None:
-            continue
-        edges.append({"s": si, "t": di})
-
-    return {
-        "domain": domain,
-        "total_pages": len(pages),
-        "by_depth": dict(sorted(by_depth.items())),
-        "by_status": dict(sorted(by_status.items())),
-        "tree": tree,
-        "graph": {
-            "nodes": nodes,
-            "edges": edges,
-            "truncated": truncated,
-            "max_nodes": MAX_GRAPH_NODES,
-        },
-    }
-
-
-@app.get("/api/jobs/{job_id}/priority")
-async def job_priority(job_id: str):
-    """إرجاع بيانات محرّك الأولويات (الصفحات + ملخّص لوحة العمل) للعرض في المتصفح."""
-    import json as _json
-    meta = runner.meta(job_id)
-    json_path = meta.get("result", {}).get("json")
-    if not json_path or not Path(json_path).exists():
-        return JSONResponse({"pages": [], "error": "no audit json"}, status_code=404)
-    size_mb = Path(json_path).stat().st_size / (1024 * 1024)
-    if size_mb > MAX_AUDIT_JSON_MB:
-        return JSONResponse({
-            "pages": [],
-            "error": f"audit JSON too large ({size_mb:.0f} MB); "
-                     f"open output/csv/page_priority.csv instead",
-        }, status_code=413)
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            audit = _json.load(f)
-    except (OSError, ValueError):
-        return JSONResponse({"pages": [], "error": "read error"}, status_code=500)
-    prio = audit.get("priority", {}) or {}
-    pages = prio.get("pages", []) or []
-    return JSONResponse({
-        "pages": pages,
-        "summary": prio.get("summary", {}) or {},
-        "count": len(pages),
-    })
