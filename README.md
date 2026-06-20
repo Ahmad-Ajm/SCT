@@ -55,6 +55,14 @@ Arabic documentation is available in [README_ar.md](README_ar.md).
 
 ## Quick Start
 
+**Fastest path — one click (v1.10):** double-click `START.bat` (Windows) /
+right-click → "Run with PowerShell" on `START.ps1` / `./start.sh` (macOS/Linux).
+The launcher detects Python, installs requirements on first run, opens the
+browser at `http://127.0.0.1:8000`, and prints the local auth token for
+`curl`/scripts. `STOP.bat` ends the server.
+
+**Manual (advanced):**
+
 ```bash
 python -m pip install -r requirements.txt
 python main.py --help
