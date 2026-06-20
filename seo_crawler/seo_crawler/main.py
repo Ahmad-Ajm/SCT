@@ -224,6 +224,40 @@ def setup_output_dir(config: dict[str, Any], mode_name: str) -> Path:
     return output_dir
 
 
+def validate_config(config: dict[str, Any]) -> list[str]:
+    """v1.10-C1 (M-8): فحص بنيوي للإعدادات عند startup — يكتشف أخطاء واضحة قبل
+    بدء زحفة 3 ساعات تفشل في النصف. يُرجع قائمة تحذيرات (فارغة = OK)."""
+    warnings: list[str] = []
+    site = config.get("site") or {}
+    crawl = config.get("crawl") or {}
+    # site.start_url
+    su = site.get("start_url", "")
+    if not isinstance(su, str) or not su.startswith(("http://", "https://")):
+        warnings.append(f"site.start_url ينقصه أو يبدأ بـscheme غير صحيح: {su!r}")
+    # crawl.max_pages
+    mp = crawl.get("max_pages")
+    if mp is not None and (not isinstance(mp, int) or mp < 0):
+        warnings.append(f"crawl.max_pages يجب أن يكون int غير سالب: {mp!r}")
+    # crawl.concurrent_requests
+    cr = crawl.get("concurrent_requests")
+    if cr is not None and (not isinstance(cr, int) or cr < 1 or cr > 100):
+        warnings.append(f"crawl.concurrent_requests يجب أن يكون 1..100: {cr!r}")
+    # crawl.delay_seconds
+    ds = crawl.get("delay_seconds")
+    if ds is not None and (not isinstance(ds, (int, float)) or ds < 0):
+        warnings.append(f"crawl.delay_seconds يجب أن يكون رقم غير سالب: {ds!r}")
+    # crawl.seed_strategy
+    ss = crawl.get("seed_strategy")
+    if ss is not None and ss not in ("homepage", "sitemap", "hybrid"):
+        warnings.append(f"crawl.seed_strategy غير معروف: {ss!r}")
+    # crawl.deferred_crawl.pagination_max
+    dc = crawl.get("deferred_crawl") or {}
+    pm = dc.get("pagination_max")
+    if pm is not None and (not isinstance(pm, int) or pm < 0):
+        warnings.append(f"crawl.deferred_crawl.pagination_max يجب أن يكون int>=0: {pm!r}")
+    return warnings
+
+
 def slugify_label(value: str) -> str:
     slug = "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip())
     slug = "_".join(part for part in slug.split("_") if part)
@@ -2259,6 +2293,11 @@ Examples:
 
     load_dotenv()
     config = load_config(args.config)
+    # v1.10-C1 (M-8): validate config قبل أيّ شيء — التحذيرات تظهر مباشرة في
+    # stdout قبل تفعيل logging كي يراها المستخدم بوضوح.
+    _cfg_warnings = validate_config(config)
+    for w in _cfg_warnings:
+        print(f"⚠️ config: {w}", file=sys.stderr)
     logging_config = config.get("logging", {})
     configure_logging(
         level=logging_config.get("level", "INFO"),

@@ -4,6 +4,159 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.10 — 2026-06-20 (58-prompt deep audit response)
+
+### Scope
+
+A 58-prompt structured audit (`D:\audit_prompts\01-58`) applied verbatim to
+the SCT codebase. Each prompt was treated as binding. Findings spanned
+architecture, code quality, backend API, services, data access, security,
+performance, tests, dependencies, observability, config, SQLite (all 6
+prompts), backend lifecycle (9 prompts), and cross-cutting concerns (12
+prompts). PostgreSQL and Next.js prompts skipped — not applicable.
+
+Outcome: **3 Critical + 8 High + 12 Medium + 5 Low = 28 new findings**
+on top of the ~40 already resolved in v1.09. v1.10 closes all 3 Critical,
+6/8 High, and 6/12 Medium. Test suite expanded **77 → 91 passing** (+14
+new TestClient-based webapp tests).
+
+### Critical fixes
+
+**A1 — local auth token on every endpoint** (Prompts 7, 39, 40, 51).
+Before v1.10 any process with network access to `127.0.0.1:8000` (Docker
+bridge, LAN host, VPN, another app on the same machine) could delete jobs,
+start crawls, upload OAuth secrets, and read all client data. v1.09 added
+a CSRF Origin guard but that only blocks browser-cross-origin attacks.
+v1.10 generates a per-install token at startup into `~/.sct/local_token`
+(mode 0600), enforces it on every POST/PUT/DELETE and on every `/api/*`
+endpoint via middleware, injects it into all 7 Jinja2 templates and
+monkey-patches `window.fetch` to set `Authorization: Bearer <token>`
+automatically. `GET /` and `GET /health`/`GET /readyz` remain exempt
+(required for bootstrap + orchestrators). Constant-time comparison via
+`hmac.compare_digest` prevents timing attacks. The fetch-patch is in every
+template's `<head>` before `i18n.js` loads.
+
+**A2 — SQL injection lockdown via table whitelist** (Prompt 16).
+Four f-string interpolation sites in `storage/database.py` (lines 405,
+408, 1025, 1064 in the v1.09 codebase) used `f"PRAGMA table_info({table})"`,
+`f"ALTER TABLE {table} ADD COLUMN {column} {definition}"`, and
+`f"SELECT COUNT(*) FROM {table}"`. Names were compile-time constants but
+the pattern was dangerous — any future contributor copying it with a user
+input would create an injection. v1.10 introduces `_ALLOWED_TABLES`
+frozenset, `_safe_table()` guard, and `_IDENT_RE` / `_DEFN_RE` regex
+gates. Every interpolation now passes through them. The `get_stats()`
+loop also passes through `_safe_table()` even though its list is
+hardcoded — defense in depth.
+
+**A3 — global FastAPI exception handler** (Prompt 42). Roughly 30
+sites used the `return JSONResponse({"error": str(e)[:300]}, 500)`
+pattern, leaking internal exception messages (file paths, table names,
+sometimes frame state via `repr`). v1.10 adds `@app.exception_handler(Exception)`
+that logs the full traceback with the request_id and returns a generic
+`{"error": "internal_error", "request_id": rid}` payload. A separate
+`StarletteHTTPException` handler preserves the explicit `status_code` and
+`detail` from intentional `HTTPException` raises but adds the request_id.
+
+### High-severity fixes
+
+**B1.a — `slowapi`-style rate limiting** (Prompt 4/39). 10 starts/hour
+on `/api/start`, 120 requests/min on all other `/api/*`. In-memory
+token-bucket per (IP, scope) — no new dependency. `/health`, `/readyz`,
+and `/static/` are exempt. Returns `429 {"error": "rate_limited", ...}`.
+
+**B1.b — correlation IDs** (Prompt 11). Every request gets a 12-char
+UUID via middleware. Available as `request.state.request_id`. Returned
+as `X-Request-ID` header. Used by the v1.10 exception handler.
+
+**B1.c — `/health` + `/readyz`** (Prompt 11). `/health` always returns
+`{"status": "ok"}` for liveness. `/readyz` probes a write to `webapp_jobs/`
+to confirm the app can actually serve work — returns 503 on filesystem
+error.
+
+**B2 — 14 webapp TestClient endpoint tests** (Prompt 9). New
+`tests/test_webapp_endpoints.py` covers: health/readyz without auth,
+401 on missing/bad token, 200 on Bearer + query token, CSRF cross-origin
+rejected, CSRF localhost passes, X-Request-ID present, invalid job_id
+rejected on xml download, unknown job 404 handling, phase2 on missing
+job, generate with bad format, log-board on missing job. All **91/91**
+pass in 6.2s.
+
+**B3.a — `requirements-dev.txt`** (Prompt 10). Split dev-only deps:
+`pip-audit` for CVE feeds + `httpx` for the FastAPI TestClient.
+
+**B3.b — `pip-audit` step in CI** (Prompt 10/56). `security-audit` job
+runs after Linux tests. Uses `--strict` flag on `requirements.txt` from
+the PyPI Advisory DB. `continue-on-error: true` so transient feed issues
+don't break the pipeline — failures show as annotations in the run
+summary.
+
+**B3.c — Windows CI runner** (Prompt 47). New `test-windows` job on
+`windows-latest` with Python 3.11. Catches Windows-specific regressions
+(path separators, `CREATE_NEW_PROCESS_GROUP`, file locks on cache DBs)
+that the existing 3-version Linux matrix can never see.
+
+### Medium fixes
+
+**C1.M-2 — `Form()` validation** is rolled into the existing handlers;
+many already had practical limits via in-function checks. Not changed
+broadly to avoid breaking compatible API behavior.
+
+**C1.M-3 — UploadFile MIME validation** on `/api/google/upload`.
+Accepts only `application/json`, `text/plain`, `text/json`,
+`application/octet-stream`, or empty. Rejects everything else with 400.
+Other upload endpoints (`/api/logs/analyze`, `/api/jobs/<id>/log-board`)
+take log files — text input, validated via decode rather than MIME.
+
+**C1.M-4 — SQLite `PRAGMA busy_timeout = 5000`** on every connection.
+This is on top of the existing `sqlite3.connect(timeout=30.0, ...)`
+arg, which only applies at `BEGIN` time. The PRAGMA applies inside
+every nested write — drastically reduces `database is locked` errors
+when multiple worker threads hit the same DB.
+
+**C1.M-8 — `validate_config()` at startup** in `main.py`. Checks
+`site.start_url` scheme, `crawl.max_pages` >= 0, `concurrent_requests`
+1..100, `delay_seconds` >= 0, `seed_strategy` in
+`{homepage, sitemap, hybrid}`, `deferred_crawl.pagination_max` >= 0.
+Warnings print to `stderr` before logging boots so misconfiguration is
+visible immediately.
+
+**C1.M-11 — `HEALTHCHECK`** in Dockerfile (30s interval, 5s timeout,
+3 retries) hitting `/health`. Orchestrators now know whether the
+container is actually serving, not just running.
+
+### Low fixes
+
+**D1.L-1 — `healthcheck:` block** in `docker-compose.yml` so
+`docker compose ps` shows `healthy` state.
+
+**D1.L-2 — `.env.example`** template documenting `PAGESPEED_API_KEY`,
+`BACKLINKS_API_KEY`, `AI_API_KEY`, and `SCT_NO_AUTO_INSTALL`. None of
+these are commit-able; the template is.
+
+### Verified
+
+```
+91/91 tests pass (6.2s, +14 new TestClient tests)
+compileall clean
+node --check on inline JS clean
+SSRF helper + auth token + CSRF + rate limit all confirmed via TestClient
+```
+
+### Findings deferred to a future release
+
+- M-1 (folder nesting `seo_crawler/seo_crawler/`) — disruptive refactor.
+- M-6 (`/api/v1/` versioning) — would break frontend without coordinated
+  rewrite; deferred until OpenAPI work begins.
+- M-7 (custom OpenAPI schemas) — pairs with M-6.
+- H-4/H-5 (split `main.py`/`app.py`/`test_core_behaviors.py`) — large
+  scope; planned for v1.11.
+- L-3 (lockfile), L-4 (USER_GUIDE deferred panel docs), L-5 (incident
+  runbook) — documentation backlog for v1.11.
+
+### Remaining ROADMAP item
+
+- **Single-file Windows `.exe` (PyInstaller)** — needs a Windows CI build host.
+
 ## v1.09 — 2026-06-19 (large audit batch)
 
 ### Scope

@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Log Analyzer — SCT</title>
 <link rel="stylesheet" href="/static/app.css">
+<script>
+window._sctToken = "{{ sct_token }}";
+(function () {
+  const o = window.fetch.bind(window);
+  window.fetch = function (i, n) {
+    n = n || {}; n.headers = new Headers(n.headers || {});
+    if (!n.headers.has("Authorization")) n.headers.set("Authorization", "Bearer " + window._sctToken);
+    return o(i, n);
+  };
+})();
+</script>
 <script src="/static/i18n.js"></script>
 </head>
 <body>

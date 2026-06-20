@@ -13,6 +13,7 @@ storage/database.py
 """
 
 import json
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -396,17 +397,44 @@ class CrawlDatabase:
                 conn.commit()
                 log.info(f"تم تهيئة قاعدة البيانات: {self.db_path}")
 
+    # v1.10-A2: قائمة بيضاء لأسماء الجداول/الأعمدة المسموح interpolation لها.
+    # SQLite لا يدعم parameterize لأسماء الكيانات، فالـwhitelist هو الحلّ الصحيح
+    # لإغلاق نمط SQL injection لو نُقل الكود مستقبلاً مع مدخل خارجي.
+    _ALLOWED_TABLES: frozenset[str] = frozenset({
+        "pages", "links", "images", "headings", "schema_entries",
+        "http_headers", "redirects", "external_link_status",
+        "crawl_queue", "visited_urls", "url_depth", "meta",
+    })
+    # أنماط آمنة لأعمدة + تعريفات (يحدّد الإصلاحات المسموحة في _PAGE_MIGRATIONS)
+    _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    _DEFN_RE = re.compile(r"^[A-Za-z0-9_ ()]+$")
+
+    def _safe_table(self, name: str) -> str:
+        """v1.10-A2: تتحقّق أنّ اسم الجدول من القائمة البيضاء قبل interpolation."""
+        if name not in self._ALLOWED_TABLES:
+            raise ValueError(f"refusing unknown table name: {name!r}")
+        return name
+
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        """إضافة أي أعمدة جديدة مفقودة في قواعد بيانات أُنشئت بإصدار أقدم."""
+        """إضافة أي أعمدة جديدة مفقودة في قواعد بيانات أُنشئت بإصدار أقدم.
+
+        v1.10-A2: نُغلّف interpolation بـ_safe_table + regex على أسماء الأعمدة
+        والتعريفات. أسماء جدول/أعمدة compile-time constants من الـcode، لكنّ
+        defense-in-depth ضدّ تعديل مستقبليّ غير حذر."""
         for table, migrations in (
             ("pages", self._PAGE_MIGRATIONS),
             ("http_headers", self._HEADER_MIGRATIONS),
         ):
-            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            tbl = self._safe_table(table)
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({tbl})")}
             for column, definition in migrations.items():
                 if column not in existing:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-                    log.info(f"ترقية المخطط: أُضيف العمود {table}.{column}")
+                    if not self._IDENT_RE.match(column):
+                        raise ValueError(f"invalid column name: {column!r}")
+                    if not self._DEFN_RE.match(definition):
+                        raise ValueError(f"invalid column definition: {definition!r}")
+                    conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {column} {definition}")
+                    log.info(f"ترقية المخطط: أُضيف العمود {tbl}.{column}")
 
     def _get_connection(self) -> sqlite3.Connection:
         """الحصول على connection للـ thread الحالي."""
@@ -418,6 +446,11 @@ class CrawlDatabase:
             )
             self._local.conn.row_factory = sqlite3.Row
             self._local.conn.execute("PRAGMA foreign_keys = ON")
+            # v1.10-C1 (M-4): busy_timeout=5000ms — على مستوى الـconnection بدل
+            # timeout-arg-only، يضمن انتظار في كلّ `BEGIN/COMMIT` لا فقط
+            # الـcontention الأوّلي. ينقص نسبة `database is locked` بشكل كبير
+            # عند worker threads متعدّدة على نفس DB.
+            self._local.conn.execute("PRAGMA busy_timeout = 5000")
 
             # تحسينات الأداء
             if self._wal_mode:
@@ -1054,15 +1087,20 @@ class CrawlDatabase:
             log.info("تم تنظيف قاعدة البيانات")
 
     def get_stats(self) -> dict[str, int]:
-        """إحصائيات قاعدة البيانات."""
+        """إحصائيات قاعدة البيانات.
+
+        v1.10-A2: أسماء الجدول compile-time constants من السطر التالي + يُمرَّر
+        عبر _safe_table قبل interpolation كـdefense-in-depth.
+        """
         stats = {}
         with self._get_connection() as conn:
             for table in ["pages", "links", "images", "headings", "schema_entries",
                           "http_headers", "redirects", "external_link_status",
                           "crawl_queue", "visited_urls"]:
                 try:
-                    stats[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                except sqlite3.Error:
+                    tbl = self._safe_table(table)  # whitelist enforcement
+                    stats[table] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                except (sqlite3.Error, ValueError):
                     stats[table] = 0
         return stats
 

@@ -30,5 +30,12 @@ USER sct
 # الواجهة المرئية
 EXPOSE 8000
 
+# v1.10-C1 (M-11): HEALTHCHECK — orchestrators (Docker compose, K8s) تعرف هل
+# الـapp يردّ فعلاً، لا فقط هل الـprocess على قيد الحياة.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request,sys; \
+sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).getcode()==200 else 1)" \
+        || exit 1
+
 # لا تُضمّن أي مفاتيح في الصورة — تُمرَّر وقت التشغيل عبر -e أو env_file/.env
 CMD ["python", "webapp/run.py", "--host", "0.0.0.0", "--port", "8000"]

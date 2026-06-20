@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SCT — Crawler & SEO Audit</title>
 <link rel="stylesheet" href="/static/app.css">
+<script>
+// v1.10-A1: حقن SCT local token في كلّ fetch تلقائياً (Authorization: Bearer).
+// المتصفّح يحصل على الـtoken من القالب الذي رنّت السيرفر بأمان (مَن يستطيع طلب
+// `/` يمسك بالـtoken — هذا تماماً ما نريد لأداة محلّيّة).
+window._sctToken = "{{ sct_token }}";
+(function () {
+  const origFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    init = init || {};
+    init.headers = new Headers(init.headers || {});
+    if (!init.headers.has("Authorization")) {
+      init.headers.set("Authorization", "Bearer " + window._sctToken);
+    }
+    return origFetch(input, init);
+  };
+})();
+</script>
 <script src="/static/i18n.js"></script>
 <style>
   .tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 4px;border-bottom:2px solid #e5e7eb}
@@ -37,7 +54,7 @@
 </head>
 <body>
 <header class="topbar">
-  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO <small class="version-tag">v1.09 · by Ahmad-Ajm</small></h1>
+  <h1 data-i18n="app_title">🕷️ SCT — أداة الزحف وتدقيق SEO <small class="version-tag">v1.10 · by Ahmad-Ajm</small></h1>
   <span>
     <a href="/logs" class="btn sm" data-i18n="logs_link">📜 تحليل اللوغ</a>
     <button id="langToggle" class="btn sm" type="button">English</button>

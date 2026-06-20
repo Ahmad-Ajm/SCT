@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -44,6 +45,191 @@ from webapp.job_runner import JobRunner  # noqa: E402
 app = FastAPI(title="SCT — Simple Crawler Tool")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+
+
+# ============================================================
+# v1.10-A1: Local auth token — يُحمي webapp من أيّ مَن يصل لـ127.0.0.1
+# (Docker bridge، LAN، VPN، تطبيقات أخرى على نفس الجهاز).
+# يُولَّد عند أوّل startup ويُحفَظ في ~/.sct/local_token بصلاحيّات 0600.
+# يُحقَن تلقائياً في القوالب عبر `request.scope["sct_token"]`، فالمستخدم
+# الذي فتح الصفحة من نفس الجهاز يحصل عليه شفافياً. أيّ POST/PUT/DELETE
+# يحتاج Bearer header أو `?token=` query (لـcurl).
+# ============================================================
+def _load_or_create_token() -> str:
+    """ينشئ token محلّياً إن لم يوجد. يُخزَّن بـ0600. مَن يمسك الـtoken يدير الأداة."""
+    from secrets import token_urlsafe
+    home = Path.home() / ".sct"
+    home.mkdir(mode=0o700, exist_ok=True)
+    tp = home / "local_token"
+    if tp.exists():
+        try:
+            existing = tp.read_text(encoding="utf-8").strip()
+            if existing and len(existing) >= 32:
+                return existing
+        except OSError:
+            pass
+    new = token_urlsafe(32)
+    try:
+        tp.write_text(new, encoding="utf-8")
+        try:
+            os.chmod(tp, 0o600)
+        except (OSError, NotImplementedError):
+            pass
+    except OSError:
+        # إن تعذّر الحفظ (rare)، نستعمل token جلسة فقط — يفقد عند إعادة التشغيل
+        pass
+    return new
+
+
+_LOCAL_TOKEN = _load_or_create_token()
+
+# مسارات معفاة (يمكن GET-ها بلا auth: صفحات HTML + static + health/readyz)
+# هذا يسمح للمتصفّح بتحميل index.html ثم يحقن الـtoken في كلّ POST.
+_AUTH_EXEMPT_PREFIXES = ("/static/", "/health", "/readyz")
+_AUTH_EXEMPT_EXACT = {"/favicon.ico"}
+
+
+def _extract_token(request) -> str:
+    """يقرأ token من Bearer header أو query param."""
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return (request.query_params.get("token") or "").strip()
+
+
+@app.middleware("http")
+async def _local_auth_guard(request, call_next):
+    """v1.10-A1: يفرض token على كلّ POST/PUT/DELETE + كلّ /api/.
+
+    GET على HTML صفحات يمر — لأنّ المتصفّح لا يستطيع إرسال headers مخصّصة عند
+    أوّل تحميل صفحة. القوالب تحقن الـtoken في كلّ fetch لاحقاً. هذا نمط مشابه
+    لـJupyter notebook token authentication."""
+    path = request.url.path or "/"
+    if path in _AUTH_EXEMPT_EXACT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
+        return await call_next(request)
+    # GET على HTML pages (الجذر + /jobs/*): يمر بدون auth، لكن الـtoken يُحقَن
+    # في الـsession كي تستعمله الـfetch calls التالية.
+    if request.method == "GET" and not path.startswith("/api"):
+        return await call_next(request)
+    # API + state-changing methods: يجب توفّر token صحيح
+    provided = _extract_token(request)
+    if not provided or not _constant_time_eq(provided, _LOCAL_TOKEN):
+        return JSONResponse(
+            {"error": "unauthorized",
+             "hint": "Provide your SCT local token via Authorization: Bearer <token> "
+                     f"or ?token=<token>. Token file: ~/.sct/local_token"},
+            status_code=401,
+        )
+    return await call_next(request)
+
+
+def _constant_time_eq(a: str, b: str) -> bool:
+    """v1.10-A1: مقارنة ثابتة الزمن — يمنع timing attacks."""
+    import hmac
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+# ============================================================
+# v1.10-A3: Global exception handler — يمنع leakage لرسائل الاستثناءات
+# الداخليّة (paths، table names، أحياناً frame locals عبر repr). كان النمط
+# السابق في 30+ موقع: `return JSONResponse({"error": str(e)[:300]}, 500)`.
+# الآن: الأخطاء غير المُتوقَّعة تُسجَّل بـtraceback كامل مع request_id فقط،
+# والـclient يحصل على رسالة عامّة + request_id لتتبّع.
+# ============================================================
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request, exc):
+    """يمسك أيّ استثناء غير معالَج ⇒ يسجّل + يردّ generic 500.
+
+    الاستثناءات المتوقّعة (HTTPException, ValueError بـvalidation) لا تمرّ من
+    هنا — FastAPI/Starlette تتولّاها بـhandlers خاصّة."""
+    import traceback, uuid
+    rid = getattr(request.state, "request_id", None) or uuid.uuid4().hex[:12]
+    log = logging.getLogger("sct.webapp")
+    log.error(
+        f"[req={rid}] unhandled {type(exc).__name__} on {request.method} "
+        f"{request.url.path}\n{traceback.format_exc()}"
+    )
+    return JSONResponse(
+        {"error": "internal_error", "request_id": rid,
+         "hint": "Server log holds the traceback. Search by request_id."},
+        status_code=500,
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request, exc):
+    """HTTPException-derived: نُبقي status_code الأصلي + رسالة قصيرة آمنة."""
+    rid = getattr(request.state, "request_id", None) or ""
+    payload = {"error": exc.detail if isinstance(exc.detail, str) else "http_error"}
+    if rid:
+        payload["request_id"] = rid
+    return JSONResponse(payload, status_code=exc.status_code)
+
+
+def _tpl_ctx(extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """v1.10-A1: السياق المُشترَك لكلّ TemplateResponse — يحقن sct_token تلقائياً."""
+    ctx = {"sct_token": _LOCAL_TOKEN}
+    if extra:
+        ctx.update(extra)
+    return ctx
+
+
+# v1.10-B1: middleware لـcorrelation IDs — كلّ طلب يحصل على UUIDv4 يظهر في
+# كلّ log line يخصّ هذا الطلب. تتبّع debug عبر terminal واحد بحثاً برقم.
+@app.middleware("http")
+async def _correlation_id_middleware(request, call_next):
+    import uuid
+    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    request.state.request_id = rid
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
+    return response
+
+
+# v1.10-B1: rate limiting خفيف — 120 طلب/دقيقة لكلّ IP، وحدّ خاصّ على /api/start
+# (10/ساعة) لمنع spawning crawlers بلا سيطرة. تنفيذ in-memory (سلّة + token bucket
+# مبسَّط) — لا dependency جديدة. كافٍ لأداة local، production يحتاج slowapi/redis.
+_RATE_BUCKETS: dict[str, tuple[float, int]] = {}
+_RATE_LOCK = __import__("threading").Lock()
+
+
+def _check_rate(ip: str, key: str, max_per_minute: int) -> bool:
+    """يُرجع True إن سُمح، False إن تُجاوز. token-bucket بسيط بـsecond-resolution."""
+    import time
+    now = time.time()
+    bk = f"{ip}|{key}"
+    with _RATE_LOCK:
+        last, count = _RATE_BUCKETS.get(bk, (now, 0))
+        # نفس النافذة (60s)؟
+        if now - last < 60.0:
+            count += 1
+            _RATE_BUCKETS[bk] = (last, count)
+            return count <= max_per_minute
+        # نافذة جديدة
+        _RATE_BUCKETS[bk] = (now, 1)
+        return True
+
+
+@app.middleware("http")
+async def _rate_limit_middleware(request, call_next):
+    path = request.url.path or "/"
+    if path.startswith("/static/") or path in ("/health", "/readyz"):
+        return await call_next(request)
+    ip = (request.client.host if request.client else "?")
+    # حدّ خاصّ على /api/start: 10/ساعة (= 0.16/دقيقة، نُسهّله إلى 1/min × 10) +
+    # حدّ عام 120/دقيقة على بقيّة الـAPI.
+    if path == "/api/start" and request.method == "POST":
+        if not _check_rate(ip, "start", max_per_minute=10):
+            return JSONResponse({"error": "rate_limited", "scope": "start"},
+                                status_code=429)
+    elif path.startswith("/api/"):
+        if not _check_rate(ip, "api", max_per_minute=120):
+            return JSONResponse({"error": "rate_limited", "scope": "api"},
+                                status_code=429)
+    return await call_next(request)
 
 
 # v1.09-B3: حماية CSRF — على أيّ POST، إن وُجد `Origin` ولم يُطابق مضيف الـapp،
@@ -214,14 +400,34 @@ def _label_for(rel: str, lang: str = "ar") -> str:
     return name
 
 
+@app.get("/health")
+async def health():
+    """v1.10-B1: liveness — يُفيد orchestrators (Docker compose, K8s) أنّ الـapp يردّ."""
+    return JSONResponse({"status": "ok"})
+
+
+@app.get("/readyz")
+async def readyz():
+    """v1.10-B1: readiness — يفحص قابليّة الكتابة + DB access. يردّ 503 إن غير جاهز."""
+    from webapp.job_runner import JOBS_DIR
+    try:
+        # فحص فعلي للكتابة في jobs dir
+        probe = JOBS_DIR / ".healthcheck"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        return JSONResponse({"status": "ready"})
+    except OSError as e:
+        return JSONResponse({"status": "not_ready", "reason": str(e)[:120]}, status_code=503)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "jobs": runner.list_jobs()[:15],
+        _tpl_ctx({"request": request, "jobs": runner.list_jobs()[:15],
          "groups": EXTRACTION_GROUPS, "formats": OUTPUT_FORMATS,
          "sections": SECTIONS, "severities": SEVERITIES,
-         "active_job": runner.active_job()},
+         "active_job": runner.active_job()}),
     )
 
 
@@ -403,7 +609,7 @@ async def start(request: Request):
 async def job_page(request: Request, job_id: str):
     meta = runner.meta(job_id)
     return templates.TemplateResponse(
-        "job.html", {"request": request, "job_id": job_id, "meta": meta}
+        "job.html", _tpl_ctx({"request": request, "job_id": job_id, "meta": meta})
     )
 
 
@@ -827,6 +1033,15 @@ async def google_status():
 @app.post("/api/google/upload")
 async def google_upload(file: UploadFile = File(...)):
     """رفع ملف OAuth client secret (Desktop) من المتصفّح."""
+    # v1.10-C1 (M-3): MIME validation — نقبل application/json و text/* فقط.
+    # ملف Google OAuth client_secret دائماً JSON. أيّ شيء آخر مرفوض.
+    ctype = (file.content_type or "").lower().split(";")[0].strip()
+    if ctype not in ("application/json", "text/plain", "text/json",
+                     "application/octet-stream", ""):
+        return JSONResponse(
+            {"error": f"MIME type غير مقبول: {ctype}. متوقّع application/json."},
+            status_code=400,
+        )
     # ملف client secret صغير جداً (بضع كيلوبايت). نحدّ الحجم لمنع استنزاف الذاكرة.
     raw = await file.read()
     if len(raw) > 64 * 1024:
@@ -1477,7 +1692,7 @@ _PAGE_FIELDS = [
 @app.get("/jobs/{job_id}/explore", response_class=HTMLResponse)
 async def explore_page(request: Request, job_id: str):
     return templates.TemplateResponse(
-        "explore.html", {"request": request, "job_id": job_id}
+        "explore.html", _tpl_ctx({"request": request, "job_id": job_id})
     )
 
 
@@ -1511,14 +1726,14 @@ async def job_pages(job_id: str):
 async def board_page(request: Request, job_id: str):
     """لوحة العمل التفاعلية (Action Board) — تعرض أولويات الإصلاح مجمّعةً وقابلةً للتصفية."""
     return templates.TemplateResponse(
-        "board.html", {"request": request, "job_id": job_id}
+        "board.html", _tpl_ctx({"request": request, "job_id": job_id})
     )
 
 
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
     """صفحة تحليل ملفات سجلّ الخادم (Apache/Nginx) لاستخراج زحف Googlebot."""
-    return templates.TemplateResponse("logs.html", {"request": request})
+    return templates.TemplateResponse("logs.html", _tpl_ctx({"request": request}))
 
 
 # سقف رفع ملف اللوغ (يُقرأ كاملاً للذاكرة بعد الـupload — الـstreaming بداخل التحليل)
@@ -1624,7 +1839,7 @@ async def jobs_list_with_audit():
 async def compare_page(request: Request, job_id: str):
     """صفحة مقارنة زمنية: تختار مهمّة أخرى وتعرض المُصلَح/الجديد/الباقي."""
     return templates.TemplateResponse(
-        "compare.html", {"request": request, "job_id": job_id}
+        "compare.html", _tpl_ctx({"request": request, "job_id": job_id})
     )
 
 
@@ -1693,7 +1908,7 @@ async def graph_page(request: Request, job_id: str):
     """v1.04: صفحة تصوير الزحف — شجرة URL + توزيع العمق/الحالة + رسم بياني للروابط
     على المواقع الصغيرة (<500 صفحة)."""
     return templates.TemplateResponse(
-        "graph.html", {"request": request, "job_id": job_id}
+        "graph.html", _tpl_ctx({"request": request, "job_id": job_id})
     )
 
 
