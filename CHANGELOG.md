@@ -4,6 +4,110 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.12.1 — v1.12.7 (2026-06-20 same-day patches — full refactor completion)
+
+The v1.12.0 release shipped the supply-chain + dependency fixes (DEP-1, DEP-6,
+DEP-12 + DEP-2/3/5 bonus) + the first 8 of 14 services modules. The same-day
+v1.12.1–v1.12.7 patches finish the structural refactor that was explicitly
+deferred from v1.11, all gated on green 91/91 tests between batches.
+
+### Final REFACTOR-services (v1.12.1 + v1.12.2)
+
+`seo_crawler/main.py`: **2,339 → 513 LOC (−78%)** with 14 service modules:
+
+| Module | Tier | LOC | Owns |
+|---|---|---:|---|
+| `progress_service` | 0 leaf | 57 | `emit_phase` |
+| `deferred_service` | 0 leaf | 45 | `deferred_list`, `deferred_summary` |
+| `integrations_summary` | 0 leaf | 48 | `gsc_summary`, `ga4_summary` |
+| `export_helpers` | 1 leaf | 186 | 11 flatten helpers + `get_value` |
+| `config_service` | 1 | 99 | `load_config`, `setup_output_dir`, `validate_config`, `slugify_label`, `configure_target_site` |
+| `db_facade` | 1 | 75 | `DatabaseBackedCrawler` + `AttrDict` |
+| `ai_service` | 1 | 54 | `run_ai_analysis` |
+| `crawl_service` | 2 | 115 | `run_crawl_sync/async`, Phase 2 helpers |
+| `analysis_service` | 2 | 285 | `run_analysis` (14 analyzer lazy imports) |
+| `external_check_service` | 3 | 226 | `run_external_links_check`, `run_resource_status_check` |
+| `integrations_service` | 3 | 243 | `run_integrations`, `MinimalCrawler` |
+| `export_service` | 4 | 449 | `run_export` (the biggest single extraction) |
+| `integrations_only_service` | 5 | 101 | `run_integrations_only` |
+| `compare_service` | 5 | 202 | `run_compare_workflow`, `build_compare_summary`, `summarize_crawler_result` |
+
+main.py re-exports every public name for backward compat — tests + external
+callers (`from main import DatabaseBackedCrawler` etc.) keep working.
+
+### Full REFACTOR-app-routers (v1.12.3 + v1.12.4 + v1.12.5 + v1.12.6)
+
+`webapp/app.py`: **2,098 → 143 LOC (−93%)** with 12 webapp modules:
+
+- **`webapp/constants.py` (144 LOC)** — pure data + i18n: EXTRACTION_GROUPS,
+  OUTPUT_FORMATS, SECTIONS, SEVERITIES, UA_PRESETS, MAX_AUDIT_JSON_MB,
+  CSV_LABELS + `label_for()`.
+- **`webapp/security.py` (240 LOC)** — auth token + 4 middlewares + 2
+  exception handlers + `register_middlewares(app)` / `register_exception_handlers(app)`.
+  Preserves the v1.10 middleware execution order
+  (CSRF → rate → correlation → auth → handler, last-registered = first-executed).
+- **`webapp/deps.py` (87 LOC)** — singletons (`runner`, `templates`,
+  `FINISHED_STATUSES`) + path helpers (`_safe_under_jobs`, `_job_output_dir`,
+  `_safe_output_file`) + Google helper (`_google_dir`) + `_run_conn_test`.
+  Single source of truth — no duplicate helper definitions across routers.
+
+The 9 APIRouter modules under `webapp/routers/`:
+
+| Router | LOC | Endpoints |
+|---|---:|---|
+| `pages.py` | 87 | 7 HTMLResponse routes (/, /jobs/{id}, /jobs/{id}/{explore,board,compare,graph}, /logs) |
+| `jobs.py` | 315 | Job lifecycle: /api/start (heaviest, ~170 LOC of form parsing), progress, events (SSE), phase2, deferred, stop, kill, delete, delete-all |
+| `downloads.py` | 214 | report rebuild + file delivery + ZIP packaging (with `only=` filter) |
+| `generate.py` | 191 | background HTML/PDF/Excel/XML build + status. Owns `_gen_state`/`_gen_lock` |
+| `google_oauth.py` | 318 | full OAuth flow (8 endpoints). Owns `_paste_flow` state + `_probe_token_expired` + `_save_google_tokens` |
+| `connections.py` | 98 | /api/test/{gsc,ga4,pagespeed} |
+| `setup.py` | 214 | /api/setup/{tool}, /api/requirements, /docs/{name} + markdown→HTML |
+| `analytics.py` | 310 | read-only audit-JSON endpoints (/api/jobs/{id}/{pages,compare,url-detail,graph,priority}) + _build_graph_payload |
+| `logs.py` | 103 | /api/logs/analyze + /api/jobs/{id}/log-board |
+
+app.py final shape: FastAPI instantiation → static mount → deps/security/
+constants imports → `register_middlewares(app)` + `register_exception_handlers(app)`
+→ 9 `app.include_router(...)` → `/health` + `/readyz` → backward-compat
+re-exports of `_extract_oauth_code`, `_probe_token_expired` for test imports.
+
+### REFACTOR-tests-split infrastructure (v1.12.7)
+
+`tests/conftest.py` extracted from `test_core_behaviors.py`:
+- sys.path bootstrap (so any test file can `from analyzers.X import Y`)
+- Shared fixtures: `FakeResponse`, `MinimalPage`, `_FakeAIResp`.
+
+`test_core_behaviors.py` now imports fixtures from conftest, removing
+duplicated definitions. The actual category-split of the 77 tests across
+6 files (test_crawler/analyzers/integrations/exporters/priority/utils) is
+deferred to v1.13 — needs a focused session to categorize each test and
+migrate while preserving setUp/tearDown state, helper closures, and the
+local HTTP fixture server. v1.12.7 ships the prerequisite plumbing.
+
+### Test status across all v1.12 patches
+
+```
+v1.12.0 → 91/91 OK
+v1.12.1 → 91/91 OK
+v1.12.2 → 91/91 OK
+v1.12.3 → 91/91 OK
+v1.12.4 → 91/91 OK
+v1.12.5 → 91/91 OK
+v1.12.6 → 91/91 OK
+v1.12.7 → 91/91 OK
+```
+
+Every patch landed on green tests before the next started.
+
+### Final v1.12 totals
+
+- **main.py: 2,339 → 513 LOC (−78%)** + 14 services modules (2,200 LOC)
+- **webapp/app.py: 2,098 → 143 LOC (−93%)** + 12 webapp modules (2,500 LOC)
+- **tests/conftest.py** seeded for v1.13 category-split
+- **Zero behavior changes** — all public APIs preserved through re-exports
+- **All 91 tests green** at every checkpoint
+
+---
+
 ## v1.12 — 2026-06-20 (high-severity deps + supply-chain hardening + services/ leaves)
 
 ### Scope

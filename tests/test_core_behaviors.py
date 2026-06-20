@@ -3,15 +3,16 @@ import sys
 import tempfile
 import threading
 import unittest
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
+# v1.12.7 REFACTOR-tests-split: sys.path + shared fixtures نُقلت إلى tests/conftest.py
+from tests.conftest import FakeResponse, MinimalPage, _FakeAIResp  # noqa: F401
 
+# ROOT و APP يبقيان للتوافق العكسي مع testات تستعمل ROOT مباشرةً.
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "seo_crawler" / "seo_crawler"
-sys.path.insert(0, str(APP))
 
 from crawler.robots_parser import RobotsParser
 from analyzers.canonical_analyzer import analyze_canonicals
@@ -33,41 +34,6 @@ from utils.helpers import (
     neutralize_formula,
     format_duration,
 )
-
-
-class FakeResponse:
-    status_code = 200
-    text = "User-agent: *\nDisallow: /blocked\nSitemap: https://example.com/sitemap.xml\n"
-    encoding = "utf-8"
-
-    def iter_content(self, chunk_size=8192):
-        data = self.text.encode("utf-8")
-        for i in range(0, len(data), chunk_size):
-            yield data[i:i + chunk_size]
-
-    def close(self):
-        return None
-
-
-@dataclass
-class MinimalPage:
-    url: str
-    status_code: int = 200
-    is_indexable: bool = True
-    canonical: str = ""
-
-
-class _FakeAIResp:
-    """استجابة requests وهمية لاختبار مستشار الذكاء الاصطناعي دون شبكة."""
-
-    def __init__(self, payload):
-        self._payload = payload
-
-    def raise_for_status(self):
-        return None
-
-    def json(self):
-        return self._payload
 
 
 class CoreBehaviorTests(unittest.TestCase):
