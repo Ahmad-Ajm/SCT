@@ -4,6 +4,65 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13 — 2026-06-20 (REFACTOR-tests-split content migration)
+
+The final REFACTOR from the v1.11 audit. tests/test_core_behaviors.py
+(1,414 LOC, 77 tests in 3 classes) is split into 6 categorized files
+under tests/, with the v1.12.7 `conftest.py` providing shared fixtures
+(sys.path bootstrap + FakeResponse + MinimalPage + _FakeAIResp).
+
+### The 6 new test files
+
+| File | Tests | LOC | Covers |
+|---|---:|---:|---|
+| `tests/test_crawler.py` | 17 | 308 | robots, db persistence, async_core, classifier, content/custom extractors, adaptive throttle, platform presets, Phase 2 seed injection |
+| `tests/test_analyzers.py` | 23 | 379 | every analyzer module (canonical, url_issues, duplicate, redirect, schema, security, hreflang, pagination, link_score, near_duplicate, spell_check, hints, accessibility, gsc_insights, crawl_compare, log_analyzer, _coerce) |
+| `tests/test_integrations.py` | 12 | 226 | gsc_api, ga4_api, pagespeed_api, crux_history, ai_advisor (incl. SSRF rejection), lighthouse_importer, backlinks_api |
+| `tests/test_exporters.py` | 8 | 166 | csv_exporter, html_exporter, report_builder (incl. client/expert/both audiences), sitemap_generator, unified join, opportunities |
+| `tests/test_priority.py` | 3 | 121 | reporting/priority_engine (classify, ease, scores, action board) + reporting/url_detail |
+| `tests/test_utils.py` | 14 | 199 | utils/helpers, utils/monitoring, utils/auto_install, storage/cache, webapp/job_runner internals, webapp/app helpers (_probe_token_expired, _run_conn_test) |
+
+### Mechanics
+
+- `tools/split_tests.py` (new, 200 LOC) — one-shot migration tool that
+  parses test_core_behaviors.py with `ast`, maps each of the 77 tests
+  to a category, and emits the 6 target files with category-specific
+  module-level imports (each file only imports what its tests use).
+- Per-class context (CoreBehaviorTests, RegressionTests, V109BatchTests)
+  is collapsed: each new file gets a single `TestX(unittest.TestCase)`
+  class that holds all tests for the category. The legacy class
+  membership wasn't load-bearing — there were no shared setUp methods
+  across the 3 old classes.
+- `tests/test_core_behaviors.py` deleted. Pre-v1.13 imports for
+  `from tests.test_core_behaviors import ...` no longer work — any
+  external code that did this (none in-tree) needs to update to
+  `from tests.test_<category> import ...`.
+
+### Test status
+
+```
+v1.13 → 91/91 OK (77 from the 6 split files + 14 webapp endpoint tests)
+```
+
+Identical pass count + behavior to v1.12.7. The split is pure
+refactoring — no test logic changed.
+
+### Repository structure post-v1.13
+
+The full v1.11-audit-driven refactor is complete. Summary:
+
+| Area | Before | After | Modules |
+|---|---:|---:|---|
+| `seo_crawler/main.py` | 2,339 LOC | 513 LOC (−78%) | 14 services modules |
+| `webapp/app.py` | 2,098 LOC | 143 LOC (−93%) | 12 webapp modules |
+| `tests/test_core_behaviors.py` | 1,414 LOC | (deleted) | 6 split files + conftest.py |
+
+Total new modules across v1.12.0–v1.13: **32**. All behavior preserved
+through re-exports + module-level fixtures. Every release shipped on
+green tests.
+
+---
+
 ## v1.12.1 — v1.12.7 (2026-06-20 same-day patches — full refactor completion)
 
 The v1.12.0 release shipped the supply-chain + dependency fixes (DEP-1, DEP-6,
