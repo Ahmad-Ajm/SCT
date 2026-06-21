@@ -475,19 +475,52 @@ function renderDiagnostics(d) {
 
 // v1.13.2: EventSource لا يدعم headers مخصّصة، فnavigation عادي لا يحقن
 // Authorization. نُمرّر token في query حتى تنجح المصادقة.
+// v1.13.3: حارس مزدوج — finish() لا يُستدعى مرّتين سواء جاء من SSE أو polling.
+let _finishedOnce = false;
+function _safeFinish(meta) {
+  if (_finishedOnce) return;
+  _finishedOnce = true;
+  finish(meta);
+}
 const es = new EventSource(withToken('/api/jobs/' + jobId + '/events'));
 es.onmessage = (e) => {
   const data = JSON.parse(e.data);
   applyProgress(data.progress);
   applyStatus(effectiveStatus(data.meta, data.progress));
+  // v1.13.3: لو data وصلت بـmeta منتهية + result جاهز، لا ننتظر event:end.
+  // (السبب: في بعض الحالات end لا يصل بسبب race في الـbackend بين كتابة meta
+  // وإغلاق المهمة، فيكتفي السيرفر بـdata: ثم يخرج.)
+  if (data.meta && FINISHED.includes(data.meta.status) && data.meta.result) {
+    _safeFinish(data.meta);
+    try { es.close(); } catch (_e) {}
+  }
 };
 es.addEventListener('end', (e) => {
   const data = JSON.parse(e.data);
   applyProgress(data.progress);
-  finish(data.meta);
+  _safeFinish(data.meta);
   es.close();
 });
 es.onerror = () => { /* المتصفح يعيد المحاولة تلقائياً */ };
+
+// v1.13.3: polling fallback يعمل بجانب SSE — يضمن auto-update حتى لو SSE
+// فشل (auth/timeouts/proxy/إلخ). كل 3 ثوان يفحص /progress؛ لو الحالة منتهية
+// والـresult جاهز يستدعي _safeFinish ويتوقّف. عند نجاح SSE _finishedOnce
+// يكون true فالـpoller لا يفعل شيئاً.
+const _pollFallback = setInterval(async () => {
+  if (_finishedOnce) { clearInterval(_pollFallback); return; }
+  try {
+    const r = await fetch('/api/jobs/' + jobId + '/progress');
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j || !j.meta) return;
+    // إن وُجد result مع status منتهية — نعرض اللوحة فوراً
+    if (FINISHED.includes(j.meta.status) && j.meta.result) {
+      _safeFinish(j.meta);
+      clearInterval(_pollFallback);
+    }
+  } catch (_e) { /* استمرّ */ }
+}, 3000);
 
 document.getElementById('killBtn').addEventListener('click', async () => {
   if (!confirm('قتل فوري للعملية بلا انتظار. لن تُصدَّر بيانات. متأكد؟')) return;
