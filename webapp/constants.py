@@ -115,14 +115,45 @@ CSV_LABELS: dict[str, dict[str, str]] = {
 
 
 def label_for(rel: str, lang: str = "ar") -> str:
-    """تسمية معبّرة لملف ناتج حسب مساره النسبي."""
+    """تسمية معبّرة لملف ناتج حسب مساره النسبي.
+
+    v1.13.1: تمييز ملفّات JSON المتعدّدة (كانت كلّها تظهر «الأرشيف الكامل (JSON)»):
+    - metrics.json                 → مقاييس الأداء
+    - integrations_<slug>_<ts>.json → أرشيف التكاملات
+    - audit_<slug>_<ts>.json        → الأرشيف الكامل
+    - pagespeed_raw/*.json          → PageSpeed خام (مع تمييز mobile/desktop)
+    - comparison_summary.json       → ملخّص المقارنة
+    - أيّ ملف .json آخر             → اسم الملف صريح
+    """
     name = Path(rel).name
     stem = Path(name).stem
     low = name.lower()
+    low_rel = rel.replace("\\", "/").lower()
     if rel.startswith("csv/") and stem in CSV_LABELS:
         return CSV_LABELS[stem][lang]
     if low.endswith(".json"):
-        return "الأرشيف الكامل (JSON)" if lang == "ar" else "Full audit archive (JSON)"
+        # v1.13.1: تمييز JSON بحسب نمط الاسم/المسار
+        if low == "metrics.json":
+            return "مقاييس الأداء (JSON)" if lang == "ar" else "Performance metrics (JSON)"
+        if low.startswith("comparison_summary"):
+            return "ملخّص المقارنة (JSON)" if lang == "ar" else "Comparison summary (JSON)"
+        if "pagespeed_raw/" in low_rel or low_rel.startswith("pagespeed_raw"):
+            # نُحاول استخراج mobile/desktop من اسم الملف
+            extra = ""
+            if "mobile" in low:
+                extra = " — Mobile"
+            elif "desktop" in low:
+                extra = " — Desktop"
+            return (f"PageSpeed خام{extra} (JSON)" if lang == "ar"
+                    else f"PageSpeed raw{extra} (JSON)")
+        if low.startswith("integrations_"):
+            return "أرشيف التكاملات (JSON)" if lang == "ar" else "Integrations archive (JSON)"
+        if low.startswith("audit_") or low == "audit.json":
+            return "الأرشيف الكامل (JSON)" if lang == "ar" else "Full audit archive (JSON)"
+        if "deferred" in low:
+            return "روابط مؤجَّلة (JSON)" if lang == "ar" else "Deferred URLs (JSON)"
+        # fallback: اسم الملف صريح (لا «الأرشيف الكامل» العامّة)
+        return f"{stem} (JSON)"
     if low.endswith(".xlsx"):
         return "مصنّف Excel" if lang == "ar" else "Excel workbook"
     if "_client" in low and low.endswith(".html"):
