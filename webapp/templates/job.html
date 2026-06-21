@@ -172,6 +172,16 @@ window._sctToken = "{{ sct_token }}";
 <script>
 const jobId = "{{ job_id }}";
 
+// v1.13.2: navigation عاديّ من <a href> أو window.location لا يمرّ عبر
+// fetch monkey-patch، فلا يحقن Authorization header. الحلّ: نُضيف
+// ?token=... للـURLs التي تُفتح كـnavigation. الـtoken نفسه المُحقَن
+// في كل قوالب v1.10-A1 (window._sctToken).
+function withToken(url) {
+  const t = window._sctToken || "";
+  if (!t) return url;
+  return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(t);
+}
+
 // --- عدّاد الوقت الحيّ ---
 let lastServerElapsed = 0;   // آخر قيمة من الخادم (مرجعية)
 let lastUpdateTs = Date.now();
@@ -214,7 +224,8 @@ function renderDownloads(result) {
     if (result && result[k]) {
       const a = document.createElement('a');
       a.className = 'btn sm';
-      a.href = '/api/jobs/' + jobId + '/download/' + k;
+      // v1.13.2: token في query لأنّ navigation عبر href لا يحقن header.
+      a.href = withToken('/api/jobs/' + jobId + '/download/' + k);
       a.textContent = dlWord + ' ' + kinds[k];
       box.appendChild(a);
     }
@@ -222,14 +233,14 @@ function renderDownloads(result) {
   for (const k of Object.keys(result || {}).filter(x => x.startsWith('xml_')).sort()) {
     const a = document.createElement('a');
     a.className = 'btn sm';
-    a.href = '/api/jobs/' + jobId + '/download/' + k;
+    a.href = withToken('/api/jobs/' + jobId + '/download/' + k);
     a.textContent = dlWord + ' 🧩 XML ' + k.replace('xml_', '');
     box.appendChild(a);
   }
   if (result && result.html) {
     const v = document.createElement('a');
     v.className = 'btn sm';
-    v.href = '/api/jobs/' + jobId + '/view';
+    v.href = withToken('/api/jobs/' + jobId + '/view');
     v.target = '_blank';
     v.textContent = (window.sctT ? window.sctT('view_report') : '👁️ عرض التقرير');
     box.appendChild(v);
@@ -261,7 +272,7 @@ function renderDownloads(result) {
   // تنزيل كل الملفات كـ ZIP واحد
   const all = document.createElement('a');
   all.className = 'btn sm primary';
-  all.href = '/api/jobs/' + jobId + '/download-all';
+  all.href = withToken('/api/jobs/' + jobId + '/download-all');
   all.textContent = (window.sctT ? window.sctT('download_all') : '🗜️ تنزيل الكل (ZIP)');
   box.appendChild(all);
   loadFiles();
@@ -300,7 +311,7 @@ async function loadFiles() {
       html += '<li style="margin:3px 0">'
         + '<label class="chk" style="display:inline-flex;gap:6px;align-items:center">'
         + '<input type="checkbox" class="fchk" value="' + f.rel + '" checked> '
-        + '<a href="/api/jobs/' + jobId + '/download-file?rel=' + encodeURIComponent(f.rel) + '">'
+        + '<a href="' + withToken('/api/jobs/' + jobId + '/download-file?rel=' + encodeURIComponent(f.rel)) + '">'
         + f.label + '</a> <span class="muted sm">(' + _fmtSize(f.size) + ')</span>'
         + '</label></li>';
     });
@@ -313,7 +324,7 @@ document.addEventListener('click', (e) => {
   if (e.target && e.target.id === 'dlSelected') {
     const sel = [...document.querySelectorAll('#filesList .fchk:checked')].map(c => c.value);
     if (!sel.length) { alert(document.documentElement.lang === 'en' ? 'Select at least one file' : 'اختر ملفاً واحداً على الأقل'); return; }
-    window.location = '/api/jobs/' + jobId + '/download-all?only=' + encodeURIComponent(sel.join(','));
+    window.location = withToken('/api/jobs/' + jobId + '/download-all?only=' + encodeURIComponent(sel.join(',')));
   }
   if (e.target && e.target.id === 'filesAll') {
     document.querySelectorAll('#filesList .fchk').forEach(c => { c.checked = e.target.checked; });
@@ -462,7 +473,9 @@ function renderDiagnostics(d) {
   document.getElementById('diagLines').textContent = lines.join('\n');
 }
 
-const es = new EventSource('/api/jobs/' + jobId + '/events');
+// v1.13.2: EventSource لا يدعم headers مخصّصة، فnavigation عادي لا يحقن
+// Authorization. نُمرّر token في query حتى تنجح المصادقة.
+const es = new EventSource(withToken('/api/jobs/' + jobId + '/events'));
 es.onmessage = (e) => {
   const data = JSON.parse(e.data);
   applyProgress(data.progress);
@@ -581,7 +594,7 @@ function _renderDeferred() {
   });
   // رابط CSV
   const csvBtn = document.getElementById('deferredCsvBtn');
-  if (csvBtn) csvBtn.href = '/api/jobs/' + jobId + '/download-file?rel=csv/deferred_urls.csv';
+  if (csvBtn) csvBtn.href = withToken('/api/jobs/' + jobId + '/download-file?rel=csv/deferred_urls.csv');
 }
 document.addEventListener('click', async (e) => {
   if (e.target && e.target.id === 'phase2Btn') {
@@ -656,7 +669,8 @@ function _syncGenButtonStates() {
       (fmt === 'xml' && Object.keys(lastResult).some((k) => k.startsWith('xml_'))));
     if (hasIt) {
       dl.disabled = false;
-      dl.onclick = () => { window.location = '/api/jobs/' + jobId + '/download/' + fmt; };
+      // v1.13.2: navigation عبر window.location لا يحقن token header — نُضيفه في query.
+      dl.onclick = () => { window.location = withToken('/api/jobs/' + jobId + '/download/' + fmt); };
       if (st.textContent === '—' || st.textContent === T('gen_pending', '—')) {
         st.textContent = T('gen_done', 'جاهز');
       }
