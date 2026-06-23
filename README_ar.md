@@ -2,7 +2,9 @@
 
 SCT هي أداة مفتوحة المصدر مبنية ببايثون لفحص SEO التقني والداخلي للمواقع. تساعدك على اكتشاف مشاكل الزحف، الفهرسة، العناوين، الوصف، الروابط، الصور، structured data، canonical، hreflang، mixed content، redirects، وتصدير تقارير قابلة للتحليل.
 
-بدأ المشروع كأداة صغيرة لفحص موقع واحد، ثم تطور إلى Crawler متعدد الأوضاع مع زحف async، تخزين SQLite، تصدير CSV/JSON/Excel، سجلات تفصيلية، وملف `metrics.json` لقياس الأداء.
+بدأ المشروع كأداة صغيرة لفحص موقع واحد، ثم تطور إلى Crawler متعدد الأوضاع مع زحف async، تخزين SQLite، تصدير CSV/JSON/Excel، سجلات تفصيلية، وملف `metrics.json` لقياس الأداء، وواجهة محلية متكاملة بـSSE، وتقارير HTML/PDF عربيّة RTL.
+
+النسخة الإنجليزية متاحة في [README.md](README.md).
 
 ## الميزات
 
@@ -12,36 +14,42 @@ SCT هي أداة مفتوحة المصدر مبنية ببايثون لفحص S
 - أوضاع تشغيل: `audit` و`competitor` و`compare`.
 - قراءة `robots.txt` وsitemaps.
 - التحكم في SSL verification.
-- تحليل مشاكل URL hygiene.
-- تحليل canonical.
-- كشف التكرارات في العناوين والوصف والمحتوى.
-- كشف thin content.
-- تحليل الروابط الداخلية المكسورة.
-- فحص الروابط الخارجية.
-- تحليل الصور.
-- فحص Schema.org.
-- فحص hreflang.
-- مقارنة sitemap مع نتائج الزحف.
-- كشف mixed content.
-- تصيير JavaScript (Playwright) وفرق الخام مقابل المُصيَّر، والاستخراج المخصّص (CSS/XPath/Regex).
-- درجة الروابط الداخلية (PageRank)، وكشف الصفحات شبه‑المكرّرة (SimHash)، وكاشف الصفحات اليتيمة.
+- تحليل مشاكل URL hygiene + canonical.
+- كشف التكرارات (العناوين/الوصف/المحتوى) + thin content.
+- تحليل الروابط الداخلية المكسورة + فحص الروابط الخارجية + تحليل الصور.
+- فحص Schema.org + hreflang + مقارنة sitemap مع نتائج الزحف.
+- كشف mixed content + محلّل ترويسات الأمان (HSTS/CSP/X-Frame-Options/إلخ).
+- جرد الموارد (CSS/JS/صور/خطوط/iframes) مع علامات mixed-content.
+- استخراج مخصّص (CSS/Attribute/Text/Regex rules).
+- تصيير JavaScript اختياري عبر Playwright + فرق raw-vs-rendered.
+- استيراد Lighthouse/PageSpeed JSON (بلا مفاتيح).
 - تكاملات Google اختيارية: GSC (+URL Inspection)، GA4، PageSpeed (+جداول Lighthouse العميقة)،
   CrUX History — كلها مطفأة افتراضياً.
 - تحليلات GSC: تكلّس الكلمات وفُرَص الروابط الداخلية. ومقارنة زمنية بين زحفتين (قبل/بعد).
-- تلميحات قابلة للتنفيذ لكل مشكلة (الأثر/الجهد/لماذا/كيف/درجة الأولوية).
+- درجة الروابط الداخلية (PageRank)، وكشف الصفحات شبه‑المكرّرة (SimHash + LSH)، وكاشف الصفحات اليتيمة.
 - محرّك أولويات v2 + لوحة عمل: درجة متعددة العوامل لكل صفحة (شدّة × أثر × سهولة × ثقة) مع
   تصنيف نوع الصفحة وسهولة الإصلاح ومالكه، وتجميعها في «افعل الآن/يحتاج مطوّراً/…».
 - مولّد `sitemap.xml`، تحكّم تكيّفي بالسرعة، قوالب منصّات التجارة (زد/سلة/Shopify/Woo).
-- تثبيت تلقائي للمتطلبات الاختيارية (محصور بقائمة بيضاء، يُعطَّل بـ`SCT_NO_AUTO_INSTALL=1`).
-- تصدير CSV وJSON وExcel اختيارياً، وتقارير HTML/PDF.
+- ضبط المتطلبات الاختيارية (التثبيت التلقائي صار **opt-in** عبر `SCT_AUTO_INSTALL=1` بعد v1.12؛
+  الافتراضي يُسجّل خطأ واضحاً باسم الحزمة وأمر `pip install …` الدقيق).
+- متصفّح النتائج (تصفية/فرز/بحث) وإعدادات قابلة للتعديل بالكامل من الواجهة.
+- تصدير CSV وJSON وExcel وHTML/PDF.
 - واجهة مرئية محلية متكاملة (FastAPI + HTMX + SSE) مع متابعة مباشرة للزحف.
 - تقارير HTML/PDF قابلة للتخصيص للعميل (عربي/RTL عبر Playwright).
 - استئناف async موثوق وإعادة تشغيل آمنة بلا تكرار صفوف.
 - حماية SSRF، سقف لقنابل gzip، وتحييد حقن الصيغ في CSV/Excel.
-- سجلات تفصيلية وملف `metrics.json`.
+- سجلات تفصيلية وملف `metrics.json` للمراقبة.
 - GitHub Actions CI.
 
 ## البدء السريع
+
+**أسرع طريقة — نقرة واحدة (v1.10):** انقر مزدوجاً على `START.bat` (Windows) /
+نقرة يمين → «Run with PowerShell» على `START.ps1` / `./start.sh` (macOS/Linux).
+المُشغّل يكتشف Python، يثبّت requirements عند أوّل تشغيل، يفتح المتصفّح على
+`http://127.0.0.1:8000`، ويطبع الـlocal auth token لـ`curl`/scripts. `STOP.bat`
+يُنهي الخادم.
+
+**يدويّاً (متقدّم):**
 
 ```bash
 python -m pip install -r requirements.txt
@@ -176,6 +184,7 @@ python -B -m unittest discover -s tests
 | المساهمة / توسعة الأداة | [`CONTRIBUTING_AR.md`](CONTRIBUTING_AR.md) · [English](CONTRIBUTING.md) |
 | ميثاق السلوك | [`CODE_OF_CONDUCT_AR.md`](CODE_OF_CONDUCT_AR.md) · [English](CODE_OF_CONDUCT.md) |
 | سياسة الأمان | [`SECURITY.md`](SECURITY.md) |
+| دليل الحوادث للمشغّلين (RUNBOOK) | [`docs/RUNBOOK_AR.md`](docs/RUNBOOK_AR.md) · [English](docs/RUNBOOK.md) |
 | سجلّ الإصدارات | [`CHANGELOG.md`](CHANGELOG.md) |
 | ما هو مخطّط | [`ROADMAP.md`](ROADMAP.md) |
 | تكاملات الأدوات الخارجية (Lighthouse, ZAP) | [`docs/EXTERNAL_TOOLS_GUIDE_AR.md`](docs/EXTERNAL_TOOLS_GUIDE_AR.md) · [English](docs/EXTERNAL_TOOLS_GUIDE.md) |
