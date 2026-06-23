@@ -41,8 +41,10 @@ Arabic documentation is available in [README_ar.md](README_ar.md).
 - Priority Engine v2 + Action Board: a transparent multi-factor per-page score
   (severity × impact × ease × confidence) with page-type and ease/owner classification,
   grouped into Do now / Needs developer / Needs platform / Needs content / Do later.
-- Sitemap generator, adaptive crawl throttle, and e-commerce platform presets
-  (Zid / Salla / Shopify / WooCommerce).
+- Sitemap generator, adaptive crawl throttle, and platform presets
+  (Zid / Salla / Shopify / WooCommerce for stores, WordPress for CMS sites —
+  the WP preset excludes `?replytocom=`, `/feed/`, `/tag/`, `/author/`,
+  `/wp-admin`, `/wp-json/`, `/xmlrpc.php` plus 7 query-param strips).
 - Optional-requirement gating (auto-install is now opt-in via `SCT_AUTO_INSTALL=1` after v1.12; default behavior is to log a clear error naming the missing extra and the exact `pip install …` command).
 - Results explorer (filter/sort/search) and full settings editable from the UI.
 - CSV, JSON, optional Excel, and HTML/PDF report exports.
@@ -60,6 +62,20 @@ right-click → "Run with PowerShell" on `START.ps1` / `./start.sh` (macOS/Linux
 The launcher detects Python, installs requirements on first run, opens the
 browser at `http://127.0.0.1:8000`, and prints the local auth token for
 `curl`/scripts. `STOP.bat` ends the server.
+
+**Operations & API auth.** The web UI runs entirely on `127.0.0.1` and is
+gated by a per-install token at `~/.sct/local_token` (mode `0600`). The
+browser UI auto-injects it; scripts pass it as
+`Authorization: Bearer <token>` **or** `?token=<token>` query param. The
+launcher prints the value at startup, and `GET /api/google/status` (or any
+other `/api/*`) returns a 401 hint string that names the token file path if
+you forget. Two healthcheck endpoints are exempt from auth and rate
+limits: `GET /health` (liveness) and `GET /readyz` (readiness, actually
+write-probes `webapp_jobs/`). The API rate limiter caps `/api/start` at
+10 requests/min/IP and the rest of `/api/*` at 120/min — generous for
+interactive scripts; documented so deployment automation doesn't
+self-throttle. Full operator runbook (8 scenarios with shell + PowerShell
+commands): [`docs/RUNBOOK.md`](docs/RUNBOOK.md) · [العربية](docs/RUNBOOK_AR.md).
 
 **Manual (advanced):**
 

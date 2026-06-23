@@ -105,13 +105,15 @@ python _review/i18n_audit.py
 
 1. أنشئ `seo_crawler/seo_crawler/analyzers/<name>.py` يصدّر دالّة `analyze_<name>(...)`
    تُرجع `dict` بصيغة `{"<rows>": [...], "summary": {...}}`.
-2. في `seo_crawler/seo_crawler/main.py::run_analysis`، استورِدها وادعُها واحفظ النتيجة
+2. في `seo_crawler/seo_crawler/services/analysis_service.py::run_analysis` (منذ v1.12)، استورِدها وادعُها واحفظ النتيجة
    في `results["<name>"]`.
-3. في `seo_crawler/seo_crawler/main.py::run_export`، أضف تصدير CSV من الصفوف.
+3. في `seo_crawler/seo_crawler/services/export_service.py::run_export` (منذ v1.12)، أضف تصدير CSV من الصفوف.
 4. اختياري: أضِف قسماً في تقرير HTML بـ
    `seo_crawler/seo_crawler/exporters/html_exporter.py` (سجّله في `EXPERT_SECTIONS` أو
    `CLIENT_SECTIONS`).
-5. أضِف اختبار انحدار في `tests/test_core_behaviors.py` بمدخلات اصطناعية — يجب أن يعمل
+5. أضِف اختبار انحدار في الملفّ المناسب من تقسيم v1.13 (`tests/test_crawler.py`،
+   `test_analyzers.py`، `test_integrations.py`، `test_exporters.py`،
+   `test_priority.py`، أو `test_utils.py`) بمدخلات اصطناعية — يجب أن يعمل
    دون اتصال خلال أجزاء من الثانية.
 
 راجع `analyzers/gsc_insights.py` أو `analyzers/log_analyzer.py` كأمثلة نظيفة.
@@ -122,7 +124,7 @@ python _review/i18n_audit.py
 
 1. أنشئ `seo_crawler/seo_crawler/integrations/<name>_api.py` بصنف client صغير.
 2. أضف `<name>: { enabled: false, ... }` إلى `config.example.yaml` + `config.yaml`.
-3. اربطه في `main.py::run_integrations` (محصور بـ`enabled`).
+3. اربطه في `services/integrations_service.py::run_integrations` (منذ v1.12، محصور بـ`enabled`).
 4. أضِف بطاقة في تبويب «التكاملات والذكاء» في `webapp/templates/index.html` مع checkbox
    التفعيل + حقول الإعدادات + زرّ اختبار.
 5. أضِف نقطة JSON `/api/test/<name>` إن أردت زرّ «اختبار الاتصال».

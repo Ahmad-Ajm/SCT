@@ -4,6 +4,90 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.1 — v1.13.7 (2026-06-23 same-day polish + open-source readiness)
+
+Seven patches consolidating user-reported UI bugs, auth-edge cases, and
+the first WordPress preset before v1.14. Each landed on a green test
+suite. The full per-commit story is in the git log; the consolidated
+behavior changes are:
+
+- **v1.13.1 — `label_for` differentiates JSON files.** The "النتائج
+  والتقارير" panel used to label every `.json` file as
+  "الأرشيف الكامل (JSON)" regardless of content. Now: `metrics.json`,
+  `integrations_<slug>_<ts>.json`, `audit_*.json`, `pagespeed_raw/*.json`
+  (with Mobile/Desktop suffix), `comparison_summary.json`, and any
+  `*deferred*.json` get distinct labels in both languages. Fallback for
+  unknown JSONs is `<stem> (JSON)` instead of the generic "Full audit
+  archive".
+
+- **v1.13.2 — `withToken()` for non-fetch navigation.** Download buttons,
+  `<a target=_blank>` view links, and the SSE EventSource all used
+  plain `<a href>` / `window.location` / `EventSource(url)`, none of
+  which trigger the `window.fetch` monkey-patch that injects the v1.10
+  `Authorization: Bearer` header. So every download silently returned
+  401 since v1.10. Fix: a tiny `withToken(url)` helper appends
+  `?token=...` to every URL used as navigation. Eight call sites
+  patched, plus the SSE URL. Backend was already prepared:
+  `_extract_token()` (security.py) reads from either the Bearer header
+  or the `?token=` query.
+
+- **v1.13.3 — Triple safety net for auto-show.** The "report + downloads
+  appear automatically when crawl finishes" behavior depended only on
+  the SSE `event: end` handler. Three failure modes (`event: end`
+  delayed by a backend race, mid-stream disconnect, total SSE failure)
+  all left the results panel hidden until refresh. Now: three paths
+  share a `_finishedOnce` guard so `finish(meta)` runs exactly once.
+  Path 1 is still `event: end`. Path 2 is "incoming `data:` already
+  carries a `FINISHED` status with `meta.result`". Path 3 is a 3-second
+  polling fallback hitting `/api/jobs/{id}/progress`.
+
+- **v1.13.4 — Docs language-parity catch-up.** `README_ar.md` had drifted
+  behind `README.md` (still mentioned the old `SCT_NO_AUTO_INSTALL`,
+  no `START.bat` launcher, no RUNBOOK link). Resynced. New
+  `docs/RUNBOOK_AR.md` (460 LOC, all 8 scenarios) for parity with the
+  English RUNBOOK.
+
+- **v1.13.5 — WordPress platform preset.** Added the fifth preset to
+  `config_presets.PRESETS`. Excludes 19 vanilla-WP traps (most
+  importantly `?replytocom=` which can multiply queue size 10–50×,
+  `/feed/` on every taxonomy/post, `/tag/`, `/author/`,
+  `/wp-admin`, `/wp-json/`, `/xmlrpc.php`) and strips 7 query params
+  (`replytocom`, `attachment_id`, `unapproved`, `moderation-hash`,
+  `preview`, `preview_id`, `preview_nonce`). Detection signature added
+  to `_SIGNATURES` after WooCommerce so a WP+Woo store still picks
+  the more specific `woocommerce` preset. Form label updated from
+  "قالب منصّة التجارة" to "قالب منصّة جاهز" since the field is no
+  longer e-commerce-exclusive. Whitelist tuple in
+  `webapp/job_runner.py` extended; comments in `config.yaml` and
+  `config.example.yaml` updated. New test
+  `test_wordpress_preset_present_and_excludes_traps` (4 assertions:
+  preset present, critical patterns included, `apply_preset` merges
+  without losing user patterns, `detect_platform` yields to Woo on
+  overlap). 92/92 tests.
+
+- **v1.13.6 — Polling updates counters live + card tooltips.** User
+  reported that refreshing the job page mid-crawl returned all six
+  live counters to 0. The v1.13.3 polling fallback only triggered
+  `_safeFinish` at FINISHED — it never called `applyProgress` or
+  `applyStatus` during running. Now: every poll updates the badge and
+  the counters even while running, first poll fires immediately (no
+  3-second delay), and the panel still shows only on real completion.
+  Also added Arabic `title=` tooltips to all 6 cards (pages / queue /
+  failed / ext_checked / speed / sec) explaining what each measures
+  and how to read its value.
+
+- **v1.13.7 — Defensive URL scheme normalization.** API calls that
+  passed `example.com` without a scheme silently broke the crawl
+  (empty `netloc` → empty `domain` → everything looked external).
+  `job_runner` now auto-prepends `https://` if the value doesn't start
+  with `http://` or `https://`. Browsers were already guarded by the
+  HTML5 `type="url"` validator on the form. Internal-page URLs like
+  `https://example.com/blog/post-1` work fine as start URLs but still
+  crawl the full host (not just `/blog/`); subpath-scoped crawls
+  need an `include` pattern.
+
+---
+
 ## v1.13 — 2026-06-20 (REFACTOR-tests-split content migration)
 
 The final REFACTOR from the v1.11 audit. tests/test_core_behaviors.py
@@ -714,7 +798,7 @@ SSRF helper now correctly rejects IPv4-mapped IPv6 and fails closed on NXDOMAIN
 
 ### Fixed — critical NameError in `_discover_new_links`
 
-A real-world crawl
+A real-world crawl on a e-commerce site 
 raised `NameError: name 'url' is not defined` **6,500 times**. Every product
 page fetched, every product page failed at link-discovery, every product
 page logged a traceback. 3,246 pages were saved (sitemap-seeded), but **zero

@@ -105,13 +105,15 @@ Analyzers are pure functions over crawled data. Pattern:
 
 1. Create `seo_crawler/seo_crawler/analyzers/<name>.py` exporting a function
    `analyze_<name>(...)` that returns a `dict` with `{"<rows>": [...], "summary": {...}}`.
-2. In `seo_crawler/seo_crawler/main.py::run_analysis`, import and call it, storing the
+2. In `seo_crawler/seo_crawler/services/analysis_service.py::run_analysis` (since v1.12), import and call it, storing the
    result under `results["<name>"]`.
-3. In `seo_crawler/seo_crawler/main.py::run_export`, add a CSV export from the rows.
+3. In `seo_crawler/seo_crawler/services/export_service.py::run_export` (since v1.12), add a CSV export from the rows.
 4. Optional: add an HTML report section in `seo_crawler/seo_crawler/exporters/html_exporter.py`
    (register in `EXPERT_SECTIONS` or `CLIENT_SECTIONS`).
-5. Add a regression test in `tests/test_core_behaviors.py` with synthetic input — should
-   run offline in milliseconds.
+5. Add a regression test in the matching `tests/test_<category>.py` file (v1.13 split:
+   `test_crawler`, `test_analyzers`, `test_integrations`, `test_exporters`,
+   `test_priority`, `test_utils`) with synthetic input — should run offline in
+   milliseconds.
 
 See `analyzers/gsc_insights.py` or `analyzers/log_analyzer.py` for clean examples.
 
@@ -121,7 +123,7 @@ See `analyzers/gsc_insights.py` or `analyzers/log_analyzer.py` for clean example
 
 1. Create `seo_crawler/seo_crawler/integrations/<name>_api.py` with a small client class.
 2. Add `<name>: { enabled: false, ... }` to `config.example.yaml` + `config.yaml`.
-3. Wire it in `main.py::run_integrations` (gated by `enabled`).
+3. Wire it in `services/integrations_service.py::run_integrations` (since v1.12, gated by `enabled`).
 4. Add a card to the *Integrations & AI* tab in `webapp/templates/index.html` with the
    enable checkbox + config fields + a test button.
 5. Add a JSON endpoint `/api/test/<name>` if you want a "Test connection" button.
