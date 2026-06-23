@@ -62,8 +62,25 @@ own credentials stay on disk and are never committed.
 
 ```
 seo_crawler/seo_crawler/
-├── main.py                     orchestrator (run_analysis, run_export, _run_integrations_only)
-├── config_presets.py           e-commerce platform presets (Zid / Salla / Shopify / Woo)
+├── main.py                     thin CLI entrypoint (argparse + dispatch to services)
+├── config_presets.py           platform presets — Zid / Salla / Shopify / Woo for stores,
+│                                WordPress (v1.13.5) for CMS sites; `apply_preset()` +
+│                                `detect_platform()` (signatures, Woo wins on overlap)
+├── services/                   v1.12 refactor: main.py 2,339 → 513 LOC by extracting
+│   ├── analysis_service.py       run_analysis (analyzer orchestration over rows)
+│   ├── crawl_service.py          async + sync crawl driver
+│   ├── export_service.py         run_export (CSV / Excel / JSON / XML / HTML / PDF / sitemap)
+│   ├── integrations_service.py   run_integrations (clients fetch + cache)
+│   ├── integrations_only_service.py  run_integrations_only (no-crawl path; --integrations-only)
+│   ├── compare_service.py        crawl-over-time diff driver
+│   ├── deferred_service.py       Phase-2 URL classifier hookup (find / inject seeds)
+│   ├── progress_service.py       writes to SCT_PROGRESS_FILE
+│   ├── config_service.py         load_config + validate_config + merge layers
+│   ├── ai_service.py             AI advisor wrapper (text only, never ranking)
+│   ├── db_facade.py              thin SQLite DB façade for services
+│   ├── external_check_service.py external-link HEAD fan-out
+│   ├── integrations_summary.py   per-job summary view of integration results
+│   └── export_helpers.py         shared formatters across exporters
 ├── crawler/
 │   ├── async_core.py             async crawler (aiohttp); workers, queue, JS render hook
 │   ├── core.py                   sync fallback crawler
@@ -80,14 +97,19 @@ seo_crawler/seo_crawler/
 │   ├── crawl_compare.py          before/after diff for two audit JSONs
 │   ├── log_analyzer.py           Apache/Nginx CLF + Googlebot extraction
 │   ├── accessibility.py          axe-core result summariser
+│   ├── url_classifier.py         Phase-1 vs Phase-2 deferment classifier (v1.08)
 │   └── hints.py                  impact/effort/why/how on every issue
 ├── integrations/               external APIs (all off by default)
 │   ├── google_auth.py            OAuth client_secret + token (allow_interactive gate)
 │   ├── gsc_api.py                Search Console + URL Inspection
 │   ├── ga4_api.py                GA4 Data API + Admin API (property listing)
 │   ├── pagespeed_api.py          PageSpeed + deep Lighthouse table extraction
+│   ├── lighthouse_importer.py    importer for already-generated Lighthouse JSON (no key)
 │   ├── crux_history.py           Core Web Vitals time series
-│   └── awt_importer.py           AWT (Ahrefs Webmaster) CSV import
+│   ├── awt_importer.py           AWT (Ahrefs Webmaster) CSV import
+│   ├── backlinks_api.py          v1.04 live: Ahrefs v3 + Majestic OpenApp (Bearer / key)
+│   └── ai_advisor.py             AI provider abstraction (OpenAI / Anthropic / Gemini /
+│                                  local-OpenAI-compatible) — text only
 ├── reporting/
 │   ├── report_join.py            build_unified: technical × GSC × GA4 per URL
 │   ├── opportunities.py          compute_opportunities (legacy priority)
@@ -96,19 +118,45 @@ seo_crawler/seo_crawler/
 │   └── report_builder.py         loads audit JSON, renders HTML/PDF
 ├── exporters/                  csv_exporter, excel_exporter, json_exporter,
 │                                xml_exporter, html_exporter, sitemap_generator
-├── storage/                    SQLite DB + APICache
+├── storage/                    SQLite DB + APICache (with _ALLOWED_TABLES identifier whitelist)
 └── utils/                      helpers (SSRF guard, formula neutraliser, normalize_url),
                                 logger, observability, auto_install
 
-webapp/
-├── app.py                      FastAPI app (routes, endpoints, /api/jobs/…)
-├── job_runner.py               JobRunner: spawns subprocess, tracks state, deletes
+webapp/                         v1.12 refactor: app.py 2,098 → 143 LOC by extracting
+├── app.py                      FastAPI app: middleware wiring + router includes only
+├── security.py                 local auth token (Bearer + ?token=), CSRF Origin guard,
+│                                rate limit buckets, /health + /readyz exemptions
+├── deps.py                     FastAPI dependencies: require_token, require_origin,
+│                                rate_limited, valid_job_id
+├── constants.py                shared constants: file labels, MIME whitelist, paths,
+│                                label_for() that disambiguates JSON variants (v1.13.1)
+├── routers/                    9 APIRouter modules (was monolithic app.py):
+│   ├── pages.py                  HTML page routes (`/`, `/jobs/{id}`, `/board`, `/explore`,
+│   │                              `/compare`, `/logs`, `/graph`)
+│   ├── jobs.py                   /api/jobs CRUD + progress + events (SSE) + phase2
+│   ├── generate.py               on-demand HTML/PDF/Excel/XML generation
+│   ├── downloads.py              file downloads with auth + path-traversal guard
+│   ├── analytics.py              /api/jobs/<id>/board, /url-detail, /compare
+│   ├── logs.py                   /api/logs upload + analysis
+│   ├── google_oauth.py           /api/google/upload|authorize|disconnect|status
+│   ├── connections.py            integration test endpoints (test buttons)
+│   └── setup.py                  3-step Google setup wizard endpoints
+├── job_runner.py               JobRunner: spawns subprocess, tracks state, deletes;
+│                                also normalizes user-supplied URLs (v1.13.7)
 ├── run.py                      uvicorn entrypoint
 ├── static/                     app.css, i18n.js (ar + en dicts)
-└── templates/                  index.html, job.html, board.html, compare.html, logs.html,
-                                explore.html
-tests/
-└── test_core_behaviors.py      regression suite (~70 tests, all offline)
+└── templates/                  index.html, job.html (incl. withToken() helper +
+                                triple-path auto-show + counter tooltips), board.html,
+                                compare.html, logs.html, explore.html, graph.html
+tests/                          v1.13 refactor: 1,414-LOC monolith → 6 categorized files
+├── conftest.py                 shared fixtures (temp DB, fake HTTP server, sample audit)
+├── test_analyzers.py             analyzer unit tests
+├── test_crawler.py               crawler + presets + URL classifier tests
+├── test_exporters.py             CSV / Excel / JSON / XML / HTML / sitemap
+├── test_integrations.py          parser tests against synthetic API responses
+├── test_priority.py              priority engine + Action Board
+├── test_utils.py                 SSRF guard, formula neutraliser, normalize_url
+└── test_webapp_endpoints.py      TestClient: auth, CSRF, rate limits, /health, /readyz
 ```
 
 ---
@@ -121,13 +169,13 @@ tests/
    passed via `os.environ` to the subprocess instead.
 3. `JobRunner.start` spawns `python -m seo_crawler.main` as a child process with
    `SCT_PROGRESS_FILE=…` and `SCT_NONINTERACTIVE=1`.
-4. **`main.main_async`** orchestrates the run:
-   - `run_analysis` → analyzers (pure) produce `analysis["…"]` dicts.
-   - `run_integrations` → optional clients fetch GSC/GA4/PageSpeed/CrUX.
+4. **`main.main_async`** orchestrates the run by dispatching to `services/`:
+   - `services.analysis_service.run_analysis` → analyzers (pure) produce `analysis["…"]` dicts.
+   - `services.integrations_service.run_integrations` → optional clients fetch GSC/GA4/PageSpeed/CrUX.
    - `build_unified(pages, analysis, gsc_pages, ga4_landing_pages)` joins per-URL.
    - `compute_opportunities(unified_rows)` (legacy) and
      `compute_priority(unified_rows, platform)` (v2 + Action Board).
-   - `run_export` writes CSV / Excel / JSON / XML / HTML / PDF / sitemap.
+   - `services.export_service.run_export` writes CSV / Excel / JSON / XML / HTML / PDF / sitemap.
 5. **Web UI polls progress** via `/api/jobs/<id>/events` (SSE) until done.
 6. **Outputs** are listed at `/api/jobs/<id>/files`; secondary views
    (`/board`, `/explore`, `/compare`, drill-down panel) read the audit JSON.
@@ -177,8 +225,10 @@ tests/
   register in `output.formats`.
 - **New UI tab:** see `CONTRIBUTING.md §7`. Existing tab JS picks up `data-tab` /
   `data-pane` generically.
-- **New CLI flag:** add to `main.py`'s `argparse.ArgumentParser`, then document in
-  `docs/CLI.md`.
+- **New CLI flag:** add to `main.py`'s `argparse.ArgumentParser` (in
+  `seo_crawler/seo_crawler/main.py`), then document in **both** `docs/CLI.md` and
+  `docs/CLI_AR.md` (flag table + scenarios + env-var table). Add a test under
+  `tests/` if the flag mutates the config layer.
 
 ---
 
@@ -189,10 +239,12 @@ tests/
 | How is a single page crawled and stored? | `crawler/async_core.py::_crawl_page` |
 | How are issues aggregated and labeled? | `analyzers/seo_issues.py` + `analyzers/hints.py` |
 | How is the priority score computed? | `reporting/priority_engine.py::compute_priority` |
-| How are integrations gated? | `main.py::run_integrations` + `config.example.yaml::integrations` |
+| How are integrations gated? | `services/integrations_service.py::run_integrations` + `config.example.yaml::integrations` |
 | How do secrets reach the subprocess? | `webapp/job_runner.py::_build_job_config` (`_secret_env` → `start` env) |
-| How does the UI know the job state? | `/api/jobs/<id>/events` SSE + `webapp_jobs/<id>/progress.json` |
-| How are tokens stored / revoked? | `webapp/app.py::/api/google/upload|authorize|disconnect` + `_google_dir()` |
+| How does the UI know the job state? | `/api/jobs/<id>/events` SSE (auth via `?token=`) + `webapp_jobs/<id>/progress.json` |
+| How are tokens stored / revoked? | `webapp/routers/google_oauth.py::upload\|authorize\|disconnect` + `_google_dir()` |
+| How is the webapp authenticated? | `webapp/security.py::require_token` (Bearer or `?token=`) + `~/.sct/local_token` |
+| How is a Phase-2 run wired? | `services/deferred_service.py` (find CSV + inject seeds) + `main.py::--phase2` |
 | How does i18n switch language? | `webapp/static/i18n.js` (loads on every page; `langToggle` button) |
 
 ---
@@ -207,6 +259,7 @@ python -B -m unittest discover -s tests
 
 Live integrations (GSC, GA4, PageSpeed, AI) are tested via **parsers** on synthetic
 responses — never against the real network. The crawler is tested against a tiny
-in-process HTTP fixture (`tests/test_core_behaviors.py`).
+in-process HTTP fixture (see `tests/conftest.py` for fixtures; the crawler tests live in
+`tests/test_crawler.py` after the v1.13 split from the old `test_core_behaviors.py`).
 
 See `CONTRIBUTING.md §1` for the full commit gate.

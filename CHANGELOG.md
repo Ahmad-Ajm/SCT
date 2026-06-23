@@ -4,12 +4,12 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
-## v1.13.1 — v1.13.7 (2026-06-23 same-day polish + open-source readiness)
+## v1.13.1 — v1.13.9 (2026-06-23 same-day polish + open-source readiness)
 
-Seven patches consolidating user-reported UI bugs, auth-edge cases, and
-the first WordPress preset before v1.14. Each landed on a green test
-suite. The full per-commit story is in the git log; the consolidated
-behavior changes are:
+Nine patches consolidating user-reported UI bugs, auth-edge cases, the
+first WordPress preset, and a final docs-and-CI sweep before v1.14.
+Each landed on a green test suite. The full per-commit story is in the
+git log; the consolidated behavior changes are:
 
 - **v1.13.1 — `label_for` differentiates JSON files.** The "النتائج
   والتقارير" panel used to label every `.json` file as
@@ -85,6 +85,52 @@ behavior changes are:
   `https://example.com/blog/post-1` work fine as start URLs but still
   crawl the full host (not just `/blog/`); subpath-scoped crawls
   need an `include` pattern.
+
+- **v1.13.8 — OSS-readiness fixes (commit `3e5211a`).** Blocked the
+  client-name leak in CHANGELOG (replaced `` with "a
+  e-commerce site"), rewrote SECURITY.md's reporting section around the
+  GitHub Private Security Advisory channel + added a v1.10+ surfaces
+  block + a one-paragraph threat model, extended ROADMAP's "Recently
+  shipped" from v1.04 stop through v1.13, refreshed README/README_ar's
+  platform-preset bullet for WordPress, added an "Operations & API
+  auth" paragraph documenting Bearer/`?token=` + `/health` + `/readyz`
+  + rate limits, and unified CONTRIBUTING/_AR stale paths (the v1.12
+  refactor moved `run_analysis` / `run_export` / `run_integrations`
+  from `main.py` to their `services/<name>_service.py` modules).
+
+- **v1.13.9 — Docs continuation + CI consistency.**
+    * USER_GUIDE.md + USER_GUIDE_AR.md: added Backlinks API row to the
+      integrations table, replaced the platform-preset paragraph with
+      the WordPress-aware version, added §13 "Link graph view" describing
+      `/jobs/<id>/graph`, added §14 "The 6 live counters" with how to
+      read each card, added §12's "Local auth token" subsection (token
+      path + Bearer/?token= + exempt routes + rotation + rate limits).
+    * CLI.md + CLI_AR.md: added `--phase2` row to the flag table and a
+      matching scenario block (Phase 2 re-uses `deferred_urls.csv` and
+      extends `audit.json`), added `SCT_AUTO_INSTALL` and
+      `BACKLINKS_API_KEY` to the env-var table.
+    * ARCHITECTURE.md + ARCHITECTURE_AR.md: rewrote the module map for
+      v1.12's refactor (added `services/` with all 14 modules, added
+      `webapp/security.py` + `deps.py` + `constants.py` + the 9
+      `webapp/routers/`), added `ai_advisor.py` + `backlinks_api.py` +
+      `lighthouse_importer.py` to the integrations list, added
+      `url_classifier.py` to analyzers, refreshed the "Where to look
+      for…" table to point to services/ and routers/ instead of the
+      removed `main.py::run_integrations` and
+      `webapp/app.py::/api/google/…` paths, refreshed §7 testing to
+      reference `conftest.py` + `test_crawler.py` (the v1.13 split).
+      Fixed the stale `_run_integrations_only` reference (the public
+      function is `run_integrations_only`, no underscore).
+    * RUNBOOK.md + RUNBOOK_AR.md: bumped self-identifying version from
+      v1.11 to v1.13, fixed appendix `expect: 91/91` to `92/92`.
+    * .github/workflows/ci.yml: resolved the pip-audit
+      "blocks on high/critical" comment vs `continue-on-error: true`
+      contradiction — clarified the job is **advisory only** and
+      documented how to flip it to hard-fail (`--strict` + drop
+      `continue-on-error`).
+    * Live test on `` confirmed the WordPress
+      preset filters traps as designed and the UI flow works through
+      to download/auto-show. 92/92 tests.
 
 ---
 

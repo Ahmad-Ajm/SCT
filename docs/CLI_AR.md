@@ -24,6 +24,7 @@ usage: main.py [-h]
                [--no-resume]
                [--skip-external]
                [--integrations-only]
+               [--phase2]
                [--clear-cache]
 ```
 
@@ -39,6 +40,7 @@ usage: main.py [-h]
 | `--no-resume` | مطفأ | بدء جديد: يتجاهل أي `visited`/`queue` محفوظ ويبدأ من الصفر. |
 | `--skip-external` | مطفأ | لا يفحص حالة الروابط الخارجية (أسرع). |
 | `--integrations-only` | مطفأ | تخطّي الزحف كاملاً؛ يجلب فقط التكاملات (GSC/GA4/PageSpeed) ويُصدّر CSV لها. |
+| `--phase2` | مطفأ | v1.08: يشغّل **Phase 2** — يستعمل `deferred_urls.csv` من المخرجات السابقة كقائمة بذور ويعطّل المصنّف (يفحص كل الروابط). يُمدّد `audit.json` القائم بدل كتابة جديد. مفيد إذا أجَّلت Phase 1 روابط ترقيم عميق/التفاف تحويلات/تركيب فلاتر، ثم قرّرت أنك تريد زحفها. |
 | `--clear-cache` | مطفأ | يمسح كاش الـ API (`state/api_cache.db`) ويخرج. |
 
 ### سيناريوهات عملية
@@ -65,6 +67,10 @@ python main.py --mode compare
 # جلب التكاملات فقط، بلا زحف
 python main.py --integrations-only
 
+# تشغيل Phase 2 على الروابط المؤجَّلة من التشغيل السابق
+# (يُمدّد audit.json في نفس مجلّد المخرجات)
+python main.py --phase2
+
 # استعمال ملف إعداد مختلف (مثلاً لكل عميل)
 python main.py --config configs/clientA.yaml
 
@@ -82,6 +88,8 @@ python main.py --clear-cache
 | `SCT_PROGRESS_FILE` | يضعه `JobRunner` تلقائياً لتُمرّر العملية الفرعية حالة المراحل/العدّادات لملف JSON تستطلعه الواجهة. |
 | `SCT_NONINTERACTIVE` | يضعه `JobRunner` على `1`. عند ضبطه، لن يفتح OAuth متصفّحاً محلياً؛ يُرجع خطأً واضحاً بدل تعليق العملية الفرعية. |
 | `SCT_NO_AUTO_INSTALL` | اضبطه على `1` لتعطيل مساعد التثبيت التلقائي (`utils/auto_install.py`). المكتبات الاختيارية حينها تحتاج تثبيتاً يدوياً بـ`pip`. |
+| `SCT_AUTO_INSTALL` | v1.12: تفعيل صريح للمساعد التلقائي. الافتراضي **مطفأ** منذ v1.12 (كان فعّالاً). اضبطه على `1` إذا كنت بحاجة للسلوك القديم فقط. |
+| `BACKLINKS_API_KEY` | تكامل v1.04 للباك‑لينك. Ahrefs v3 يستخدم `Authorization: Bearer <key>`؛ Majestic OpenApp يستخدم نفس المتغيّر. مطفأ افتراضياً — يُستعمل فقط عند تفعيل `integrations.backlinks_api` في الإعداد. |
 
 ---
 

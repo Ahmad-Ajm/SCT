@@ -44,9 +44,13 @@ jobs:
       - name: Test
         run: python -B -m unittest discover -s tests
 
-  # v1.10-B3: pip-audit — يفحص CVEs على كلّ dependency في requirements.txt.
-  # لا يفشل البناء على low-severity (نسمح للمشروع بالاستمرار)؛ يفشل على
-  # high/critical فقط. القائمة محدَّثة عبر PyPI Advisory DB.
+  # v1.10-B3 / v1.13.9: pip-audit — يفحص CVEs على كلّ dependency في requirements.txt
+  # ويسرد النتائج في تلخيص الـrun. وضع التشغيل **إعلامي**: `continue-on-error: true`
+  # يعني أنّ الجوب لا يفشل أبداً على أي شدّة — العمليّة الفعليّة هي «نقرأ التنبيه
+  # في الـrun summary، نُقيِّمه، ونرفع PR لرفع الحزمة إن لزم». القائمة محدَّثة عبر
+  # PyPI Advisory DB. إذا أردنا الفشل الصلب على high/critical لاحقاً، احذف
+  # `continue-on-error` (الراية `--strict` تجعل pip-audit ترجع كود خروج غير صفر
+  # على أي تنبيه).
   security-audit:
     runs-on: ubuntu-latest
     needs: test-linux

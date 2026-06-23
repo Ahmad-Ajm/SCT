@@ -24,6 +24,7 @@ usage: main.py [-h]
                [--no-resume]
                [--skip-external]
                [--integrations-only]
+               [--phase2]
                [--clear-cache]
 ```
 
@@ -39,6 +40,7 @@ usage: main.py [-h]
 | `--no-resume` | off | Start fresh: ignore any saved `visited`/`queue` state and crawl from scratch. |
 | `--skip-external` | off | Don't check external link statuses (faster). |
 | `--integrations-only` | off | Skip the crawl entirely; only fetch the optional integrations (GSC/GA4/PageSpeed) and export their CSVs. |
+| `--phase2` | off | v1.08: run **Phase 2** — re-uses `deferred_urls.csv` from the matching Phase 1 output as the seed list and bypasses the URL classifier (every URL is crawled). Extends the existing `audit.json` instead of writing a new one. Useful when Phase 1 deferred pagination-deep / redirect-wrapper / filter-combination URLs and you've decided you do want them crawled. |
 | `--clear-cache` | off | Wipe the API cache (`state/api_cache.db`) and exit. |
 
 ### Example scenarios
@@ -65,6 +67,10 @@ python main.py --mode compare
 # Fetch only the integration data, no crawl
 python main.py --integrations-only
 
+# Run Phase 2 on the deferred URLs the previous run produced
+# (extends the existing audit.json in the same output folder)
+python main.py --phase2
+
 # Use a different config (e.g. a per-client config)
 python main.py --config configs/clientA.yaml
 
@@ -82,6 +88,8 @@ python main.py --clear-cache
 | `SCT_PROGRESS_FILE` | Set automatically by the web `JobRunner` so the subprocess can stream phase/counter updates to a JSON file the UI polls. |
 | `SCT_NONINTERACTIVE` | Set to `1` by the web `JobRunner`. When set, OAuth never opens a local browser; it returns a clear error instead of hanging the subprocess. |
 | `SCT_NO_AUTO_INSTALL` | Set to `1` to disable the auto-install helper (`utils/auto_install.py`). Optional libraries will then need to be installed manually with `pip`. |
+| `SCT_AUTO_INSTALL` | v1.12: opt-in re-enable of the auto-install helper. Default is **off** since v1.12 (used to be on). Set to `1` only if you need the legacy behavior. |
+| `BACKLINKS_API_KEY` | v1.04 backlinks integration. Ahrefs v3 uses `Authorization: Bearer <key>`; Majestic OpenApp expects the same env var. Off by default — only consulted when `integrations.backlinks_api` is enabled in config. |
 
 ---
 

@@ -280,6 +280,7 @@ process via environment variables, not saved to disk.
 | **CrUX History** (optional) | Core Web Vitals trend over time (`pagespeed.crux_history`) | Same PageSpeed key |
 | **Lighthouse import** | Reads local Lighthouse JSON (no keys/internet) | A folder of Lighthouse `.json` files |
 | **Ahrefs Webmaster (AWT)** | Imports AWT CSV exports (free backlinks/keywords for site owners) | A folder of CSV files |
+| **Backlinks API** (live, paid) | Fetches **referring domains + top external links** from Ahrefs API v3 or Majestic OpenApp — surfaces the highest-authority links pointing to your site | API key in `.env` (`BACKLINKS_API_KEY`); see [docs/EXTERNAL_TOOLS_GUIDE.md](EXTERNAL_TOOLS_GUIDE.md) |
 
 When GSC/GA4 are enabled, the **Unified report** cross‑references technical issues with
 traffic to produce **Priority Opportunities**
@@ -287,8 +288,16 @@ traffic to produce **Priority Opportunities**
 **impact / effort / why-it-matters / how-to-fix / priority_score** to make it actionable.
 
 ### Extra run options (in `config.yaml`)
-- **`site.platform_preset`** (`zid` | `salla` | `shopify` | `woocommerce`): adds recommended
-  exclude patterns (cart/checkout/account) without clearing yours.
+- **`site.platform_preset`** (`zid` | `salla` | `shopify` | `woocommerce` | `wordpress`):
+  adds recommended exclude patterns without clearing yours.
+  Stores exclude cart/checkout/account/add-to-cart and normalize `sort_by` / `orderby`.
+  **`wordpress`** (v1.13.5) excludes the WordPress-specific SEO traps that WooCommerce
+  doesn't cover: `?replytocom=` (the classic infinite-crawl comment trap that can multiply
+  queue size 10–50× on a comment-heavy blog), `/feed/` on every taxonomy and post, `/tag/`,
+  `/author/`, `/wp-admin`, `/wp-login.php`, `/wp-json/`, `/xmlrpc.php`, plus 7 query-param
+  strips (`replytocom`, `attachment_id`, `unapproved`, `moderation-hash`, `preview`,
+  `preview_id`, `preview_nonce`). Pick `wordpress` for vanilla WP sites and `woocommerce`
+  for WP-based stores (the WooCommerce preset already covers the wp-admin overlap).
 - **`crawl.adaptive_throttle.enabled`**: slows the crawl automatically on 429/5xx/slow
   responses and recovers (server-friendly, avoids blocks).
 - **`output.generate_sitemap`**: generates a clean `sitemap.xml` from indexable pages.
@@ -407,12 +416,56 @@ If the key/library is missing or the call fails, the crawl still completes norma
 
 - Runs entirely locally; nothing is uploaded unless you enable an integration or the AI
   advisor.
+- **Local auth token (v1.10).** The web UI binds to `127.0.0.1` and every
+  `/api/*` route requires a per-install token stored at `~/.sct/local_token`
+  (mode `0600`). The launcher prints the value on start. Scripts pass it as
+  `Authorization: Bearer <token>` **or** `?token=<token>` (the query-param
+  form is what makes the SSE stream and the `<a href>` download links work
+  without a fetch monkey-patch — see v1.13.2). Exempt routes: `GET /`,
+  `GET /jobs/{id}` (HTML pages), `GET /health`, `GET /readyz`, and
+  `/static/*`. Rotate by deleting the file and restarting (a fresh token is
+  generated on first start). Rate limits: `/api/start` 10/min/IP,
+  `/api/*` 120/min/IP. Full operator playbook in
+  [docs/RUNBOOK.md](RUNBOOK.md) (8 scenarios with shell + PowerShell).
 - SSRF protection blocks crawling/redirecting to internal/loopback/metadata addresses
   (override per‑run with `crawl.allow_private_hosts`).
 - CSV/Excel exports neutralize formula injection for safe opening in spreadsheet apps.
 - Secret keys live in `.env` / local per‑job config (gitignored) and are passed to the crawl
   process via environment variables — never committed.
 - No PII is collected from GA4 or sent to the AI provider.
+
+## 13. Link graph view (`/jobs/<id>/graph`)
+
+Every finished crawl gets an interactive page at `/jobs/<id>/graph` that
+renders:
+
+- A **path-segment tree** of every crawled URL (collapsed by host /
+  path segment), colored by status code so a red branch flags a 4xx /
+  5xx subtree at a glance.
+- **Depth histogram** and **status histogram** as small bar charts (how
+  deep the site is, how many of each response code).
+- A **force-directed link map** of the internal-link graph, capped at 500
+  nodes so the browser stays responsive. Nodes are pages, edges are
+  `is_internal = true` links from the crawl.
+
+Useful for spotting orphan branches, redirect chains, and depth
+explosions that the per-page reports don't surface as cleanly. Linked
+from the job page header. The data is built server-side from `audit.json`
+on first request, no extra storage.
+
+## 14. The 6 live counters on the job page
+
+While a crawl is running the job page shows six counter cards. Each
+card has a tooltip on hover, here's the long-form explanation:
+
+| Card | What it counts | Read it as |
+|------|----------------|------------|
+| **Pages** (`m_pages`) | Successfully crawled (2xx/3xx) so far | The sample size of every downstream report. |
+| **Queue** (`m_queue`) | Discovered but not yet fetched | Grows during sitemap/nav discovery, then drains. **Stuck at 0 early on a big site = your sitemap or main-nav discovery failed**; check `seed_strategy`. |
+| **Failed** (`m_failed`) | 4xx/5xx responses or connection failures (DNS/timeout) | High = broken links in nav, sitemap, or external CDN. Cross-reference with `broken_data` in `audit.json`. |
+| **Ext. checked** (`m_ext_checked`) | External-link statuses verified by HEAD | Zero during Phase 1; populates during Phase 2.5 when `external_check.enabled` is true. |
+| **Pages/sec** (`m_speed`) | Recent crawl rate (last few seconds, not lifetime) | Sudden drops = target is slow, rate-limiting you, or hitting a robots-disallowed segment. Cross-reference with `adaptive_throttle` if enabled. |
+| **Seconds** (`m_elapsed`) | Time since job start | Same as the timer at the top; included as a card for parity with the other counters. |
 
 
 ## Two-phase crawl: the deferred-URL panel

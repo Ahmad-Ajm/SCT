@@ -12,12 +12,19 @@ This roadmap lists the **remaining** proposed improvements. Completed items are 
 ## Recently shipped (highlights)
 
 - **v1.13 (2026-06-20–23)** — final REFACTOR-tests-split (1,414 LOC monolith →
-  6 categorized files + conftest.py), then a same-day polish train (v1.13.1
-  label_for differentiates JSON files, v1.13.2 `withToken()` for SSE +
-  downloads, v1.13.3/6 triple-path auto-show + live polling, v1.13.4 docs
-  parity catch-up + RUNBOOK_AR, **v1.13.5 WordPress platform preset** with
-  19 exclude patterns + 7 query-param strips, v1.13.7 defensive URL scheme
-  normalization). Tooltips on job-page counters. 92/92 tests.
+  6 categorized files + conftest.py), then a same-day polish + OSS-readiness
+  train (v1.13.1 label_for differentiates JSON files, v1.13.2 `withToken()`
+  for SSE + downloads, v1.13.3/6 triple-path auto-show + live polling,
+  v1.13.4 docs parity + RUNBOOK_AR, **v1.13.5 WordPress platform preset**
+  with 19 exclude patterns + 7 query-param strips, v1.13.7 defensive URL
+  scheme normalization, **v1.13.8** OSS blocker fixes — client-name leak
+  scrubbed, SECURITY.md rewritten around GitHub Private Advisory channel
+  + v1.10+ threat model, ROADMAP backfilled through v1.13, CONTRIBUTING
+  stale `main.py::run_*` paths fixed, **v1.13.9** docs continuation —
+  USER_GUIDE Backlinks/WordPress/graph/counters/local-token sections,
+  CLI --phase2 + env-var additions, ARCHITECTURE rewritten for the v1.12
+  services/+routers/ refactor, RUNBOOK self-id bumped, pip-audit CI
+  comment vs `continue-on-error` contradiction resolved). 92/92 tests.
 - **v1.12 (2026-06-20)** — security/quality overhaul. CVE bumps (Playwright
   base v1.47→v1.55, aiohttp 3.10→3.12, jinja2 3.1.4→3.1.6, python-multipart
   0.0.12→0.0.18). `SCT_AUTO_INSTALL` flipped from opt-out to opt-in.

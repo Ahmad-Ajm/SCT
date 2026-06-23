@@ -1,6 +1,6 @@
 # SCT Incident Runbook
 
-> Operator-facing incident response for SCT (Simple Crawler Tool) v1.11. Each
+> Operator-facing incident response for SCT (Simple Crawler Tool) v1.13. Each
 > scenario follows a **Symptoms → Diagnosis → Fix** structure with concrete
 > shell commands. Where useful, the expected log line you should see (the
 > "screenshot of log") is shown verbatim so you can match against your own
@@ -759,7 +759,7 @@ CSP"), file the request in the project tracker — adding a fixed CSP /
 HSTS / referrer policy to the FastAPI middleware is straightforward but
 must be done carefully so the existing inlined `<script>` blocks
 continue to load. It has been considered as a backlog item but is not
-shipped as of v1.11.
+shipped as of v1.13.
 
 ---
 
@@ -778,7 +778,7 @@ ls webapp_jobs/ | wc -l && du -sh webapp_jobs/
 
 # Run the test suite to confirm a clean install
 python -B -m unittest discover -s tests
-# expect: 91/91 pass on v1.11
+# expect: 92/92 pass on v1.13
 ```
 
 ```powershell

@@ -570,7 +570,7 @@ ls webapp_jobs/ | wc -l && du -sh webapp_jobs/
 
 # شغّل suite الاختبارات للتأكّد من install نظيف
 python -B -m unittest discover -s tests
-# متوقّع: 91/91 pass على v1.13
+# متوقّع: 92/92 pass على v1.13
 ```
 
 ```powershell
