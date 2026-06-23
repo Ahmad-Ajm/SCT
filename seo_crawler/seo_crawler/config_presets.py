@@ -1,9 +1,11 @@
 """
 config_presets.py
 =================
-قوالب جاهزة لمنصّات التجارة الإلكترونية الشائعة (IMP-11): زد (Zid)، سلة (Salla)،
-Shopify، WooCommerce. تكشف المنصّة من HTML/الترويسات وتطبّق إعدادات موصى بها
-(استبعاد صفحات السلّة/الدفع/الحساب التي لا قيمة لها في فهرسة البحث).
+قوالب جاهزة لمنصّات شائعة (IMP-11): زد (Zid)، سلة (Salla)، Shopify،
+WooCommerce، WordPress (v1.13.5). تكشف المنصّة من HTML/الترويسات وتطبّق
+إعدادات موصى بها — استبعاد صفحات لا قيمة لها في فهرسة البحث:
+  - متاجر: السلّة/الدفع/الحساب + sort_by ونحوه
+  - WordPress: ?replytocom + /feed/ + /tag/ + /author/ + /wp-admin + wp-json
 
 دالّة الكشف نقية وقابلة للاختبار. التطبيق يدمج أنماط الاستبعاد في `filters.exclude_patterns`
 دون مسح ما يضعه المستخدم.
@@ -45,14 +47,56 @@ PRESETS: dict[str, dict[str, Any]] = {
         "strip_query_params": ["orderby", "order", "min_price", "max_price"],
         "note": "WooCommerce — استبعاد السلّة/الإدارة + تطبيع orderby.",
     },
+    # v1.13.5: WordPress vanilla (مدوّنات، أخبار، شركات، حكومي). لا يغطّيه
+    # preset الـWooCommerce لأنّ ذاك يخصّ التجارة فقط ويترك أعداء WP الرئيسيّين:
+    # ?replytocom (فخّ تعليقات يضاعف الطابور 10-50x)، /feed/ على كل تصنيف ومقال،
+    # /tag/ و /author/ أرشيف رفيع المحتوى، /wp-json/ نقاط REST API.
+    "wordpress": {
+        "label": "WordPress",
+        "exclude_patterns": [
+            "*/wp-admin*",
+            "*/wp-login.php*",
+            "*/xmlrpc.php*",
+            "*/wp-json/*",
+            "*/feed/*",
+            "*/feed",
+            "*/comments/feed/*",
+            "*/tag/*/feed/*",
+            "*/category/*/feed/*",
+            "*/author/*/feed/*",
+            "*?replytocom=*",
+            "*&replytocom=*",
+            "*?attachment_id=*",
+            "*&attachment_id=*",
+            "*?p=*",
+            "*/author/*",
+            "*/tag/*",
+            "*/?s=*",
+            "*&s=*",
+        ],
+        # معاملات WordPress الكلاسيكيّة المُلوِّثة للـURL (تكرار محتوى + traps):
+        "strip_query_params": [
+            "replytocom", "attachment_id", "unapproved", "moderation-hash",
+            "preview", "preview_id", "preview_nonce",
+        ],
+        "note": (
+            "WordPress — استبعاد wp-admin/feed/replytocom/author/tag + تطبيع "
+            "معاملات التعليقات والمعاينة. يوفّر 30-60% من ميزانيّة الزحف على "
+            "مدوّنات كثيرة التعليقات."
+        ),
+    },
 }
 
-# توقيعات الكشف: (المنصّة, قائمة كلمات تظهر في HTML أو قيم الترويسات)
+# توقيعات الكشف: (المنصّة, قائمة كلمات تظهر في HTML أو قيم الترويسات).
+# ترتيب القائمة يحدّد أيّ منصّة تفوز عند تطابق متعدّد — WooCommerce قبل WordPress
+# لأنّه subset أكثر دقّةً (متاجر WP) ويستحقّ preset التجارة الخاص به.
 _SIGNATURES: list[tuple[str, tuple[str, ...]]] = [
     ("shopify", ("cdn.shopify.com", "myshopify.com", "shopify", "x-shopid", "x-shopify")),
     ("salla", ("salla.sa", "cdn.salla", "s-cdn.net", "salla")),
     ("zid", ("zid.store", "cdn.zid", "x-zid", "zidapi", "zid")),
     ("woocommerce", ("woocommerce", "wp-content/plugins/woocommerce", "wc-ajax", "wc_")),
+    # v1.13.5: vanilla WordPress (يأتي بعد Woo فلا يطغى عليه)
+    ("wordpress", ("wp-content/", "wp-includes/", "/wp-json/", 'generator" content="wordpress')),
 ]
 
 

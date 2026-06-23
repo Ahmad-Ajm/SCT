@@ -11,7 +11,8 @@ site:
   # نطاقات إضافية تُعتبر "داخلية" (إن وُجدت)
   additional_internal_domains: []
   # مثال: ["shop.example.com", "blog.example.com"]
-  # قالب منصّة تجارة جاهز (IMP-11): "" أو zid | salla | shopify | woocommerce
+  # قالب منصّة جاهز (IMP-11 + v1.13.5): "" أو zid | salla | shopify | woocommerce | wordpress
+  # متاجر تستبعد cart/checkout/account؛ wordpress يستبعد wp-admin/feed/replytocom/author/tag.
   platform_preset: ""
 
 # === إعدادات الزحف العامة ===

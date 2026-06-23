@@ -132,9 +132,9 @@ class JobRunner:
         elif ua_preset in ua_map:
             cfg["crawl"]["user_agent"] = ua_map[ua_preset]
 
-        # قالب منصّة التجارة (IMP-11): يُطبَّق فقط لقيمة معروفة
+        # قالب منصّة جاهز (IMP-11 + v1.13.5 WordPress): يُطبَّق فقط لقيمة معروفة
         preset = str(overrides.get("platform_preset", "") or "").strip().lower()
-        if preset in ("zid", "salla", "shopify", "woocommerce"):
+        if preset in ("zid", "salla", "shopify", "woocommerce", "wordpress"):
             cfg["site"]["platform_preset"] = preset
         # توليد sitemap.xml (IMP-5)
         if overrides.get("generate_sitemap") is not None:

@@ -230,6 +230,33 @@ class TestCrawler(unittest.TestCase):
         self.assertIn("*/keepme*", ex)       # لم يُمسح ما وضعه المستخدم
         self.assertIn("*/checkout*", ex)      # أُضيف من القالب
         self.assertEqual(cfg["site"]["platform_preset_applied"], "Salla")
+
+    def test_wordpress_preset_present_and_excludes_traps(self):
+        """v1.13.5: WordPress preset يستبعد الفخاخ الكلاسيكيّة (replytocom/feed/tag/author)."""
+        from config_presets import PRESETS, apply_preset, detect_platform
+        # 1. الـpreset موجود مع الأنماط المتوقَّعة
+        self.assertIn("wordpress", PRESETS)
+        wp = PRESETS["wordpress"]
+        for required in (
+            "*?replytocom=*", "*/feed/*", "*/wp-admin*", "*/wp-json/*",
+            "*/tag/*", "*/author/*", "*/xmlrpc.php*",
+        ):
+            self.assertIn(required, wp["exclude_patterns"], f"missing pattern: {required}")
+        for q in ("replytocom", "attachment_id", "preview"):
+            self.assertIn(q, wp["strip_query_params"])
+        # 2. apply_preset يدمج الأنماط دون مسح ما وضعه المستخدم
+        cfg = {"filters": {"exclude_patterns": ["*/keep-me*"]}}
+        apply_preset(cfg, "wordpress")
+        ex = cfg["filters"]["exclude_patterns"]
+        self.assertIn("*/keep-me*", ex)
+        self.assertIn("*?replytocom=*", ex)
+        self.assertEqual(cfg["site"]["platform_preset_applied"], "WordPress")
+        # 3. detect_platform يتعرّف على fingerprint WordPress (بدون Woo)
+        wp_html = '<link rel="stylesheet" href="https://example.com/wp-content/themes/x/style.css">'
+        self.assertEqual(detect_platform(wp_html), "wordpress")
+        # 4. WooCommerce لا يزال يفوز عند تعدّد التطابق (موقع متجر على WP)
+        wc_html = wp_html + '<script src="/wp-content/plugins/woocommerce/x.js"></script>'
+        self.assertEqual(detect_platform(wc_html), "woocommerce")
     def test_discover_new_links_smoke_smoke(self):
         import asyncio
         from bs4 import BeautifulSoup
