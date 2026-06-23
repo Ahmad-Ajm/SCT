@@ -91,8 +91,14 @@ class JobRunner:
 
         url = overrides.get("url")
         if url:
-            cfg["site"]["start_url"] = url
+            # v1.13.7: defensive normalization — أحياناً المستخدم يلصق "example.com"
+            # بلا scheme أو يبدأ بـ"www." فقط. browser form يرفض ذلك مع type="url"،
+            # لكنّ API calls خارجيّة أو لصق سريع قد يمرّر القيمة بلا تعديل.
             from urllib.parse import urlparse
+            url = url.strip()
+            if not url.startswith(("http://", "https://")):
+                url = "https://" + url.lstrip("/")
+            cfg["site"]["start_url"] = url
             cfg["site"]["domain"] = urlparse(url).netloc
 
         if overrides.get("max_pages") is not None:
