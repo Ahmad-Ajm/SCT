@@ -54,14 +54,12 @@ Background investigations that did **not** need a fix:
 Version bumped to 1.13.11. 92/92 tests.
 
 Also in this commit: `git filter-repo --replace-text` was run before
-the first public push to surgically replace internal validation-site references in history with neutral placeholders. Commit graph, dates, authorship, and messages are preserved.
-
-neutral placeholders (`` and
-``). Commit graph, dates, authorship,
-and messages are preserved. All commit SHAs changed (the natural
-consequence of any history rewrite). The pre-rewrite `.git` is at
-`.git.backup-pre-filter-repo` locally for rollback; that backup is not
-pushed.
+the first public push to surgically replace internal validation-site
+references everywhere in history with neutral placeholders. Commit
+graph, dates, authorship, and messages are preserved. All commit SHAs
+changed (the natural consequence of any history rewrite). The
+pre-rewrite `.git` is kept only as a local rollback backup and is
+never pushed.
 
 ---
 
