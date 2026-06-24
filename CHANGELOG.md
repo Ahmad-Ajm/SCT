@@ -74,11 +74,11 @@ adversarial verification on every dimension + a synthesis judge). The
 audit cleared the project for publication after **one** hard blocker
 and surfaced 4 high-ROI polish items:
 
-- **Blocker fix — customer-domain anonymization.** The v1.13.9 CHANGELOG
-  block carried `` (a real healthcare
-  staging site  that preset validation was run on) in
-  plaintext. Replaced with "a healthcare WordPress site",
-  matching the style we used for the v1.13.8 `` scrub.
+- **Blocker fix — preset validation-site anonymization.** The v1.13.9
+  CHANGELOG block named a specific WordPress preset-validation site in
+  plaintext. Replaced with a neutral placeholder
+  (`a healthcare WordPress site`), matching the same style used for
+  the v1.13.8 generic-platform scrub.
 - **`config.yaml` untracked (recommended OSS pattern).** Was committed
   with only example values, but having both `config.yaml` and
   `config.example.yaml` in the repo invited accidental commits of real
@@ -198,9 +198,9 @@ git log; the consolidated behavior changes are:
   crawl the full host (not just `/blog/`); subpath-scoped crawls
   need an `include` pattern.
 
-- **v1.13.8 — OSS-readiness fixes (commit `3e5211a`).** Blocked the
-  client-name leak in CHANGELOG (replaced `` with "a
-  e-commerce site"), rewrote SECURITY.md's reporting section around the
+- **v1.13.8 — OSS-readiness fixes.** Blocked an early CHANGELOG
+  validation-site name leak (replaced with a neutral placeholder,
+  "an e-commerce site"), rewrote SECURITY.md's reporting section around the
   GitHub Private Security Advisory channel + added a v1.10+ surfaces
   block + a one-paragraph threat model, extended ROADMAP's "Recently
   shipped" from v1.04 stop through v1.13, refreshed README/README_ar's
@@ -240,7 +240,7 @@ git log; the consolidated behavior changes are:
       contradiction — clarified the job is **advisory only** and
       documented how to flip it to hard-fail (`--strict` + drop
       `continue-on-error`).
-    * Testing on a WordPress site configuration confirmed the
+    * Validation on a WordPress site configuration confirmed the
       preset filters traps as designed and the UI flow works through
       to download/auto-show. 92/92 tests.
 
@@ -956,8 +956,8 @@ SSRF helper now correctly rejects IPv4-mapped IPv6 and fails closed on NXDOMAIN
 
 ### Fixed — critical NameError in `_discover_new_links`
 
-A real-world crawl on a e-commerce site 
-raised `NameError: name 'url' is not defined` **6,500 times**. Every product
+A real-world crawl on an e-commerce site raised
+`NameError: name 'url' is not defined` **6,500 times**. Every product
 page fetched, every product page failed at link-discovery, every product
 page logged a traceback. 3,246 pages were saved (sitemap-seeded), but **zero
 new URLs were discovered from page content** — the bug fired on the first
