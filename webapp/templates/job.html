@@ -46,7 +46,7 @@ window._sctToken = "{{ sct_token }}";
     <div class="cards" id="liveCards">
       <div class="card" data-tip-key="tip_c_pages" title="عدد الصفحات التي زحف SCT إليها بنجاح حتى الآن (200/3xx). هذا الرقم هو 'حجم العيّنة' لكلّ التحليلات اللاحقة."><div class="num" id="m_pages">0</div><div class="lbl" data-i18n="c_pages">صفحات</div></div>
       <div class="card" id="m_queue_card" data-tip-key="tip_c_queue" title="روابط مكتشفة لكن لم تُفحَص بعد. الرقم ينمو في البداية ثمّ يتناقص؛ لو ظلّ صفراً مبكّراً فالـsitemap/الـnav لم يُكتشفا بشكل صحيح."><div class="num" id="m_queue">0</div><div class="lbl" id="m_queue_lbl" data-i18n="c_queue">في الطابور</div></div>
-      <div class="card" data-tip-key="tip_c_failed" title="صفحات أعادت 4xx/5xx أو فشل اتّصال (timeout/DNS). رقم مرتفع يدلّ على روابط مكسورة من الـnav أو من sitemap قديم."><div class="num" id="m_failed">0</div><div class="lbl" data-i18n="c_failed">فاشلة</div></div>
+      <div class="card" data-tip-key="tip_c_failed" title="صفحات فشل جلبها بعد كلّ محاولات الإعادة: timeout, DNS, Connection Reset/Refused, redirect loop, SSRF-block, robots-block, page-too-large. ملاحظة: 4xx/5xx لا تُحتسب هنا — تظهر كـ‹صفحات› مع كود الحالة. الرقم المرتفع هنا يعني مشكلة شبكة/خادم لا روابط مكسورة."><div class="num" id="m_failed">0</div><div class="lbl" data-i18n="c_failed">فاشلة</div></div>
       <div class="card" data-tip-key="tip_c_ext_checked" title="روابط خارجيّة (لمواقع أخرى) فُحِص statusها بـHEAD. يظهر في Phase 2.5؛ يكون صفراً أثناء Phase 1."><div class="num" id="m_ext_checked">0</div><div class="lbl" data-i18n="c_ext_checked">روابط مفحوصة</div></div>
       <div class="card" data-tip-key="tip_c_speed" title="معدّل الزحف الفوريّ (صفحات/ثانية). يختلف عن المعدّل الإجماليّ — يعكس آخر بضع ثوان. لو هبط فجأة فالخادم باطئ أو وصل rate limit."><div class="num" id="m_speed">0</div><div class="lbl" data-i18n="c_speed">صفحة/ث</div></div>
       <div class="card" data-tip-key="tip_c_sec" title="الزمن المنقضي من بدء المهمّة بالثواني (مساوي للمؤقّت في الأعلى)."><div class="num" id="m_elapsed">0</div><div class="lbl" data-i18n="c_sec">ثانية</div></div>
@@ -543,7 +543,19 @@ document.getElementById('killBtn').addEventListener('click', async () => {
   setTimeout(() => location.reload(), 600);
 });
 document.getElementById('stopBtn').addEventListener('click', async () => {
+  // v1.13.11 (F7): بعد إيقاف يدوي، لا ننتظر SSE/polling لإظهار النتائج —
+  // نسحب الـmeta مباشرةً بعد grace period ونستدعي _safeFinish.
+  // هذا يكمل شبكة الأمان الثلاثية v1.13.3 لمسار الإيقاف اليدوي.
   await fetch('/api/jobs/' + jobId + '/stop', { method: 'POST' });
+  await new Promise(r => setTimeout(r, 600));
+  try {
+    const r = await fetch('/api/jobs/' + jobId + '/progress');
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && j.meta && j.meta.result) {
+      _safeFinish(j.meta);
+    }
+  } catch (_e) { /* الـpolling سيلتقط لاحقاً */ }
 });
 
 // v1.02: زرّ توليد لكلّ تنسيق + تنزيل بجانبه — يستفسر حالة الجوب في الخلفية

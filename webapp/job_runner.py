@@ -405,6 +405,17 @@ class JobRunner:
         meta["ended_at"] = datetime.now().isoformat()
         meta["result"] = self._discover_result(job_dir, meta.get("mode", "audit"))
         meta["diagnostics"] = self._summarize_run_log(job_dir / "run.log")
+        # v1.13.11 (F5): مزامنة progress.json مع الحالة النهائية كي لا تظهر
+        # شارة "فشل" مع شريط "جار التحليل..." في الواجهة (race condition سابق:
+        # meta.status="failed" وprogress.status="analyzing" تتعايشان دون مزامنة).
+        # نقرأ الموجود ونحدّث حقل status فقط — العدّادات والمراحل تُحفَظ كما هي.
+        progress_file = job_dir / "progress.json"
+        try:
+            cur = self.progress(job_id) or {}
+            cur["status"] = meta["status"]
+            self._write_progress(progress_file, cur)
+        except OSError:
+            log.exception("Failed to sync final status to progress.json for %s", job_id)
         self._write_meta(job_dir, meta)
         with self._lock:
             self._procs.pop(job_id, None)

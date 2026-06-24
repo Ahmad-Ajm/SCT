@@ -4,6 +4,67 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.11 (2026-06-24 live-test bug sweep — 3 race-condition fixes)
+
+Three fixes triggered by the user's live WordPress crawl test, surfaced
+by a 7-dimension adversarial workflow:
+
+- **F5: status race condition between `job.json` and `progress.json`.**
+  When a subprocess exited non-zero mid-analysis, `job_runner._watch`
+  wrote `meta.status = "failed"` to `job.json` but the last-known
+  `progress.json` still carried the in-flight phase (e.g. `analyzing`).
+  The job page reads both: badge shows "فشل" while the bar shows "جار
+  التحليل…". Fix: after deciding final status, merge it into
+  `progress.json` before writing `job.json`. Counters and phase fields
+  are preserved (a failed job still shows how far it got).
+
+- **F7: stop-button auto-show regression.** After clicking Stop, the
+  results panel and download buttons stayed hidden until manual
+  refresh. The v1.13.3 triple safety net only covered natural
+  completion paths (`event: end`, FINISHED `data:`, polling) — Stop
+  fired `POST /api/jobs/{id}/stop` and waited for SSE, which sometimes
+  never came. Now: Stop awaits a 600 ms grace then pulls
+  `/api/jobs/{id}/progress` and calls `_safeFinish(meta)` itself,
+  matching the v1.13.3 pattern.
+
+- **F6: failed-card tooltip accuracy.** Tooltip said "4xx/5xx أو فشل
+  اتّصال", implying both. The code path actually counts only
+  `_fetch_page` failures (timeout / DNS / connection reset / redirect
+  loop / SSRF block / robots block / page-too-large) — 4xx/5xx are
+  recorded as crawled-pages-with-status, not as failures. Tooltip
+  rewritten to match: "صفحات فشل جلبها بعد كل محاولات الإعادة … 4xx/5xx
+  لا تُحتسب هنا — تظهر كـ‹صفحات› مع كود الحالة."
+
+Background investigations that did **not** need a fix:
+
+- **N2** (Recent Jobs panel shows only 3): confirmed only 3 valid job
+  folders exist under `webapp_jobs/`. Display limit is 15; nothing
+  lost. User had deleted older jobs at some point.
+- **N3** (`webapp_jobs/` tracking): confirmed gitignored since day one;
+  zero tracked files. 359 MB on disk stays local.
+- **N4** (card tooltips): all 6 cards have HTML5 `title=` working
+  fine; the `data-tip-key` attributes are placeholders for a future
+  bilingual styled tooltip system (not v1 launch scope).
+- **N8** (live job `20260624_121003_2370cd`): no crash. The user
+  clicked Stop manually after the crawl had collected 316 pages of
+  the 500-page cap; analysis finished and exported partial results.
+  The 6 "failed" pages were genuine fetch failures (the new F6
+  tooltip will help readers understand that).
+
+Version bumped to 1.13.11. 92/92 tests.
+
+Also in this commit: `git filter-repo --replace-text` was run before
+the first public push to surgically replace internal validation-site references in history with neutral placeholders. Commit graph, dates, authorship, and messages are preserved.
+
+neutral placeholders (`` and
+``). Commit graph, dates, authorship,
+and messages are preserved. All commit SHAs changed (the natural
+consequence of any history rewrite). The pre-rewrite `.git` is at
+`.git.backup-pre-filter-repo` locally for rollback; that backup is not
+pushed.
+
+---
+
 ## v1.13.10 (2026-06-24 final pre-publication scrub)
 
 A targeted publication-readiness pass run as a 6-dimension adversarial
