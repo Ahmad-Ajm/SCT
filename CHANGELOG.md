@@ -4,6 +4,57 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.10 (2026-06-24 final pre-publication scrub)
+
+A targeted publication-readiness pass run as a 6-dimension adversarial
+audit workflow (sensitive-data sweep / git-history scan / docs
+completeness / leftover code / repo hygiene / first-impression test +
+adversarial verification on every dimension + a synthesis judge). The
+audit cleared the project for publication after **one** hard blocker
+and surfaced 4 high-ROI polish items:
+
+- **Blocker fix — customer-domain anonymization.** The v1.13.9 CHANGELOG
+  block carried `` (a real healthcare
+  staging site  that preset validation was run on) in
+  plaintext. Replaced with "a healthcare WordPress site",
+  matching the style we used for the v1.13.8 `` scrub.
+- **`config.yaml` untracked (recommended OSS pattern).** Was committed
+  with only example values, but having both `config.yaml` and
+  `config.example.yaml` in the repo invited accidental commits of real
+  user start URLs / domains. Now `config.yaml` is gitignored and
+  `services/config_service.py::load_config` falls back to
+  `config.example.yaml` if the default path is missing — fresh clones
+  run with zero setup, and users only create their own `config.yaml`
+  when they need overrides (which then stays out of git).
+- **`pyproject.toml` added.** Enables `pip install git+<repo-url>`
+  (no PyPI publish required) and sets up the project for future PyPI
+  release with zero rework. Includes name, version, MIT license, full
+  classifiers (Development Status :: 5 - Production/Stable, AR + EN
+  natural languages, Python 3.10/3.11/3.12), URLs (Homepage, Docs,
+  Changelog, Issues), and a `sct` console-script entry point.
+  Dependencies are still managed in `requirements.txt` to keep parity
+  with Docker/CI — duplicating them in pyproject would invite drift.
+- **README badges (AR + EN).** Both READMEs gained a 4-badge row
+  (CI status, Python 3.10+, MIT license, AR+EN docs link) — the
+  audit's "first-impression test" agent rated this the single
+  highest-ROI no-code fix.
+- **`docs/OAUTH_SETUP.md` and `docs/GA4_PROPERTY_ID.md` are now English.**
+  The Arabic content moved to `OAUTH_SETUP_AR.md` and
+  `GA4_PROPERTY_ID_AR.md`, matching the rest of the project's
+  EN-at-canonical / AR-at-`_AR` convention.
+
+The audit's history scan over 41 commits found **zero** API keys, .env
+leaks, or credentials. `` exists in commit `2c14c11` but was
+already scrubbed in v1.13.8 — wiping history is **not** recommended:
+it would cost 41 commits of attribution + the visible v1.13.x polish
+narrative that signals active maintenance, and would gain nothing the
+existing fix didn't already buy. The full verdict is in the workflow
+output.
+
+Version bumped to 1.13.10. 92/92 tests.
+
+---
+
 ## v1.13.1 — v1.13.9 (2026-06-23 same-day polish + open-source readiness)
 
 Nine patches consolidating user-reported UI bugs, auth-edge cases, the
@@ -128,7 +179,7 @@ git log; the consolidated behavior changes are:
       contradiction — clarified the job is **advisory only** and
       documented how to flip it to hard-fail (`--strict` + drop
       `continue-on-error`).
-    * Live test on `` confirmed the WordPress
+    * Testing on a WordPress site configuration confirmed the
       preset filters traps as designed and the UI flow works through
       to download/auto-show. 92/92 tests.
 

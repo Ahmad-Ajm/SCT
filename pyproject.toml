@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sct"
+version = "1.13.10"
+description = "Simple Crawler Tool — a local-only technical SEO crawler + audit with a FastAPI web UI, two-phase crawl, deep PageSpeed/Lighthouse tables, GSC/GA4 integration, and HTML/PDF reports."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Ahmad-Ajm" }]
+keywords = ["seo", "crawler", "audit", "lighthouse", "pagespeed", "gsc", "ga4", "wordpress", "woocommerce"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Environment :: Web Environment",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: MIT License",
+  "Natural Language :: Arabic",
+  "Natural Language :: English",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+  "Topic :: Internet :: WWW/HTTP :: Site Management",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+# Dependencies are managed in requirements.txt to keep parity with the
+# existing Docker/CI flow. `pip install .` will not pull them automatically;
+# run `pip install -r requirements.txt` first (documented in README §Quick Start).
+# We intentionally do not duplicate the list here to avoid drift.
+
+[project.urls]
+Homepage = "https://github.com/Ahmad-Ajm/SCT"
+Documentation = "https://github.com/Ahmad-Ajm/SCT/blob/main/docs/USER_GUIDE.md"
+Changelog = "https://github.com/Ahmad-Ajm/SCT/blob/main/CHANGELOG.md"
+Issues = "https://github.com/Ahmad-Ajm/SCT/issues"
+
+[project.scripts]
+sct = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["seo_crawler*", "webapp*"]
+exclude = ["tests*", "webapp_jobs*", "output*", "state*", "logs*", "credentials*"]

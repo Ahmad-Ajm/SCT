@@ -36,3 +36,9 @@ Thumbs.db
 
 # Local review folder (files moved out of the repo for review before final deletion)
 _review/
+
+# v1.13.10: user's local config — config.example.yaml is the tracked template.
+# load_config() falls back to config.example.yaml when config.yaml is absent,
+# so a fresh clone runs without setup. Copy the example to config.yaml only
+# when you need local overrides — keeps your real start_url / domain out of git.
+config.yaml

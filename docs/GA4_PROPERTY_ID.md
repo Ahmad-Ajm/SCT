@@ -1,35 +1,41 @@
-# كيف تجد GA4 property_id؟
+# How do I find my GA4 `property_id`?
 
-`property_id` هو معرّف الـProperty في Google Analytics 4 — رقم من 9-10 خانات (مثل
-`123456789`). تحتاجه SCT لجلب بيانات GA4.
+> النسخة العربية: [`GA4_PROPERTY_ID_AR.md`](GA4_PROPERTY_ID_AR.md).
 
-## الطريقة الأولى — من واجهة GA4 (الأسرع)
+The `property_id` is the identifier of a Google Analytics 4 **Property** —
+a 9-10 digit number (e.g. `123456789`). SCT needs it to fetch GA4 data.
 
-1. افتح [Google Analytics](https://analytics.google.com/) واختر الـ Property من
-   القائمة العلوية.
-2. اضغط **⚙️ Admin** أسفل القائمة الجانبية.
-3. في العمود الأوسط («Property») اضغط **Property details** (أو **Property settings**).
-4. سترى **Property ID** بوضوح في أعلى الصفحة — انسخه.
+## Method 1 — from the GA4 UI (fastest)
 
-> الرقم يبدأ عادةً بـ`2`، `3`، `4` أو `5` ويتكوّن من 9-10 أرقام.
+1. Open [Google Analytics](https://analytics.google.com/) and pick the
+   Property from the top dropdown.
+2. Click **⚙️ Admin** at the bottom of the left sidebar.
+3. In the middle column ("Property") click **Property details** (or
+   **Property settings**).
+4. **Property ID** is shown at the top of the page — copy it.
 
-## الطريقة الثانية — من واجهة SCT (الأسهل بعد ربط Google)
+> The number usually starts with `2`, `3`, `4`, or `5` and is 9-10 digits.
 
-بعد ربط Google من تبويب **🔌 التكاملات والذكاء** في SCT:
+## Method 2 — from the SCT UI (easiest after connecting Google)
 
-1. في بطاقة **Google Analytics 4** اضغط **📋 جلب خصائص GA4**.
-2. ستظهر قائمة بكلّ الـ Properties التي تملك صلاحية عليها.
-3. اختر واحدة — يتعبّأ الـ `property_id` تلقائياً.
+After connecting Google from the **🔌 Integrations & AI** tab in SCT:
 
-## الفرق بين Property ID و Measurement ID
+1. In the **Google Analytics 4** card click **📋 Fetch GA4 properties**.
+2. A dropdown appears with every Property you have access to.
+3. Pick one — `property_id` is filled in automatically.
 
-- **Property ID**: رقم تقريباً 9-10 خانات (`123456789`) — هذا ما تحتاجه SCT.
-- **Measurement ID**: يبدأ بـ`G-` (مثل `G-XXXXXXXXXX`) — يُستخدم في وسم gtag على
-  الموقع، **ليس هو** المطلوب هنا.
+## Property ID vs Measurement ID
 
-## الصلاحيات المطلوبة
+- **Property ID**: a ~9-10 digit number (`123456789`) — this is what SCT
+  needs.
+- **Measurement ID**: starts with `G-` (e.g. `G-XXXXXXXXXX`) — used in the
+  `gtag` snippet on your website, **not** the value SCT asks for.
 
-للوصول إلى بيانات الـ Property حسابك يحتاج صلاحية **Viewer** على الأقلّ في GA4:
+## Required permissions
 
-- افتح GA4 → **⚙️ Admin** → **Property Access Management**.
-- إن لم تكن في القائمة، اطلب من مالك الـ Property إضافتك (Email + role = Viewer كافٍ).
+To read Property data, your account needs at least the **Viewer** role on
+the GA4 Property:
+
+- Open GA4 → **⚙️ Admin** → **Property Access Management**.
+- If you're not listed, ask the Property owner to add you (their email +
+  role = Viewer is enough).

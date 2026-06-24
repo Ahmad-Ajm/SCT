@@ -22,8 +22,21 @@ log = get_logger(__name__)
 def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
     config_file = Path(config_path)
     if not config_file.exists():
-        log.error(f"Config file not found: {config_path}")
-        sys.exit(1)
+        # v1.13.10: fall back to config.example.yaml so a fresh clone runs
+        # without the user having to `cp config.example.yaml config.yaml` first.
+        # Only the default path triggers the fallback — an explicit --config
+        # pointing at a missing file is still a hard error (likely a typo).
+        if config_path == "config.yaml":
+            fallback = Path("config.example.yaml")
+            if fallback.exists():
+                log.info("config.yaml not found; using config.example.yaml")
+                config_file = fallback
+            else:
+                log.error(f"Neither {config_path} nor config.example.yaml found")
+                sys.exit(1)
+        else:
+            log.error(f"Config file not found: {config_path}")
+            sys.exit(1)
     try:
         with open(config_file, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)

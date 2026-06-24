@@ -1,4 +1,9 @@
-# SCT - أداة زحف وتدقيق SEO
+# SCT — أداة زحف وتدقيق SEO
+
+[![CI](https://github.com/Ahmad-Ajm/SCT/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmad-Ajm/SCT/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docs: AR + EN](https://img.shields.io/badge/docs-AR%20%2B%20EN-brightgreen.svg)](README.md)
 
 SCT هي أداة مفتوحة المصدر مبنية ببايثون لفحص SEO التقني والداخلي للمواقع. تساعدك على اكتشاف مشاكل الزحف، الفهرسة، العناوين، الوصف، الروابط، الصور، structured data، canonical، hreflang، mixed content، redirects، وتصدير تقارير قابلة للتحليل.
 

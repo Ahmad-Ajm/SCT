@@ -1,80 +1,92 @@
-# دليل إعداد OAuth و Google Cloud — SCT
+# OAuth & Google Cloud setup — SCT
 
-> دليل من 3 خطوات لإنشاء بيانات اعتماد OAuth client تستخدمها SCT للوصول إلى
-> Google Search Console و Google Analytics 4 و PageSpeed Insights.
+> A 3-step guide for creating the OAuth client credentials that SCT uses to
+> read Google Search Console, Google Analytics 4, and PageSpeed Insights.
+> النسخة العربية: [`OAUTH_SETUP_AR.md`](OAUTH_SETUP_AR.md).
 
-## لماذا OAuth؟
+## Why OAuth?
 
-SCT لا تحفظ بريدك ولا كلمة مرورك. بدلاً من ذلك تستخدم OAuth: أنت توافق مرّة واحدة
-في متصفّحك، فيُحفظ "token" محلياً يُجدِّد نفسه تلقائياً. الـ token مرتبط بمشروع
-Google Cloud الذي تُنشئه أنت — لا طرف ثالث.
+SCT does not store your email or password. Instead it uses OAuth: you consent
+once in your browser, then a "token" is stored locally and refreshes itself
+automatically. The token is tied to the Google Cloud project **you** create —
+no third party in the middle.
 
-## الخطوات الثلاث
+## The three steps
 
-### 1. أنشئ مشروعاً وفعّل الـ APIs
+### 1. Create a project and enable the APIs
 
-افتح [Google Cloud Console](https://console.cloud.google.com/) واختر مشروعاً موجوداً
-أو أنشئ مشروعاً جديداً. ثم من قائمة **APIs & Services → Library** فعّل هذه الـ APIs الثلاث:
+Open the [Google Cloud Console](https://console.cloud.google.com/), pick an
+existing project or create a new one. Then from **APIs & Services → Library**
+enable these three APIs:
 
-- **Search Console API** — لجلب نقرات/ظهورات GSC.
-- **Google Analytics Admin API** — لقراءة قائمة خصائص GA4 (للقائمة المنسدلة في الواجهة).
-- **Google Analytics Data API** — لجلب بيانات GA4 (الزيارات والقنوات…).
+- **Search Console API** — fetches GSC clicks / impressions.
+- **Google Analytics Admin API** — lists your GA4 properties (powers the
+  dropdown in the UI).
+- **Google Analytics Data API** — pulls GA4 metrics (sessions, channels, …).
 
-تفعيل API يأخذ ثوانٍ — لا يتطلّب بطاقة دفع، ولا تغيير في الفوترة.
+Enabling an API takes seconds — no credit card, no change in billing.
 
-### 2. اضبط شاشة موافقة OAuth
+### 2. Configure the OAuth consent screen
 
-من **APIs & Services → OAuth consent screen**:
+From **APIs & Services → OAuth consent screen**:
 
-- اختر نوع **External** (يكفي حتى لو كنت تستخدمها لنفسك فقط).
-- املأ الحقول الأساسية: اسم التطبيق، بريدك للدعم، وبريد المطوّر.
-- اختر النطاقات (scopes) التي ستطلبها — يكفي اختيار الإضافة من بطاقات GA4 و GSC.
-- في صفحة **Test users** أضِف بريدك (وزملاءك) — في وضع *Testing* لن يستطيع غير من
-  أضفتهم استخدام الاعتماد. هذا كافٍ تماماً للاستخدام الشخصي/الداخلي.
+- Pick **External** as the user type (works fine even if it's just you).
+- Fill in the basics: app name, support email, developer email.
+- Pick the scopes you'll request — the GA4 and GSC scope shortcuts are enough.
+- On the **Test users** page add your own email (and your teammates) — while
+  the app is in *Testing* mode only listed users can sign in. This is more
+  than enough for personal / internal use.
 
-> **ملاحظة:** في وضع *Testing* تنتهي refresh tokens كلّ **7 أيام**، أي ستحتاج إعادة
-> الموافقة أسبوعياً. للإنتاج بلا تنبيه «التطبيق غير موثّق» تحتاج طلب OAuth verification
-> من Google (الـ scopes حسّاسة).
+> **Note:** in *Testing* mode refresh tokens expire every **7 days**, so you
+> will re-consent weekly. For production without the "unverified app" warning
+> you need OAuth verification from Google (the scopes are sensitive).
 
-### 3. أنشئ OAuth Client ID
+### 3. Create an OAuth Client ID
 
-من **APIs & Services → Credentials → + CREATE CREDENTIALS → OAuth client ID**:
+From **APIs & Services → Credentials → + CREATE CREDENTIALS → OAuth client ID**:
 
-- اختر نوع **Desktop app** (وليس Web).
-- اعطه اسماً (مثل "SCT local").
-- اضغط **CREATE** ثم **DOWNLOAD JSON** — احفظ الملف على جهازك.
+- Choose application type **Desktop app** (not Web).
+- Give it a name (e.g. "SCT local").
+- Click **CREATE**, then **DOWNLOAD JSON** — save the file on your machine.
 
-## ربط SCT بالملف
+## Wiring SCT to the JSON
 
-في واجهة SCT، تبويب **🔌 التكاملات والذكاء**:
+In the SCT UI, open the **🔌 Integrations & AI** tab:
 
-1. اضغط **📤 رفع الملف** وارفع `client_secret.json` الذي نزّلته.
-2. اضغط **🔐 وافق بحسابي (يفتح المتصفّح)** — يفتح متصفّحك على شاشة موافقة Google،
-   اختر حسابك (الذي تملك فيه صلاحية على GA4/GSC) ووافق.
-3. يُحفظ الـ token تحت `webapp_jobs/_google/` ولا يُرفع إلى Git.
+1. Click **📤 Upload file** and upload the `client_secret.json` you just
+   downloaded.
+2. Click **🔐 Sign in with my account (opens browser)** — your browser opens
+   Google's consent screen. Pick the account that has GA4 / GSC access and
+   approve.
+3. The token is stored under `webapp_jobs/_google/` and is never committed
+   to git.
 
-## للأجهزة بلا متصفّح (سيرفر بعيد، WSL، إلخ)
+## For headless machines (remote server, WSL, etc.)
 
-في نفس القسم اطوي **🔗 تعذّر فتح المتصفح؟ استخدم «لصق الرمز»**:
+Expand the **🔗 Browser can't open? Use "paste-the-code"** section in the
+same tab:
 
-1. اضغط **🔗 احصل على رابط الموافقة** — يعطيك رابطاً.
-2. افتح الرابط في أيّ متصفّح (على جهاز آخر إن لزم).
-3. بعد الموافقة سيُعيدك Google إلى صفحة فاشلة عنوانها يحوي `?code=...` — انسخه كاملاً.
-4. الصقه في الحقل ثم اضغط **🔓 إكمال التفويض**.
+1. Click **🔗 Get the consent URL** — it gives you a link.
+2. Open the link in any browser (on a different machine if necessary).
+3. After approving Google bounces you to a page whose URL contains
+   `?code=...` — copy the value in full.
+4. Paste it into the field and click **🔓 Complete authorization**.
 
-## استكشاف الأخطاء
+## Troubleshooting
 
-| الخطأ | السبب الأرجح | الحلّ |
+| Error | Likely cause | Fix |
 |---|---|---|
-| `not_connected` | لم تكتمل خطوة 3 | اضغط «وافق بحسابي» |
-| `auth_failed` | refresh token انتهى (>7 أيام في Testing) | كرّر الموافقة |
-| `not in test users` | حسابك ليس في قائمة Test users | أضِفه في OAuth consent screen |
-| `403 PERMISSION_DENIED` على GSC | حسابك ليس لديه صلاحية على هذا الموقع في GSC | اطلب من المالك إضافتك كـUser |
-| `403` على GA4 | حسابك ليس لديه صلاحية على الـProperty | أضِفه من GA4 → Admin → Property Access Management |
+| `not_connected` | Step 3 never completed | Click "Sign in with my account" |
+| `auth_failed` | Refresh token expired (>7 days in Testing mode) | Re-consent |
+| `not in test users` | Your account isn't on the OAuth Test-users list | Add it in the OAuth consent screen |
+| `403 PERMISSION_DENIED` on GSC | Your account doesn't have access to this site in GSC | Ask the owner to add you as a User |
+| `403` on GA4 | Your account doesn't have access to the Property | Add it from GA4 → Admin → Property Access Management |
 
-## أمان
+## Security
 
-- ملف `client_secret.json` وملفّا الـ token تُخزَّن تحت `webapp_jobs/_google/` على
-  جهازك فقط (مع صلاحيات `0600` على Unix).
-- المجلد `webapp_jobs/` مذكور في `.gitignore` — لا يُرفع إلى المستودع.
-- مفاتيح PageSpeed/AI تُمرَّر للعمليّة الفرعية عبر متغيّرات بيئة، لا تُكتب على القرص.
+- The `client_secret.json` and the two token files are stored under
+  `webapp_jobs/_google/` on your machine only (with `0600` permissions on
+  Unix).
+- `webapp_jobs/` is listed in `.gitignore` — never pushed to the repository.
+- PageSpeed / AI keys are passed to the crawler subprocess via environment
+  variables — never written to disk.

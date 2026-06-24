@@ -1,4 +1,9 @@
-# SCT - Simple Crawler Tool
+# SCT — Simple Crawler Tool
+
+[![CI](https://github.com/Ahmad-Ajm/SCT/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmad-Ajm/SCT/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docs: AR + EN](https://img.shields.io/badge/docs-AR%20%2B%20EN-brightgreen.svg)](README_ar.md)
 
 SCT is an open-source technical SEO crawler built with Python. It helps audit websites for crawlability, indexability, on-page SEO issues, links, images, structured data, canonicals, hreflang, mixed content, redirects, and exportable reports.
 
