@@ -420,15 +420,27 @@ class JobRunner:
         with self._lock:
             self._procs.pop(job_id, None)
 
-    def stop(self, job_id: str, grace_seconds: float = 8.0) -> bool:
-        """يطلب توقّفاً لطيفاً، ثم يُصعّد إلى terminate/kill إن لم تستجب
-        العملية خلال grace_seconds (يحمي من حلقات تكامل لا تفحص الإشارة)."""
+    def stop(self, job_id: str, grace_seconds: float = 60.0) -> bool:
+        """يطلب توقّفاً لطيفاً ويعود فوراً. _watch يلتقط الخروج الفعليّ.
+        thread جانبيّ يُصعّد إلى terminate/kill إن لم تستجب العملية
+        خلال grace_seconds.
+
+        v1.13.15: تحوّل من blocking إلى async + grace رُفع من 8 إلى 60 ثانية
+        ليُتاح للـsubprocess إكمال crawl + analysis + export الجزئيّ.
+        الـHTTP request يعود في <100ms — الواجهة تستطلع حتى الحالة النهائية."""
         if not _valid_job_id(job_id):
             return False
         with self._lock:
             proc = self._procs.get(job_id)
         if not proc:
             return False
+        # B1: اكتب stopped قبل الإشارة — يلغي race مع _watch تماماً.
+        try:
+            meta = self._read_meta(JOBS_DIR / job_id)
+            meta["status"] = "stopped"
+            self._write_meta(JOBS_DIR / job_id, meta)
+        except OSError:
+            log.exception("stop(%s): pre-signal meta write failed", job_id)
         try:
             if os.name == "nt":
                 proc.send_signal(signal.CTRL_BREAK_EVENT)
@@ -436,10 +448,22 @@ class JobRunner:
                 proc.send_signal(signal.SIGINT)
         except (ProcessLookupError, OSError):
             return False
-        # ننتظر لطفاً، ثم نُصعّد إن استمرّت
+        # spawn background watcher للتصعيد إن لزم — لا نحجز الـrequest.
+        threading.Thread(
+            target=self._escalate_after_grace,
+            args=(proc, grace_seconds, job_id),
+            daemon=True,
+        ).start()
+        return True
+
+    @staticmethod
+    def _escalate_after_grace(proc: subprocess.Popen, grace_seconds: float,
+                              job_id: str) -> None:
+        """ينتظر الـsubprocess grace_seconds، ثم terminate إن لم يستجب."""
         try:
             proc.wait(timeout=grace_seconds)
         except subprocess.TimeoutExpired:
+            log.warning("stop(%s): grace expired — escalating to terminate", job_id)
             try:
                 proc.terminate()
                 proc.wait(timeout=3)
@@ -448,10 +472,6 @@ class JobRunner:
                     proc.kill()
                 except OSError:
                     pass
-        meta = self._read_meta(JOBS_DIR / job_id)
-        meta["status"] = "stopped"
-        self._write_meta(JOBS_DIR / job_id, meta)
-        return True
 
     def force_kill(self, job_id: str) -> bool:
         """قتل فوري بلا مهلة (للحلقات الطويلة العالقة في طرف ثالث مثل PageSpeed)."""
@@ -461,13 +481,17 @@ class JobRunner:
             proc = self._procs.get(job_id)
         if not proc:
             return False
+        # v1.13.15 (B1): نفس النمط — اكتب stopped قبل القتل لتجنّب race مع _watch.
+        try:
+            meta = self._read_meta(JOBS_DIR / job_id)
+            meta["status"] = "stopped"
+            self._write_meta(JOBS_DIR / job_id, meta)
+        except OSError:
+            log.exception("force_kill(%s): pre-kill meta write failed", job_id)
         try:
             proc.kill()
         except OSError:
             pass
-        meta = self._read_meta(JOBS_DIR / job_id)
-        meta["status"] = "stopped"
-        self._write_meta(JOBS_DIR / job_id, meta)
         return True
 
     # ------------------------------------------------------------------

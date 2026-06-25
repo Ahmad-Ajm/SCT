@@ -543,19 +543,28 @@ document.getElementById('killBtn').addEventListener('click', async () => {
   setTimeout(() => location.reload(), 600);
 });
 document.getElementById('stopBtn').addEventListener('click', async () => {
-  // v1.13.11 (F7): بعد إيقاف يدوي، لا ننتظر SSE/polling لإظهار النتائج —
-  // نسحب الـmeta مباشرةً بعد grace period ونستدعي _safeFinish.
-  // هذا يكمل شبكة الأمان الثلاثية v1.13.3 لمسار الإيقاف اليدوي.
+  // v1.13.15 (B3): الـPOST يعود فوراً (stop() لم يعد blocking منذ v1.13.15).
+  // ثم نستطلع كل 800ms حتى تصبح meta.status حالة نهائيّة (stopped/complete/
+  // partial/failed) — حتى 90 ثانية لتغطية: 8s إشارة + ~60s grace export.
+  // عند الوصول لحالة نهائيّة نستدعي _safeFinish فوراً (حتى لو result فارغ
+  // المستخدم يرى الشارة الصحيحة بدل البقاء معلّقاً على "running").
   await fetch('/api/jobs/' + jobId + '/stop', { method: 'POST' });
-  await new Promise(r => setTimeout(r, 600));
-  try {
-    const r = await fetch('/api/jobs/' + jobId + '/progress');
-    if (!r.ok) return;
-    const j = await r.json();
-    if (j && j.meta && j.meta.result) {
-      _safeFinish(j.meta);
-    }
-  } catch (_e) { /* الـpolling سيلتقط لاحقاً */ }
+  const TERMINAL = ['stopped', 'complete', 'partial', 'partial_max_pages', 'failed'];
+  const maxAttempts = 112; // 112 * 800ms ≈ 90s
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, 800));
+    if (_finishedOnce) return;
+    try {
+      const r = await fetch('/api/jobs/' + jobId + '/progress');
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (!j || !j.meta) continue;
+      if (TERMINAL.includes(j.meta.status)) {
+        _safeFinish(j.meta);
+        return;
+      }
+    } catch (_e) { /* تابع الاستطلاع */ }
+  }
 });
 
 // v1.02: زرّ توليد لكلّ تنسيق + تنزيل بجانبه — يستفسر حالة الجوب في الخلفية

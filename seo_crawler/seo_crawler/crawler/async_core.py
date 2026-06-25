@@ -379,6 +379,9 @@ class AsyncCrawler:
                     pass
 
     def _remove_signal_handlers(self) -> None:
+        # v1.13.15 (A2-2): استعد المعالجات المحفوظة على Windows أيضاً —
+        # كانت تبقى مُعدَّلة وتؤثّر على عمليّات لاحقة في نفس process.
+        import signal as _signal
         try:
             loop = asyncio.get_running_loop()
             for sig in self._stop_signals():
@@ -388,6 +391,12 @@ class AsyncCrawler:
                     pass
         except RuntimeError:
             pass
+        for sig, prev in (getattr(self, "_prev_handlers", {}) or {}).items():
+            try:
+                _signal.signal(sig, prev)
+            except (ValueError, OSError):
+                pass
+        self._prev_handlers = {}
 
     def _request_stop(self) -> None:
         """طلب إيقاف نظيف للزحف (من المستخدم/إشارة)."""

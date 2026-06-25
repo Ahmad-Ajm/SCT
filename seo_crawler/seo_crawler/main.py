@@ -274,7 +274,18 @@ async def main_async(args, config: dict[str, Any]):
                 if args.sync:
                     crawler = run_crawl_sync(config)
                 else:
-                    crawler = await run_crawl_async(config, db=db)
+                    # v1.13.15 (B2): KeyboardInterrupt أثناء crawl لا يجب أن يقتل export.
+                    # نلتقطه هنا، نوسم crawler بالـstop، ونتابع لمرحلة export الجزئيّة.
+                    try:
+                        crawler = await run_crawl_async(config, db=db)
+                    except (KeyboardInterrupt, asyncio.CancelledError):
+                        log.warning("⚠️  Crawl interrupted — falling through to partial export")
+                        # crawler قد يكون None إن انكسر قبل return؛ في تلك الحالة نخرج بهدوء.
+                        if crawler is None:
+                            emit_phase(None, "stopped")
+                            return
+                        crawler._external_stop = True
+                        crawler._stop_requested = True
             else:
                 log.info("Skipping crawl - using existing DB")
                 if not db:
@@ -286,8 +297,17 @@ async def main_async(args, config: dict[str, Any]):
             stopped_early = getattr(crawler, "_external_stop", False)
 
             # === Phase 2: Analyze ===
+            # v1.13.15 (B2): نلتقط KeyboardInterrupt حول التحليل أيضاً —
+            # إذا وصلت الإشارة بعد crawl لكن قبل تخطّي التحليل بأمان، نُكمل
+            # بتحليل فارغ ونمضي للـexport (المستخدم سيرى الصفحات على الأقل).
             emit_phase(crawler, "analyzing", phase_label="analyzing", phase_percent=0)
-            analysis = run_analysis(crawler, config, mode)
+            try:
+                analysis = run_analysis(crawler, config, mode)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                log.warning("⚠️  Analysis interrupted — proceeding to partial export")
+                analysis = {}
+                stopped_early = True
+                crawler._external_stop = True
 
             # === Phase 2.5: External Links ===
             external_check = {"external_results": []}
@@ -357,10 +377,18 @@ async def main_async(args, config: dict[str, Any]):
             analysis["ai_analysis"] = run_ai_analysis(analysis, config)
 
             # === Phase 4: Export ===
+            # v1.13.15 (B2): export يجب أن يكتمل حتى لو وصلت إشارة إيقاف ثانية
+            # أثناءه — وإلاّ نخسر كل العمل. KeyboardInterrupt هنا → نسجّل ونمضي
+            # (run_export نفسها لها try/except داخليّة لكل format).
             emit_phase(crawler, "exporting", phase_label="exporting", phase_percent=0)
-            exported_files = run_export(
-                crawler, analysis, integrations, external_check, output_dir, config, mode
-            )
+            try:
+                exported_files = run_export(
+                    crawler, analysis, integrations, external_check, output_dir, config, mode
+                )
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                log.warning("⚠️  Export interrupted — keeping whatever was written")
+                exported_files = {}
+                stopped_early = True
 
             # === الحالة النهائية للتقدّم (بعد اكتمال التصدير) ===
             if getattr(crawler, "_reached_max_pages", False):

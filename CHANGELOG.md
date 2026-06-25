@@ -4,6 +4,107 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.15 (2026-06-25 Stop-flow re-root — true fixes for the same 3 bugs + 3 hardening items)
+
+A second live-test on the same WordPress site reproduced the user's
+report: clicked Stop → badge showed **فشل** in red, report panel did
+not appear without manual refresh, downloaded report was **empty**.
+The v1.13.11 F5/F7 patches did NOT actually fix the underlying causes
+— they fixed the wrong layer. A 5-dimension adversarial workflow
+re-rooted each bug and found the real culprits.
+
+### B1 (real fix) — TOCTOU race between `stop()` and `_watch()` on `meta.status`
+`stop()` only wrote `meta.status="stopped"` AFTER `proc.wait()` returned.
+By that point `_watch` (waiting on the same subprocess in another thread)
+had often already read `meta.status="running"`, seen `rc != 0` from the
+subprocess exit, and overwritten the job to `status="failed"`. v1.13.11's
+F5 fix added a `progress.json` sync to mirror `meta.status`, but it
+mirrored the wrong decision after the race had already been lost.
+**Fix:** `stop()` and `force_kill()` now write `meta.status="stopped"`
+**BEFORE** sending the signal. `_watch` reads that marker no matter who
+wins the `proc.wait()` race and short-circuits to keeping `stopped`.
+
+### B2 (real fix) — subprocess killed mid-analysis, never reached export
+The crawler subprocess took >8s to graceful-shut after `CTRL_BREAK_EVENT`
+(analysis phase on partial data is expensive — link-score, near-duplicate,
+priority engine). `stop()`'s `proc.wait(timeout=8)` expired, `terminate()`
+was called, subprocess died **before reaching `run_export()`**. Output
+directory stayed empty. v1.13.11 didn't touch this layer at all.
+**Fix (three parts):**
+1. `stop()` is now **non-blocking** — sends signal, returns immediately,
+   delegates the wait+escalate to a background thread. Grace raised from
+   8s to **60s** so analysis + export have realistic time. The HTTP
+   request returns in <100ms; the UI polls until terminal state.
+2. `main_async()` now wraps `await run_crawl_async()` AND `run_analysis()`
+   AND `run_export()` in `try/except (KeyboardInterrupt, CancelledError)`
+   — if the interrupt arrives mid-phase, we fall through to the next
+   phase with whatever partial state was collected, instead of bubbling
+   up to `main()`'s `sys.exit(130)` and losing everything.
+3. The crawler `_external_stop` flag is now set in every catch so the
+   downstream phases skip the slowest substeps (external-link check,
+   resource-status check) and go straight to a minimal export of pages.
+
+### B3 (real fix) — `stopBtn` polling that gave up after one shot
+v1.13.11's F7 patch fetched `/progress` once after 600ms and gave up if
+`meta.result` wasn't ready. With the backend grace at 8s (now 60s),
+this single fetch ran way before the subprocess had finished writing
+its exports. The result panel stayed hidden until manual refresh.
+**Fix:** Replaced the one-shot 600ms fetch with an **active polling
+loop** at 800ms intervals for up to 90s (covers 8s signal travel + 60s
+backend grace + a buffer). Triggers `_safeFinish` the moment
+`meta.status` reaches any terminal value
+(stopped/complete/partial/partial_max_pages/failed) — even with an
+empty `result`, so the user sees the correct status badge instead of a
+stuck "running" UI. Honors the `_finishedOnce` guard so the other two
+safety-net paths (SSE end / polling fallback) still race cleanly.
+
+### Hardening items folded into the same commit
+
+- **A1-1 — Bare `int()` / `float()` on form input would 500 on
+  non-numeric values.** `webapp/routers/jobs.py` had five sites of
+  `int(form.get("max_pages", 500) or 500)` that blow up if the user
+  types "abc" in a number field. Now they go through `_safe_int` /
+  `_safe_float` helpers that fall back to the default on `ValueError`
+  / `TypeError`. The cause was that the existing `_int_or_none` helper
+  caught the exception but the bracket-style int() conversions in the
+  `overrides` dict didn't use it.
+- **A2-1 — `config["output"]["output_dir"]` `KeyError` on partial
+  configs.** `services/config_service.py::setup_output_dir` indexed
+  `config["output"]` directly, crashing if a CLI invocation didn't go
+  through the full config-merge layer. Now uses `.get()` with safe
+  defaults.
+- **A2-2 — Windows signal handler not restored on
+  `_remove_signal_handlers`.** `crawler/async_core.py` installs a fallback
+  `signal.signal()` handler on Windows (where `loop.add_signal_handler`
+  is `NotImplementedError`) and saves the previous handler in
+  `_prev_handlers`, but never restored it. Subsequent SIGINTs in the
+  same process would still go to the old crawler's handler. Now
+  `_remove_signal_handlers` restores `_prev_handlers` and clears the
+  dict.
+
+### What the user should re-test
+
+1. Start a crawl on a slow site, click **Stop** within 30 seconds.
+2. Status badge must transition `running → stopping → stopped` (NOT
+   `failed`). May take up to 60s for the backend to finalize.
+3. The results panel + download buttons must appear automatically (no
+   manual refresh).
+4. Downloaded CSV/JSON must contain ROWS for the pages crawled before
+   stop (not just headers, not zero bytes).
+5. Open `webapp_jobs/<job_id>/job.json` and `progress.json` — both must
+   show `status: "stopped"` (no longer divergent).
+6. Run a full crawl to completion as a regression check — the happy
+   path must still end at `status: "complete"` and download fully.
+
+92/92 tests on Windows.
+
+Deferred items (separate future commit): HttpOnly cookie for auth
+token (A1-4), TTL on module-level state dicts (A1-5), JSON-schema
+validation on custom extraction rules (A1-7), Playwright shutdown
+timeout (A2-3).
+
+---
+
 ## v1.13.11 (2026-06-24 live-test bug sweep — 3 race-condition fixes)
 
 Three fixes triggered by the user's live WordPress crawl test, surfaced

@@ -46,8 +46,11 @@ def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
 
 
 def setup_output_dir(config: dict[str, Any], mode_name: str) -> Path:
-    base_dir = Path(config["output"]["output_dir"])
-    if config["output"].get("timestamped_folder", True):
+    # v1.13.15 (A2-1): config مُحتمل أن يفتقد قسم output في تشغيل CLI أدنى —
+    # نستخدم .get بدلاً من bracket المباشر لتجنّب KeyError غير ودّي.
+    output_cfg = config.get("output") or {}
+    base_dir = Path(output_cfg.get("output_dir", "./output"))
+    if output_cfg.get("timestamped_folder", True):
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         output_dir = base_dir / f"{mode_name}_{timestamp}"
     else:

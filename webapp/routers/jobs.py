@@ -56,6 +56,22 @@ async def start(request: Request):
         except ValueError:
             return None
 
+    # v1.13.15 (A1-1): wrappers آمنة تحمي من ValueError عند إدخال غير رقميّ
+    # في الـform — كان السلوك السابق HTTP 500 unhandled exception.
+    def _safe_int(name: str, default: int) -> int:
+        try:
+            raw = form.get(name, "")
+            return int(raw) if raw not in (None, "") else default
+        except (ValueError, TypeError):
+            return default
+
+    def _safe_float(name: str, default: float) -> float:
+        try:
+            raw = form.get(name, "")
+            return float(raw) if raw not in (None, "") else default
+        except (ValueError, TypeError):
+            return default
+
     # === صيغ المخرجات المختارة ===
     # v1.04: كلّ التنسيقات الثقيلة (Excel/XML/HTML/PDF) صارت عند الطلب من صفحة المهمّة.
     # الزحف يُنتج CSV+JSON فقط (سريع جدّاً، مساحة قليلة). للحفاظ على التوافق العكسي،
@@ -72,17 +88,17 @@ async def start(request: Request):
     overrides = {
         "url": (form.get("url") or "").strip(),
         "mode": form.get("mode", "audit"),
-        "max_pages": int(form.get("max_pages", 500) or 500),
-        "max_depth": int(form.get("max_depth", 10) or 10),
-        "delay_seconds": float(form.get("delay_seconds", 0.5) or 0.5),
-        "concurrent_requests": int(form.get("concurrent_requests", 5) or 5),
+        "max_pages": _safe_int("max_pages", 500),
+        "max_depth": _safe_int("max_depth", 10),
+        "delay_seconds": _safe_float("delay_seconds", 0.5),
+        "concurrent_requests": _safe_int("concurrent_requests", 5),
         "respect_robots": _b("respect_robots", True),
         "seed_strategy": form.get("seed_strategy", "hybrid"),
         "no_resume": _b("no_resume", False),
         "skip_external": _b("skip_external", False),
         "integrations_only": _b("integrations_only", False),
         "ext_sample_per_host": _b("ext_sample_per_host", False),
-        "ext_max_urls": int(form.get("ext_max_urls") or 0),
+        "ext_max_urls": _safe_int("ext_max_urls", 0),
         "check_resource_status": _b("check_resource_status", False),
         # خيارات مشحونة حديثاً (تُعرض في الإعدادات المتقدمة)
         "platform_preset": (form.get("platform_preset") or "").strip(),
@@ -101,7 +117,7 @@ async def start(request: Request):
         "logo_url": form.get("logo_url", ""),
         "sections": sections,
         "severity_filter": severity_filter,
-        "max_rows": int(form.get("max_rows", 100) or 100),
+        "max_rows": _safe_int("max_rows", 100),
     }
 
     # التكاملات
@@ -155,7 +171,7 @@ async def start(request: Request):
             "enabled": True,
             "provider": (form.get("backlinks_provider") or "ahrefs").strip().lower(),
             "api_key": (form.get("backlinks_api_key") or "").strip(),
-            "timeout": int(form.get("backlinks_timeout") or 30),
+            "timeout": _safe_int("backlinks_timeout", 30),
         }
     if _b("ai_enabled", False):
         ai = {
