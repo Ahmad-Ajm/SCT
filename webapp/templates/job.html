@@ -450,12 +450,20 @@ function applyStatus(status) {
   if (FINISHED.includes(status)) {
     document.getElementById('stopBtn').disabled = true;
     renderTimer();  // تثبيت القيمة النهائية
+    // v1.13.16: عند بلوغ حالة نهائيّة، أخفِ شريط المرحلة كي لا يتعارض مع الـbadge.
+    // (المستخدم رأى "أوقف" + "جار التحليل..." في نفس الوقت — مُربك).
+    const pb = document.getElementById('phaseBox');
+    if (pb) pb.style.display = 'none';
   }
 }
 
+// v1.13.16: result الفارغ {} يعتبر truthy في JS — نحتاج فحص فعلي للمحتوى.
+function _hasFiles(result) {
+  return result && typeof result === 'object' && Object.keys(result).length > 0;
+}
 function finish(meta) {
   applyStatus(meta.status);
-  if (meta.result) {
+  if (_hasFiles(meta.result)) {
     document.getElementById('resultsPanel').style.display = 'block';
     renderDownloads(meta.result);
   }
@@ -491,7 +499,8 @@ es.onmessage = (e) => {
   // v1.13.3: لو data وصلت بـmeta منتهية + result جاهز، لا ننتظر event:end.
   // (السبب: في بعض الحالات end لا يصل بسبب race في الـbackend بين كتابة meta
   // وإغلاق المهمة، فيكتفي السيرفر بـdata: ثم يخرج.)
-  if (data.meta && FINISHED.includes(data.meta.status) && data.meta.result) {
+  // v1.13.16: ننتظر حتى تتوفّر ملفات فعليّة (وليس فقط result={}).
+  if (data.meta && FINISHED.includes(data.meta.status) && _hasFiles(data.meta.result)) {
     _safeFinish(data.meta);
     try { es.close(); } catch (_e) {}
   }
@@ -523,7 +532,8 @@ async function _pollOnce() {
     if (j.progress) applyProgress(j.progress);
     applyStatus(effectiveStatus(j.meta, j.progress || {}));
     // (ب) إن وُجد result مع status منتهية — اعرض اللوحة وأوقف الاستطلاع
-    if (FINISHED.includes(j.meta.status) && j.meta.result) {
+    // v1.13.16: نشترط ملفات فعليّة — meta.result={} يعني export لم يكتب بعد.
+    if (FINISHED.includes(j.meta.status) && _hasFiles(j.meta.result)) {
       _safeFinish(j.meta);
       return true;
     }
@@ -559,7 +569,16 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
       if (!r.ok) continue;
       const j = await r.json();
       if (!j || !j.meta) continue;
-      if (TERMINAL.includes(j.meta.status)) {
+      // v1.13.16: ننتظر حتى result يحتوي على ملفات. status نهائي + result فارغ
+      // = subprocess قُتل قبل export. نُكمل الاستطلاع — قد تظهر الملفات بعد ثوانٍ
+      // (في حال subprocess في طور graceful shutdown ولم يكتب بعد).
+      if (TERMINAL.includes(j.meta.status) && _hasFiles(j.meta.result)) {
+        _safeFinish(j.meta);
+        return;
+      }
+      // إذا انتهى عمر الـbackend بالكامل (ended_at موجود) + result فارغ، اعرض
+      // الحالة فقط دون لوحة نتائج — المستخدم على الأقل يعرف أنّ المهمة انتهت.
+      if (TERMINAL.includes(j.meta.status) && j.meta.ended_at) {
         _safeFinish(j.meta);
         return;
       }

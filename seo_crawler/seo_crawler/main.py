@@ -296,85 +296,97 @@ async def main_async(args, config: dict[str, Any]):
             # الروابط الخارجية (المرحلة الأبطأ) لكن نُكمل التحليل والتصدير.
             stopped_early = getattr(crawler, "_external_stop", False)
 
-            # === Phase 2: Analyze ===
-            # v1.13.15 (B2): نلتقط KeyboardInterrupt حول التحليل أيضاً —
-            # إذا وصلت الإشارة بعد crawl لكن قبل تخطّي التحليل بأمان، نُكمل
-            # بتحليل فارغ ونمضي للـexport (المستخدم سيرى الصفحات على الأقل).
-            emit_phase(crawler, "analyzing", phase_label="analyzing", phase_percent=0)
-            try:
-                analysis = run_analysis(crawler, config, mode)
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                log.warning("⚠️  Analysis interrupted — proceeding to partial export")
-                analysis = {}
-                stopped_early = True
-                crawler._external_stop = True
-
-            # === Phase 2.5: External Links ===
+            # v1.13.16 (E-Stop): عند إيقاف يدوي نقفز فوراً إلى export بأدنى تحليل
+            # ممكن — لا تكاملات (Google/Backlinks/AI)، لا روابط خارجيّة، لا
+            # link_score الثقيل، لا near_duplicate. النتائج الجزئيّة تظهر خلال
+            # ثوانٍ بدل ~دقيقة من الانتظار. المستخدم يحصل على pages.csv بأخطاء
+            # الـSEO الأساسيّة فقط.
             external_check = {"external_results": []}
-            if not args.skip_external and not stopped_early:
-                emit_phase(crawler, "checking_external_links",
-                           phase_label="checking_external_links", phase_percent=0)
-                external_check = await run_external_links_check(crawler, db, config, mode)
-            elif stopped_early:
-                log.info("→ External links check skipped (manual stop — exporting partial results)")
+            integrations = {}
+            if stopped_early:
+                emit_phase(crawler, "exporting",
+                           phase_label="exporting", phase_percent=0)
+                log.info("→ Stop signal received: minimal export (skip analysis + integrations + AI)")
+                analysis = {}
+            else:
+                # === Phase 2: Analyze (المسار العادي فقط) ===
+                emit_phase(crawler, "analyzing",
+                           phase_label="analyzing", phase_percent=0)
+                try:
+                    analysis = run_analysis(crawler, config, mode)
+                except (KeyboardInterrupt, asyncio.CancelledError):
+                    log.warning("⚠️  Analysis interrupted — falling through to partial export")
+                    analysis = {}
+                    stopped_early = True
+                    crawler._external_stop = True
 
-            # === Phase 2.6: Resource status (اختياري، مطفأ افتراضياً) ===
-            if not stopped_early:
-                resource_status = await run_resource_status_check(crawler, config, mode)
-                analysis["resource_status"] = resource_status.get("resource_status", [])
+                # === Phase 2.5: External Links ===
+                if not args.skip_external and not stopped_early:
+                    emit_phase(crawler, "checking_external_links",
+                               phase_label="checking_external_links", phase_percent=0)
+                    external_check = await run_external_links_check(
+                        crawler, db, config, mode)
 
-            # === Phase 3: Integrations ===
-            integrations = run_integrations(crawler, config, mode, cache=cache)
+                # === Phase 2.6: Resource status (اختياري) ===
+                if not stopped_early:
+                    resource_status = await run_resource_status_check(crawler, config, mode)
+                    analysis["resource_status"] = resource_status.get("resource_status", [])
 
-            # === تحليلات GSC: تكلّس الكلمات + فُرَص الروابط الداخلية (IMP-1) ===
-            try:
-                from analyzers.gsc_insights import (
-                    detect_cannibalization, find_internal_link_opportunities)
-                pq = (integrations or {}).get("gsc_page_queries") or []
-                if pq:
-                    analysis["cannibalization"] = detect_cannibalization(pq)
-                    log.info(
-                        f"→ Cannibalization: "
-                        f"{analysis['cannibalization']['count']} استعلام متنافَس عليه")
-                gsc_pages = (integrations or {}).get("gsc_pages") or []
-                if gsc_pages:
-                    ls_pages = (analysis.get("link_score") or {}).get("pages") or []
-                    analysis["internal_link_opportunities"] = \
-                        find_internal_link_opportunities(gsc_pages, ls_pages)
-                    log.info(
-                        f"→ Internal-link opportunities: "
-                        f"{analysis['internal_link_opportunities']['count']} صفحة")
-            except Exception:  # noqa: BLE001
-                log.exception("GSC insights failed")
+                # === Phase 3: Integrations (نتخطّاها كاملاً عند الإيقاف) ===
+                if not stopped_early:
+                    integrations = run_integrations(crawler, config, mode, cache=cache)
 
-            # === التقرير الموحّد: دمج تقني + GSC + GA4 وحساب الأولويات ===
-            try:
-                from reporting.report_join import build_unified
-                from reporting.opportunities import compute_opportunities
-                unified_rows = build_unified(
-                    crawler.get_pages(), analysis,
-                    integrations.get("gsc_pages"),
-                    integrations.get("ga4_landing_pages"),
-                )
-                analysis["unified_rows"] = unified_rows
-                analysis["opportunities"] = compute_opportunities(unified_rows)
-                # محرّك الأولويات v2: درجة متعددة العوامل + لوحة عمل (حتمي)
-                from reporting.priority_engine import compute_priority
-                platform = (config.get("site", {}) or {}).get("platform_preset", "")
-                analysis["priority"] = compute_priority(unified_rows, platform=platform)
-                log.info(
-                    f"→ Unified report: {len(unified_rows)} pages | "
-                    f"opportunities {analysis['opportunities']['total_with_issues']} | "
-                    f"priority do-now {analysis['priority']['summary'].get('do_now', 0)}"
-                )
-            except Exception:
-                log.exception("Unified report build failed")
-                analysis["unified_rows"] = []
-                analysis["opportunities"] = {}
-                analysis["priority"] = {}
+                # === تحليلات GSC ===
+                if not stopped_early:
+                    try:
+                        from analyzers.gsc_insights import (
+                            detect_cannibalization, find_internal_link_opportunities)
+                        pq = (integrations or {}).get("gsc_page_queries") or []
+                        if pq:
+                            analysis["cannibalization"] = detect_cannibalization(pq)
+                            log.info(
+                                f"→ Cannibalization: "
+                                f"{analysis['cannibalization']['count']} استعلام متنافَس عليه")
+                        gsc_pages = (integrations or {}).get("gsc_pages") or []
+                        if gsc_pages:
+                            ls_pages = (analysis.get("link_score") or {}).get("pages") or []
+                            analysis["internal_link_opportunities"] = \
+                                find_internal_link_opportunities(gsc_pages, ls_pages)
+                            log.info(
+                                f"→ Internal-link opportunities: "
+                                f"{analysis['internal_link_opportunities']['count']} صفحة")
+                    except Exception:  # noqa: BLE001
+                        log.exception("GSC insights failed")
 
-            # === Phase 3.5: AI Advisor (اختياري) ===
-            analysis["ai_analysis"] = run_ai_analysis(analysis, config)
+                # === التقرير الموحّد ===
+                if not stopped_early:
+                    try:
+                        from reporting.report_join import build_unified
+                        from reporting.opportunities import compute_opportunities
+                        unified_rows = build_unified(
+                            crawler.get_pages(), analysis,
+                            integrations.get("gsc_pages"),
+                            integrations.get("ga4_landing_pages"),
+                        )
+                        analysis["unified_rows"] = unified_rows
+                        analysis["opportunities"] = compute_opportunities(unified_rows)
+                        from reporting.priority_engine import compute_priority
+                        platform = (config.get("site", {}) or {}).get("platform_preset", "")
+                        analysis["priority"] = compute_priority(unified_rows, platform=platform)
+                        log.info(
+                            f"→ Unified report: {len(unified_rows)} pages | "
+                            f"opportunities {analysis['opportunities']['total_with_issues']} | "
+                            f"priority do-now {analysis['priority']['summary'].get('do_now', 0)}"
+                        )
+                    except Exception:
+                        log.exception("Unified report build failed")
+                        analysis["unified_rows"] = []
+                        analysis["opportunities"] = {}
+                        analysis["priority"] = {}
+
+                # === Phase 3.5: AI Advisor (نتخطّاه عند الإيقاف) ===
+                if not stopped_early:
+                    analysis["ai_analysis"] = run_ai_analysis(analysis, config)
 
             # === Phase 4: Export ===
             # v1.13.15 (B2): export يجب أن يكتمل حتى لو وصلت إشارة إيقاف ثانية

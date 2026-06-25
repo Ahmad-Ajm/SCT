@@ -4,6 +4,69 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.16 (2026-06-25 Stop-flow follow-up — fast minimal export + UI clarity)
+
+User re-tested v1.13.15 on the same WordPress site and reported three
+remaining issues:
+
+1. **Google integrations tried to fetch on stop** — they had enabled
+   Google integration toggles in the form but never linked credentials.
+   When Stop was clicked, the partial-export path ran through
+   `run_integrations()`, which tried to authenticate and slowed down
+   the graceful-shutdown window.
+2. **Reports still didn't appear without a manual refresh** — the
+   v1.13.15 polling loop fired `_safeFinish` the moment `meta.status`
+   went terminal, but at that point `meta.result` was the empty `{}`
+   (subprocess had been terminate()-d at the 60s grace expiry before
+   it reached `run_export()`). The results panel rendered but the
+   download buttons pointed at non-existent files.
+3. **Downloaded file was empty** — same root cause as #2: the export
+   never ran. The ZIP-all endpoint built an archive from an empty
+   `output/` directory and returned 22 bytes.
+
+### E-Stop — drastic shortcut to minimal export on stop signal
+
+`seo_crawler/main.py::main_async` now branches **immediately after
+the crawl phase**: when `stopped_early=True`, it skips
+`run_analysis()`, all of Phase 2.5 (external-link check), Phase 2.6
+(resource status), Phase 3 (integrations), the GSC-insights block,
+the unified-report builder, and the AI advisor — going straight to
+`run_export()` with `analysis={}` and `integrations={}`. Result: a
+60-second graceful shutdown now leaves enough budget for `run_export()`
+to actually write the `pages.csv` and `pages.json` files from
+whatever SQLite captured before the stop. The user gets real data, not
+empty files. Integrations never try to authenticate, so no slow
+Google-API timeout on the way out.
+
+### UI: `_safeFinish` waits for actual files, phase bar hides on terminal
+
+- `_hasFiles(result)` helper added: returns true only when `result` is
+  an object with at least one key. JS treats `{}` as truthy, so the
+  old `if (meta.result)` check fired even when no exports existed.
+- Three call sites updated to gate on `_hasFiles(meta.result)`:
+  the SSE `onmessage`, the polling `_pollOnce`, and the stop-button
+  active polling loop.
+- The stop-button loop now has a graceful tail: if the subprocess
+  truly died with `ended_at` set but `result={}` (e.g. user clicked
+  force-kill before export ran), `_safeFinish` still fires so the
+  badge shows the right final state — just without download buttons.
+- `applyStatus()` now hides `#phaseBox` when the status is terminal.
+  Previously the user saw badge `أوقف` (stopped) AND progress-bar
+  `جار التحليل...` (analyzing) at the same time. The bar reflected a
+  stale `progress.json::phase_label` written before the stop signal
+  arrived; hiding it removes the contradiction.
+
+92/92 tests. Version bumped to 1.13.16.
+
+The recent-jobs panel showing "only 3" question: the home-page list
+is hardcapped at 15 (`pages.py:37`). The current `webapp_jobs/`
+directory holds 4 job folders (2 from today + 1 from June 23 + 1 from
+May 28). Earlier sessions had more, but they were deleted explicitly
+via the `🧹 حذف الكل (عدا النشطة)` button — that endpoint
+permanently removes the folders from disk. There's no soft-delete.
+
+---
+
 ## v1.13.15 (2026-06-25 Stop-flow re-root — true fixes for the same 3 bugs + 3 hardening items)
 
 A second live-test on the same WordPress site reproduced the user's
