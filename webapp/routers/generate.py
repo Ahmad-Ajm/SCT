@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,34 @@ router = APIRouter()
 _GEN_VALID_FORMATS = {"html", "pdf", "excel", "xml"}
 _gen_state: dict[str, dict[str, dict[str, Any]]] = {}   # {job_id: {fmt: {running, ok, message}}}
 _gen_lock = threading.Lock()
+
+# v1.13.16 (F47): قفل لكلّ job يحرس قراءة-وتعديل-وكتابة meta.result. سابقاً
+# طلبان متوازيان (مثلاً HTML + PDF بضغطتين متتاليتين) كانا يتسابقان في
+# _run_generate_bg: كلاهما يقرأ meta القديم، يضيف نتيجته، ثم يكتب — فيُمحى
+# الحقل الذي كتبه الآخر. _gen_locks يُنشأ بكسل تحت _gen_lock (creator lock).
+# ملاحظة: لا نمسك per-job lock أثناء التوليد الفعلي (قد يستغرق دقائق لـPDF)؛
+# نمسكه فقط حول read-modify-write للـmeta.
+_gen_locks: dict[str, threading.Lock] = {}
+
+
+def _job_lock(job_id: str) -> threading.Lock:
+    """يُرجع قفلاً مخصّصاً لـjob_id، يُنشئه عند أوّل طلب (تحت _gen_lock)."""
+    with _gen_lock:
+        lk = _gen_locks.get(job_id)
+        if lk is None:
+            lk = threading.Lock()
+            _gen_locks[job_id] = lk
+        return lk
+
+
+def _atomic_write_json(path: Path, data: Any) -> None:
+    """v1.13.16 (F45): كتابة JSON ذرّيّة (write tmp + os.replace). نُكرّرها هنا
+    بدل الاستيراد من job_runner لأنّ هذا router مستقلّ نسبيّاً ولا نريد دورة
+    استيراد محتملة."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 def _run_generate_bg(job_id: str, fmt: str, options: dict[str, Any]) -> None:
@@ -63,11 +92,14 @@ def _run_generate_bg(job_id: str, fmt: str, options: dict[str, Any]) -> None:
         else:
             raise RuntimeError(f"unknown format: {fmt}")
         ok = True
-        # تحديث meta.result كي تظهر روابط التنزيل الجديدة
-        meta = runner.meta(job_id)
-        new_result = runner._discover_result(Path(out_dir).parent, meta.get("mode", "audit"))
-        meta["result"] = new_result
-        runner._write_meta(Path(out_dir).parent, meta)
+        # v1.13.16 (F47): تحديث meta.result داخل per-job lock — يمنع race بين
+        # طلبات توليد متوازية (HTML + PDF) على نفس الـjob. نمسك القفل فقط حول
+        # read-modify-write (سريع)؛ التوليد الفعلي أعلاه يجري خارج القفل.
+        with _job_lock(job_id):
+            meta = runner.meta(job_id)
+            new_result = runner._discover_result(Path(out_dir).parent, meta.get("mode", "audit"))
+            meta["result"] = new_result
+            _atomic_write_json(Path(out_dir).parent / "job.json", meta)
     except Exception as e:  # noqa: BLE001
         log.exception("report regeneration failed")
         err = f"{type(e).__name__}: {str(e)[:300]}"

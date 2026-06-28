@@ -236,9 +236,24 @@ class CSVExporter:
                     names.append(key)
         return names
 
+    # F21: whitespace bypass — قيمة مثل ' =SUM(1+1)' (مسافة، Tab، CR/LF، أو
+    # zero-width ​) كانت تتجاوز فحص الحرف الأول لأنّ neutralize_formula
+    # يفحص value[0] فقط. Excel يتجاهل تلك المسافات ويُفسّرها كصيغة. نُجرّد
+    # المقدّمة هنا قبل تمريرها للـhelper كي يرى الحرف المُحفِّز فعلاً.
+    _FORMULA_TRIGGERS = ("=", "+", "-", "@")
+    _LEADING_WS = (" ", "\t", "\r", "\n", "​", "﻿")
+
     def _csv_value(self, value: Any) -> Any:
         if isinstance(value, (list, dict)):
             value = json.dumps(value, ensure_ascii=False, default=str)
+        if isinstance(value, str) and value:
+            # جرّد فقط الـwhitespace/الأحرف غير المرئية الـleading قبل الفحص.
+            stripped = value.lstrip("".join(self._LEADING_WS))
+            if stripped and stripped[0] in self._FORMULA_TRIGGERS:
+                # تمرير النسخة المُجرَّدة كي يرى neutralize_formula الحرف المُحفِّز
+                # ويُضيف الـapostrophe escape. هذا يُحبط هجوم whitespace-bypass
+                # على Excel/Sheets.
+                value = stripped
         return _neutralize_formula(value)
 
     def _flatten_issue_groups(self, data: dict[str, Any]) -> list[dict[str, Any]]:

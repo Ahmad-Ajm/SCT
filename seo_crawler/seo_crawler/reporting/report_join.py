@@ -41,6 +41,25 @@ def _int(v: Any) -> int:
         return 0
 
 
+# F27: parsing آمن لقيم GSC/GA4/PageSpeed — استجابات API الخارجية قد تحتوي
+# على None أو سلاسل غير رقميّة ("N/A", "", "-") تتسبّب في ValueError وتقتل
+# عمليّة الدمج كاملة. هذه الـhelpers تُرجع default بدل الكسر.
+def _sf(v: Any, default: float = 0.0) -> float:
+    """str/None/خطأ → default. تحويل آمن إلى float."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _si(v: Any, default: int = 0) -> int:
+    """تحويل آمن إلى int (يمرّ عبر float للسماح بـ"3.0")."""
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
 def build_technical_index(
     pages: list[Any], analysis: dict[str, Any]
 ) -> dict[str, dict[str, Any]]:
@@ -142,11 +161,11 @@ def build_unified(
             # GSC
             "clicks": _int(g.get("clicks")),
             "impressions": _int(g.get("impressions")),
-            "ctr": float(g.get("ctr", 0) or 0),
-            "position": float(g.get("position", 0) or 0),
+            "ctr": _sf(g.get("ctr")),
+            "position": _sf(g.get("position")),
             # GA4
             "sessions": _int(a.get("sessions")),
             "users": _int(a.get("users") or a.get("active_users")),
-            "engagement_rate": float(a.get("engagement_rate", 0) or 0),
+            "engagement_rate": _sf(a.get("engagement_rate")),
         })
     return rows

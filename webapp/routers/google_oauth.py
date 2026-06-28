@@ -13,9 +13,10 @@ Endpoints:
     GET  /api/google/authorize-url   — رابط موافقة لاستعمال paste-code
     POST /api/google/authorize-code  — يستقبل الرمز/رابط callback وينهي التفويض
 
-ملاحظة معماريّة: `_paste_flow` و `_probe_token_expired` يبقيان داخل هذا الـmodule.
+ملاحظة معماريّة: `_paste_flows` و `_probe_token_expired` يبقيان داخل هذا الـmodule.
 state-ful module-level state بحكم تصميم تدفّق paste-code (يحفظ كائن Flow بين
-الطلبين). v1.11 RUNBOOK يوثّق هذا السلوك.
+الطلبين). v1.12.7: مفهرس بـstate لكلّ جلسة + قفل + TTL لمنع تصادم المستخدمين
+المتزامنين واستعمال state كرمز CSRF. v1.11 RUNBOOK يوثّق التصميم العام.
 """
 
 from __future__ import annotations
@@ -24,6 +25,9 @@ import asyncio
 import json
 import logging
 import os
+import secrets
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -44,9 +48,22 @@ _GOOGLE_SCOPES = [
 ]
 
 # === مسار «لصق الرمز» — احتياط للأجهزة بلا متصفّح/الخوادم البعيدة ===
-# نحتفظ بكائن Flow مؤقتاً بين طلبَي url وcode (SCT محلية لمستخدم واحد).
-_paste_flow: dict[str, Any] = {}
+# v1.12.7 (F31+F32): قاموس مفهرس بـstate لكلّ طلب — يمنع تصادم مستخدمَين متزامنَين
+# (overwriting) ويُستعمل كـCSRF state token في الوقت ذاته. كلّ مدخل يحمل
+# الـFlow + timestamp لانتهاء الصلاحية (TTL). FastAPI يشغّل handlers في threadpool
+# فالقفل ضروري لتفادي race على القاموس.
+_paste_flows: dict[str, dict[str, Any]] = {}
+_paste_flows_lock = threading.Lock()
+_PASTE_FLOW_TTL = 600  # 10 دقائق — يكفي للموافقة ويتجاوز الجلسات المهجورة
 _PASTE_REDIRECT = "http://127.0.0.1:1/"  # لا نستمع — المتصفّح يفشل لكن الرمز يظهر في URL
+
+
+def _purge_expired_flows() -> None:
+    """يحذف مدخلات Flow الأقدم من _PASTE_FLOW_TTL. يُستدعى بداخل القفل."""
+    now = time.monotonic()
+    stale = [k for k, v in _paste_flows.items() if now - v.get("ts", 0) > _PASTE_FLOW_TTL]
+    for k in stale:
+        _paste_flows.pop(k, None)
 
 
 def _probe_token_expired(token_path: Path) -> bool:
@@ -89,19 +106,37 @@ def _save_google_tokens(gd: Path, creds: Any) -> None:
 
 def _extract_oauth_code(pasted: str) -> str:
     """يستخرج معامل `code` سواء أُدخِل كرمز خام أو كرابط callback كامل."""
+    return _extract_oauth_parts(pasted)[0]
+
+
+def _extract_oauth_parts(pasted: str) -> tuple[str, str, str]:
+    """يستخرج (code, state, authorization_response) من الرابط/الرمز الملصق.
+
+    v1.12.7 (F31): نحتاج state للتحقّق ضدّ القيمة المخزّنة، و
+    `authorization_response` (الرابط الكامل) ليتمكّن google-auth-oauthlib من
+    التحقّق الذاتيّ من state عند تمريره لـfetch_token. إن لُصق رمز خام فقط
+    بلا state، تعود state="" والمتّصل يُعيد 400.
+
+    _extract_oauth_code يبقى بتوقيع str -> str للتوافق العكسي (تستعمله الاختبارات).
+    """
     s = (pasted or "").strip()
     if not s:
-        return ""
+        return "", "", ""
     if "code=" in s:
         from urllib.parse import urlparse, parse_qs
         try:
-            qs = parse_qs(urlparse(s).query or s.split("?", 1)[-1])
-            v = qs.get("code") or []
-            if v:
-                return v[0]
+            parsed = urlparse(s)
+            # يدعم رابط كامل أو سلسلة استعلام فقط (?code=...&state=...)
+            qs = parse_qs(parsed.query or s.split("?", 1)[-1])
+            code = (qs.get("code") or [""])[0]
+            state = (qs.get("state") or [""])[0]
+            # إن لم يحوِ الرابط مخططاً (paste لاستعلام فقط) فلا نمرّره
+            # كـauthorization_response لتجنّب أخطاء parsing داخل المكتبة.
+            auth_resp = s if parsed.scheme else ""
+            return code, state, auth_resp
         except (ValueError, IndexError):
             pass
-    return s
+    return s, "", ""
 
 
 @router.get("/api/google/status")
@@ -284,9 +319,16 @@ async def google_authorize_url():
     try:
         flow = Flow.from_client_secrets_file(str(cs), scopes=_GOOGLE_SCOPES)
         flow.redirect_uri = _PASTE_REDIRECT
-        auth_url, _state = flow.authorization_url(
-            access_type="offline", include_granted_scopes="true", prompt="consent")
-        _paste_flow["flow"] = flow
+        # v1.12.7 (F31): state عشوائي يُمرَّر لـGoogle ويُخزَّن جنباً لجنب مع الـFlow.
+        # عند العودة، نطابقه ضدّ state القادم في رابط callback (CSRF protection).
+        state = secrets.token_urlsafe(32)
+        auth_url, _returned_state = flow.authorization_url(
+            access_type="offline", include_granted_scopes="true",
+            prompt="consent", state=state)
+        # v1.12.7 (F32): تخزين مفهرس بـstate — مستخدمَان متزامنان لا يتصادمان.
+        with _paste_flows_lock:
+            _purge_expired_flows()
+            _paste_flows[state] = {"flow": flow, "ts": time.monotonic()}
         return JSONResponse({"auth_url": auth_url, "redirect_uri": _PASTE_REDIRECT})
     except Exception as e:  # noqa: BLE001
         log.exception("OAuth flow init failed")
@@ -295,18 +337,38 @@ async def google_authorize_url():
 
 @router.post("/api/google/authorize-code")
 async def google_authorize_code(code: str = Form("")):
-    """يكمل التفويض بعد لصق المستخدم للرمز/رابط callback من المتصفّح."""
-    extracted = _extract_oauth_code(code)
-    if not extracted:
+    """يكمل التفويض بعد لصق المستخدم للرمز/رابط callback من المتصفّح.
+
+    v1.12.7 (F31): نطلب رابط callback الكامل (لا الرمز الخام) كي يصلنا state.
+    نتحقّق أنّ state يطابق ما خزّنّاه عند توليد الرابط، ثم نحذفه (one-shot).
+    v1.12.7 (F32): البحث عن Flow مفهرس بـstate — مستخدمَا paste-code المتزامنَان
+    لا يفسد أحدهما تفويض الآخر."""
+    extracted_code, extracted_state, auth_response = _extract_oauth_parts(code)
+    if not extracted_code:
         return JSONResponse({"error": "ألصق الرمز أو رابط callback كاملاً."}, status_code=400)
-    flow = _paste_flow.get("flow")
-    if flow is None:
+    if not extracted_state:
+        # F31: من دون state لا يمكن التحقّق من CSRF — نرفض ونطلب الرابط الكامل.
         return JSONResponse(
-            {"error": "ابدأ من «احصل على رابط الموافقة» أولاً."}, status_code=400)
+            {"error": "ألصق رابط callback الكامل (يحوي state) لا الرمز فقط."},
+            status_code=400)
+    # F31+F32: استخراج Flow ضمن القفل + حذف فوريّ (one-shot use).
+    with _paste_flows_lock:
+        _purge_expired_flows()
+        entry = _paste_flows.pop(extracted_state, None)
+    if entry is None:
+        # state غير معروف أو منتهٍ أو سبق استعماله ⇒ احتمال CSRF أو إعادة تشغيل.
+        return JSONResponse(
+            {"error": "state غير صالح أو منتهٍ — ابدأ من «احصل على رابط الموافقة» مجدّداً."},
+            status_code=400)
+    flow = entry["flow"]
     try:
-        flow.fetch_token(code=extracted)
+        # تمرير authorization_response عند توفّره يجعل google-auth-oauthlib
+        # يتحقّق من state ذاتيّاً (defence-in-depth فوق فحصنا أعلاه).
+        if auth_response:
+            flow.fetch_token(authorization_response=auth_response)
+        else:
+            flow.fetch_token(code=extracted_code)
         _save_google_tokens(_google_dir(), flow.credentials)
-        _paste_flow.pop("flow", None)
         gd = _google_dir()
         return JSONResponse({
             "ok": True,

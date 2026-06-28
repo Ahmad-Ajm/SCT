@@ -4,6 +4,159 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.17 (2026-06-25 Top-10 pre-publication audit fixes — 18 confirmed via parallel agents)
+
+A 14-dimension deep audit surfaced 70 findings (4 critical / 42 high /
+19 medium / 5 low). The Top 10 priority list was applied via 5 parallel
+fix agents (partitioned by file, no overlap) + 5 adversarial verifiers
++ a synthesizer. 18 fixes landed cleanly; 2 follow-ups (regression +
+UX nit) were applied by hand. 1 deferred for a future release.
+
+### Group A — OAuth security (#1, #2 — webapp/routers/google_oauth.py)
+- **F31 — OAuth state validation (CSRF):** 32-byte URL-safe state
+  generated per authorize-url, stored as the lookup key for the Flow.
+  Callback parses state from the pasted URL, pops the matching entry
+  under lock (one-shot), rejects 400 if missing/unknown/expired. Also
+  passes the full `authorization_response` URL to `flow.fetch_token`
+  so google-auth-oauthlib does its own state verification as
+  defense-in-depth.
+- **F32 — `_paste_flow` concurrency:** Replaced module-level single-slot
+  dict with `_paste_flows` keyed by state token. All reads/writes under
+  `threading.Lock` (FastAPI threadpool). 10-min TTL eviction on every
+  insert/pop. Two simultaneous users can no longer overwrite each
+  other's flow.
+
+### Group B — Frontend XSS (#5 — webapp/templates/job.html)
+- **F49 — innerHTML interpolation:** Three sites (renderDownloads,
+  loadFiles, _renderDeferred) now use `createElement` + `textContent` +
+  `appendChild` instead of string concatenation into innerHTML.
+- **F50 — `_esc()` helper:** Full HTML-entity escape (`& < > " '`) for
+  the remaining places where innerHTML is unavoidable (deferred-samples
+  builder concatenates a multi-line block). Replaced the partial
+  `.replace(/&/g,'&amp;').replace(/</g,'&lt;')` that missed `> " '`.
+- **F52 — `_safeLogoUrl()` validator:** Requires `^https?://` and
+  explicitly rejects `javascript:`, `data:`, `vbscript:`, `file:`,
+  `blob:`. Wired into genForm submission with a bilingual alert on
+  invalid input. Empty values are deleted from FormData (not sent).
+- **F53 — token-in-URL (DEFERRED):** Removing `?token=` from
+  navigation/SSE/download URLs needs a short-lived ticket-cookie
+  refactor (new `/ticket` endpoint issuing HttpOnly Set-Cookie + backend
+  acceptance of the cookie alongside `Authorization`). EventSource and
+  `<a href>` can't carry an `Authorization` header, so a direct removal
+  would break SSE + all downloads. Deferred to v1.14.
+
+### Group C — Crawler race + memory (#4, #10 — async_core.py + js_renderer.py)
+- **F01 — URL discovery race:** Wrapped the
+  `visited/queued_urls` check + `_enqueue` call in
+  `async with self._visited_lock`. Verified `_enqueue` doesn't
+  re-acquire the same lock (no recursive-lock deadlock).
+- **F02 — Deferred-dict race:** Added a dedicated `self._deferred_lock`
+  in `__init__`; wrapped the deferred check + cap + write in
+  `async with self._deferred_lock` inside `_enqueue`. Classifier is
+  sync — kept outside the lock.
+- **F03 — JS renderer success flag:** Initialized
+  `result.is_success = False` at the start of `render()`; moved the
+  `True` assignment to the very end of the try block (after axe-core
+  completes). An exception anywhere keeps it `False`.
+- **F04 — JSRendererAsync SSRF config:** Added
+  `allow_private_hosts` as an explicit `__init__` param; passed through
+  from `AsyncCrawler`. No more silent `getattr` fallback to `False`
+  that disabled the SSRF policy.
+- **F05 — `all_js_diff` unbounded list:** Capped at 100 000 entries
+  (configurable via `js_diff_max_entries`) with a dropped counter,
+  one-time warning, and `crawler.js_diff.cap_dropped` metric.
+- **F06 — `all_accessibility` unbounded list:** Capped at 50 000 entries
+  (configurable via `accessibility_max_entries`) with same dropped
+  counter + warning + metric pattern.
+
+### Group D — Webapp lifecycle (#6, #7 — job_runner.py + generate.py)
+- **F61 — Strip credentials from per-job config.yaml:** Added
+  `_SENSITIVE_KEYS` frozenset (`credentials_file`, `api_key`, `token`,
+  `secret`, `client_secret`, `service_account_key`) and a recursive
+  `_strip_sensitive_in_place()` walker. Runs after `_build_job_config`
+  builds the dict and BEFORE `yaml.safe_dump` writes it to disk. The
+  removed keys are still passed to the subprocess via `_secret_env`
+  → environment variables. Job-directory artifacts no longer leak
+  credential paths if a user shares the folder.
+- **F45 — Atomic JSON writes:** New `_atomic_write_json()` helper writes
+  to `path.tmp` then `os.replace(tmp, path)`. Replaced direct
+  `json.dump` calls in `_write_meta` and `_write_progress`. Mid-write
+  crash can no longer leave a half-written JSON file.
+- **F46 — Subprocess log-handle leak:** Parent now calls
+  `log_file.close()` immediately after `subprocess.Popen` returns (the
+  subprocess inherits its own duplicated fd). Fixes Windows
+  "file in use" errors when the webapp later tries to read or delete
+  the log.
+- **F47 — Generate.py race:** Per-job `threading.Lock` dict (guarded by
+  a creator lock). The long-running format generation (PDF can take
+  minutes) runs outside the lock; only the `meta` read-modify-write
+  tail is serialized. Local `_atomic_write_json` duplicates the
+  job_runner pattern. Concurrent HTML+PDF requests no longer corrupt
+  `meta["result"]`.
+
+### Group E — Quick wins (#3, #8, #9 — 5 files)
+- **F28 — Gemini response parsing hardened:** Chained subscripting
+  replaced with `.get()` / default chain so malformed responses return
+  `""` + warning instead of crashing the entire audit.
+- **F21 — CSV/Excel formula-injection whitespace bypass:** `_csv_value`
+  now strips leading whitespace (space, tab, CR, LF, U+200B zero-width,
+  U+FEFF BOM) before the trigger-char check. Closes the `' =SUM(1+1)'`
+  / `'\t@cmd'` bypass.
+- **F27 — Robust numeric parsing in report_join:** `_sf()` / `_si()`
+  safe parsers added; `ctr`, `position`, `engagement_rate` now use
+  `_sf` instead of bare `float()`. Malformed GSC/GA4 values
+  (`None`, `"N/A"`, `"-"`) no longer raise `ValueError`. Cascading
+  this pattern to other files is a follow-up.
+- **F58 — `DatabaseBackedCrawler` real duration:** `get_stats()` now
+  returns real `duration_seconds` and `pages_per_second` (start_time
+  from db meta with `time.time()` fallback) instead of hardcoded 0.
+  `--analyze-only` reports the actual elapsed time.
+- **F57 — Re-raise `KeyboardInterrupt` (NOT APPLIED):** Verifier
+  determined this is "already-correct, not actually deferred". The
+  v1.13.15 (B2) design deliberately swallows the interrupt at the
+  export phase so partial results land on disk. Re-raising would
+  undo that fix. No change made.
+
+### Follow-up fixes applied by hand after the workflow
+- **integrations_service.py:46:** Group D's F61 strip removed
+  `gsc.credentials_file` from per-job configs but `GSCClient`
+  construction still read `gsc_config["credentials_file"]` directly
+  with no env-var fallback — would crash GSC at runtime. Added
+  `creds = gsc_config.get("credentials_file") or
+  os.getenv("GSC_CREDENTIALS_FILE", "")` matching the existing GA4
+  pattern. Without this fix the OAuth scrubbing would have broken
+  every GSC integration.
+- **webapp/templates/index.html:** Hint text said "paste the URL or
+  the code", but Group A's F31 fix now rejects bare codes (state must
+  be present in a callback URL). Updated three places to say
+  "paste the FULL callback URL (with state + code)" instead.
+
+### Verification stage findings
+- 0 unauthorized file writes (every agent stayed within its assigned
+  files).
+- 0 syntax errors detected by the verifier read-throughs.
+- 1 new regression introduced (GSC env-var fallback above) — caught by
+  verifier and patched.
+- 1 UX inconsistency surfaced (paste-hint text) — patched.
+
+92/92 tests on Windows. Version bumped to 1.13.17.
+
+### What's NOT fixed (deferred to v1.14 or later)
+- **F53** (token-in-URL): needs ticket-cookie architecture refactor.
+- **F27 cascade**: bare `float()` / `int()` calls in other files
+  (priority_engine, integrations_summary, log_analyzer,
+  thin_content) — only `report_join.py` was patched.
+- **F21 cascade**: the leading-whitespace strip lives inside
+  `_csv_value` only; the shared `utils.helpers.neutralize_formula`
+  still has the original bug for any other caller.
+- **All 60 medium/low findings** from the audit (per-area cleanups,
+  latent risks, hardening polish). The 5 architectural risk patterns
+  (`except Exception: pass`, module-level mutable globals,
+  non-atomic writes, URL normalization inconsistency, blind trust in
+  external APIs) need a dedicated refactor pass.
+
+---
+
 ## v1.13.16 (2026-06-25 Stop-flow follow-up — fast minimal export + UI clarity)
 
 User re-tested v1.13.15 on the same WordPress site and reported three

@@ -42,8 +42,12 @@ def run_integrations(crawler, config, mode: CrawlMode, cache=None):
     if gsc_config.get("enabled"):
         log.info("→ Google Search Console...")
         with span("integration.gsc"):
+            # v1.13.17: credentials_file مشطوب من config على القرص (F61) — نقرأه
+            # من env var التي يضبطها webapp/job_runner عبر _secret_env (نفس نمط GA4).
+            creds = gsc_config.get("credentials_file") or os.getenv(
+                "GSC_CREDENTIALS_FILE", "")
             client = GSCClient(
-                credentials_path=gsc_config["credentials_file"],
+                credentials_path=creds,
                 site_url=gsc_config["site_url"],
                 months_back=gsc_config.get("months_back", 16),
             )

@@ -6,6 +6,7 @@ services/db_facade.py — واجهة قراءة-فقط من DB لـ--analyze-onl
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,19 @@ class DatabaseBackedCrawler:
             self.sitemap_urls_seen = db.get_meta("sitemap_urls", []) or []
         except Exception:
             self.sitemap_urls_seen = []
+        # F58: start_time للـduration في التقارير. في وضع --analyze-only لا
+        # نملك start_time الأصلي للزحف، فنُحاول قراءته من meta أولاً (إن خزّنه
+        # المزحف عند البداية)، وإلاّ نُسجّل الآن. القيمة المُسجَّلة الآن تعني
+        # "duration منذ بداية analyze" لا منذ بداية الزحف الأصلي — وهذا متعمّد
+        # ومُوثَّق في تقرير المدّة.
+        try:
+            stored = db.get_meta("crawl_start_time", None)
+        except Exception:
+            stored = None
+        try:
+            self.start_time = float(stored) if stored else time.time()
+        except (TypeError, ValueError):
+            self.start_time = time.time()
 
     def _memo_db(self, key: str, builder) -> list[Any]:
         cached = self._getter_cache.get(key)
@@ -65,11 +79,15 @@ class DatabaseBackedCrawler:
 
     def get_stats(self) -> SimpleNamespace:
         pages = self.get_pages()
+        # F58: duration_seconds الآن محسوب فعلياً من start_time المخزَّن أو
+        # وقت بدء analyze. سابقاً كان دائماً 0 ممّا يجعل تقارير المدّة كاذبة.
+        duration = max(0.0, time.time() - self.start_time)
+        pps = (len(pages) / duration) if duration > 0 else 0
         return SimpleNamespace(
             pages_crawled=len(pages),
             pages_failed=sum(1 for page in pages if page.get("crawl_error")),
             pages_skipped=0,
             status_codes={},
-            duration_seconds=0,
-            pages_per_second=0,
+            duration_seconds=duration,
+            pages_per_second=pps,
         )

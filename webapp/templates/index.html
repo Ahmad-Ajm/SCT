@@ -266,13 +266,13 @@ window._sctToken = "{{ sct_token }}";
         <p id="gStatus" class="muted sm" style="margin-top:6px"></p>
         <details class="adv" style="margin-top:8px">
           <summary data-i18n="g_paste_h">🔗 تعذّر فتح المتصفح؟ استخدم «لصق الرمز» (للأجهزة البعيدة/بدون متصفّح)</summary>
-          <p class="muted sm" data-i18n="g_paste_p">يعطيك رابطاً تفتحه في أي متصفّح، توافق، فتُعاد إلى صفحة فاشلة عنوانها يحوي ?code=… انسخ الرابط أو الرمز والصقه هنا.</p>
+          <p class="muted sm" data-i18n="g_paste_p">يعطيك رابطاً تفتحه في أي متصفّح، توافق، فتُعاد إلى صفحة فاشلة عنوانها يحوي ?code=… والصق <b>الرابط الكامل</b> هنا (لا الرمز وحده — يحتاج الرابط للتحقّق من state).</p>
           <div class="actions">
             <button type="button" id="gPasteUrlBtn" class="btn sm" data-i18n="g_paste_get">🔗 احصل على رابط الموافقة</button>
             <a id="gPasteLink" class="btn sm" target="_blank" rel="noopener" style="display:none">↗ افتح الرابط</a>
           </div>
-          <label class="full" style="margin-top:6px"><span data-i18n="g_paste_code">ألصق الرمز أو رابط callback</span>
-            <input type="text" id="gPasteCode" placeholder="4/0A… أو http://127.0.0.1:1/?code=…">
+          <label class="full" style="margin-top:6px"><span data-i18n="g_paste_code">ألصق رابط callback الكامل</span>
+            <input type="text" id="gPasteCode" placeholder="http://127.0.0.1:1/?state=…&code=…">
           </label>
           <div class="actions">
             <button type="button" id="gPasteSubmitBtn" class="btn sm primary" data-i18n="g_paste_submit">🔓 إكمال التفويض</button>
@@ -797,7 +797,7 @@ async function gPasteGetUrl() {
     if (!r.ok || !j.auth_url) { msg.textContent = '✗ ' + (j.error || 'فشل'); return; }
     const a = document.getElementById('gPasteLink');
     a.href = j.auth_url; a.style.display = '';
-    msg.textContent = (window.sctT ? window.sctT('g_paste_hint') : 'افتح الرابط، وافق، ثم ألصق الرابط الناتج أو الرمز.');
+    msg.textContent = (window.sctT ? window.sctT('g_paste_hint') : 'افتح الرابط، وافق، ثم ألصق رابط callback الكامل (يحوي state + code).');
   } catch (e) { msg.textContent = '✗ ' + e; }
 }
 async function gPasteSubmit() {

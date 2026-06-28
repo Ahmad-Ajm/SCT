@@ -249,6 +249,7 @@ class JSRendererAsync:
         block_resource_types: Optional[list[str]] = None,
         axe_source: str = "",
         axe_max: int = 0,
+        allow_private_hosts: bool = False,
     ):
         self.browser_name = browser
         self.headless = headless
@@ -260,6 +261,8 @@ class JSRendererAsync:
         self.axe_source = axe_source or ""
         self.axe_max = int(axe_max or 0)
         self._axe_count = 0
+        # F04: يجب أن يُمرَّر من الـcrawler كي تتطابق سياسة SSRF مع باقي الجلب
+        self.allow_private_hosts = bool(allow_private_hosts)
         self._pw = None
         self._browser = None
         self._context = None
@@ -285,9 +288,13 @@ class JSRendererAsync:
 
     async def render(self, url: str) -> "RenderedPage":
         result = RenderedPage(url=url)
-        # v1.09-B5: حماية SSRF (نفس فحص الزاحف العادي)
+        # F03: ابدأ بـ False صراحةً ولا نُحوِّلها إلى True إلا في نهاية المسار الناجح،
+        # كي لا تبقى True عند خطأ يقع بعد ضبطها (مثلاً أثناء axe-core أو page.close()).
+        result.is_success = False
+        # F04: حماية SSRF — نستخدم self.allow_private_hosts المُمرَّر من الـcrawler
+        # بدلاً من getattr fallback إلى False (كان يتجاهل إعداد المستخدم).
         from utils.helpers import is_safe_remote_url
-        safe, reason = is_safe_remote_url(url, getattr(self, "allow_private_hosts", False))
+        safe, reason = is_safe_remote_url(url, self.allow_private_hosts)
         if not safe:
             result.error = f"SSRF-blocked: {reason}"
             return result
@@ -318,7 +325,6 @@ class JSRendererAsync:
             result.status_code = resp.status if resp else 0
             result.console_errors = console_errors
             result.network_requests = requests_count["n"]
-            result.is_success = True
 
             # فحص الوصولية (axe-core) على الصفحة الحيّة ضمن السقف
             if self.axe_source and (self.axe_max <= 0 or self._axe_count < self.axe_max):
@@ -330,6 +336,9 @@ class JSRendererAsync:
                     self._axe_count += 1
                 except Exception as ax:  # noqa: BLE001
                     log.debug("axe-core فشل على %s: %s", url, ax)
+
+            # F03: نجاح كامل (دون استثناء) ⇒ ارفع العلم هنا في النهاية فقط
+            result.is_success = True
         except Exception as e:
             result.error = f"Render failed: {type(e).__name__}: {str(e)[:200]}"
             log.debug("%s: %s", url, result.error)

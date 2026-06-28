@@ -214,7 +214,15 @@ class AIAdvisor:
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        # تصفّح آمن: أيّ حقل مفقود/فارغ في الاستجابة لا يجب أن يُسقط التدقيق كلّه.
+        # نُسلسل عبر .get() مع defaults كي نتجنّب IndexError/KeyError على المنتصف.
+        candidates = data.get("candidates") or [{}]
+        content = candidates[0].get("content") or {}
+        parts = content.get("parts") or [{}]
+        text = parts[0].get("text", "") or ""
+        if not text:
+            log.warning("Gemini response missing text field — returning empty string")
+        return text
 
     @staticmethod
     def _parse_json_object(text: str) -> dict[str, Any] | None:

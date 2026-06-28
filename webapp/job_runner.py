@@ -47,6 +47,42 @@ def _valid_job_id(job_id: str) -> bool:
     return bool(_JOB_ID_RE.match(str(job_id or "")))
 
 
+# v1.13.16 (F61): قائمة المفاتيح الحسّاسة التي يجب ألا تظهر في أيّ ملفّ على القرص.
+# تُمرَّر للعمليّة الفرعيّة عبر متغيّرات بيئة فقط (انظر _secret_env في JobRunner).
+_SENSITIVE_KEYS = frozenset({
+    "credentials_file", "api_key", "token", "secret",
+    "client_secret", "service_account_key",
+})
+
+
+def _strip_sensitive_in_place(node: Any) -> None:
+    """يمشي على شجرة dict/list ويحذف أيّ مفتاح يطابق _SENSITIVE_KEYS.
+
+    استخدام: تعقيم config قبل الكتابة على القرص لمنع تسريب مسارات اعتمادات/مفاتيح
+    عبر تنزيل config.yaml من الواجهة.
+    """
+    if isinstance(node, dict):
+        for k in list(node.keys()):
+            if k in _SENSITIVE_KEYS:
+                del node[k]
+            else:
+                _strip_sensitive_in_place(node[k])
+    elif isinstance(node, list):
+        for item in node:
+            _strip_sensitive_in_place(item)
+
+
+# v1.13.16 (F45): كتابة JSON ذرّيّة — write-then-rename بدل json.dump مباشر،
+# كي لا يبقى ملفّ نصف-مكتوب إن انهارت العمليّة في المنتصف. os.replace ذرّيّ على
+# نفس نظام الملفّات (Windows و POSIX) ويستبدل الملفّ الموجود بأمان.
+def _atomic_write_json(path: Path, data: Any, *, ensure_ascii: bool = False,
+                       indent: int | None = None) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=ensure_ascii, indent=indent)
+    os.replace(tmp, path)
+
+
 class JobRunner:
     """مدير مهام زحف محلي (مهمة واحدة نشطة في كل وقت يُنصَح بها للاستخدام المحلي)."""
 
@@ -218,6 +254,17 @@ class JobRunner:
         if bl.get("api_key"):
             self._secret_env["BACKLINKS_API_KEY"] = str(bl["api_key"])
             bl["api_key"] = ""
+        # v1.13.16 (F61): مسارات اعتماد Google (GSC/GA4) — تُلتقَط من الـconfig
+        # قبل التعقيم وتُمرَّر للعمليّة الفرعيّة عبر env vars. ملفّ config.yaml على
+        # القرص قابل للتنزيل من الواجهة، فلا نسمح ببقاء مسار credentials فيه.
+        # ملاحظة: GA4 يدعم GA4_CREDENTIALS_FILE كfallback في integrations_service؛
+        # GSC حالياً يقرأ من config فقط — يحتاج تعديل مستهلك منفصل لقراءة env.
+        gsc = cfg.get("integrations", {}).get("gsc", {})
+        if gsc.get("credentials_file"):
+            self._secret_env["GSC_CREDENTIALS_FILE"] = str(gsc["credentials_file"])
+        ga4 = cfg.get("integrations", {}).get("ga4", {})
+        if ga4.get("credentials_file"):
+            self._secret_env["GA4_CREDENTIALS_FILE"] = str(ga4["credentials_file"])
 
         # === الاستخراج المخصّص ===
         ce = overrides.get("custom_extraction")
@@ -230,6 +277,12 @@ class JobRunner:
             if val is not None:
                 cfg["analysis"][key] = val
 
+        # v1.13.16 (F61): تعقيم نهائي للأسرار قبل الكتابة على القرص. ملفّ
+        # config.yaml هذا قابل للتنزيل من الواجهة، لذا أيّ مفتاح حسّاس متبقّي
+        # (api_key/credentials_file/...) قد يُسرَّب. الأسرار تُمرَّر للعمليّة
+        # الفرعيّة عبر _secret_env فقط، وهنا نطبّق walk عميق على dict-tree كاملاً
+        # لإزالة أيّ مفتاح من SENSITIVE حتى لو أُضيف لاحقاً بفرع لم نتوقّعه.
+        _strip_sensitive_in_place(cfg)
         cfg_path = job_dir / "config.yaml"
         with open(cfg_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(cfg, f, allow_unicode=True)
@@ -305,6 +358,10 @@ class JobRunner:
             stdout=log_file, stderr=subprocess.STDOUT,
             creationflags=creationflags,
         )
+        # v1.13.16 (F46): أغلق الـhandle في الـparent بعد Popen — الـsubprocess
+        # ورث fd مضاعفاً ويكتب عبره. ترك الـhandle مفتوحاً هنا يسبّب على Windows
+        # «file in use» عند محاولة قراءة/حذف run.log لاحقاً من الواجهة.
+        log_file.close()
         with self._lock:
             self._procs[job_id] = proc
 
@@ -381,6 +438,8 @@ class JobRunner:
             stdout=log_file, stderr=subprocess.STDOUT,
             creationflags=creationflags,
         )
+        # v1.13.16 (F46): إغلاق الـhandle في الـparent — انظر الشرح في start().
+        log_file.close()
         with self._lock:
             self._procs[job_id] = proc
         threading.Thread(target=self._watch, args=(job_id, job_dir, proc), daemon=True).start()
@@ -669,8 +728,8 @@ class JobRunner:
     # ------------------------------------------------------------------
     @staticmethod
     def _write_meta(job_dir: Path, meta: dict[str, Any]) -> None:
-        with open(job_dir / "job.json", "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+        # v1.13.16 (F45): كتابة ذرّيّة — انهيار في المنتصف لا يُتلف job.json.
+        _atomic_write_json(job_dir / "job.json", meta, ensure_ascii=False, indent=2)
 
     @staticmethod
     def _read_meta(job_dir: Path) -> dict[str, Any]:
@@ -685,5 +744,5 @@ class JobRunner:
 
     @staticmethod
     def _write_progress(pf: Path, data: dict[str, Any]) -> None:
-        with open(pf, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+        # v1.13.16 (F45): كتابة ذرّيّة — يمنع progress.json نصف-مكتوب يُربك القارئ.
+        _atomic_write_json(pf, data, ensure_ascii=False)

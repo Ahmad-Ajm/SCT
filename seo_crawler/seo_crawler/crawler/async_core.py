@@ -120,6 +120,13 @@ class AsyncCrawler:
         # فحص الوصولية (axe-core) — اختياري، يحتاج تصيير JS
         self.a11y_config = config.get("accessibility", {}) or {}
         self.all_accessibility: list[dict[str, Any]] = []
+        # F05/F06: سقوف قابلة للضبط لمنع نموّ غير محدود في زحوف ضخمة
+        self._js_diff_cap = int(config.get("js_diff_max_entries", 100000))
+        self._a11y_cap = int(config.get("accessibility_max_entries", 50000))
+        self._js_diff_dropped = 0
+        self._a11y_dropped = 0
+        self._js_diff_cap_warned = False
+        self._a11y_cap_warned = False
 
         # === Domain info ===
         self.start_url = normalize_url(self.site_config["start_url"])
@@ -171,6 +178,8 @@ class AsyncCrawler:
         self.deferred_enabled = bool(deferred_cfg.get("enabled", True))
         self.deferred: dict[str, dict[str, str]] = {}
         self._deferred_cap = int(deferred_cfg.get("max_tracked", 50000))
+        # F02: lock لحماية check+cap+write على deferred dict من race بين workers
+        self._deferred_lock: asyncio.Lock = asyncio.Lock()
         # في Phase 2: classifier يُمرَّر له `phase2=True` فيُعطّل التأجيل
         self.phase2_mode = bool(deferred_cfg.get("phase2", False))
         self.classifier = UrlClassifier(
@@ -304,6 +313,8 @@ class AsyncCrawler:
                         block_resource_types=self.js_config.get("block_resource_types"),
                         axe_source=axe_source,
                         axe_max=int(self.a11y_config.get("max_pages", 50) or 0),
+                        # F04: مرّر إعداد SSRF كي يُطابق فحص JS رينديرر سلوك aiohttp
+                        allow_private_hosts=self.allow_private_hosts,
                     )
                     if await renderer.start():
                         self.js_renderer = renderer
@@ -539,22 +550,24 @@ class AsyncCrawler:
         if self.deferred_enabled and not self.phase2_mode and not bypass_classifier:
             kind, is_deferred = self.classifier.classify(url)
             if is_deferred:
-                if url in self.deferred:
-                    return
-                if len(self.deferred) >= self._deferred_cap:
-                    # v1.09-B1: لا نسقط بصمت — نسجّل تحذيراً واحداً عند بلوغ الحدّ
-                    if not getattr(self, "_deferred_cap_warned", False):
-                        log.warning(
-                            f"⚠️ deferred URL cap ({self._deferred_cap}) reached — "
-                            f"إضافيات لن تُسجَّل. ارفع crawl.deferred_crawl.max_tracked إن لزم.")
-                        self._deferred_cap_warned = True
-                    increment("crawler.deferred.cap_dropped")
-                    return
-                self.deferred[url] = {
-                    "kind": kind,
-                    "source_url": source_url or "",
-                    "depth": str(depth),
-                }
+                # F02: check+cap+write atomic لمنع تجاوز السقف وكتابة مزدوجة
+                async with self._deferred_lock:
+                    if url in self.deferred:
+                        return
+                    if len(self.deferred) >= self._deferred_cap:
+                        # v1.09-B1: لا نسقط بصمت — نسجّل تحذيراً واحداً عند بلوغ الحدّ
+                        if not getattr(self, "_deferred_cap_warned", False):
+                            log.warning(
+                                f"⚠️ deferred URL cap ({self._deferred_cap}) reached — "
+                                f"إضافيات لن تُسجَّل. ارفع crawl.deferred_crawl.max_tracked إن لزم.")
+                            self._deferred_cap_warned = True
+                        increment("crawler.deferred.cap_dropped")
+                        return
+                    self.deferred[url] = {
+                        "kind": kind,
+                        "source_url": source_url or "",
+                        "depth": str(depth),
+                    }
                 return
         await self.queue.put((url, depth))
         self.queued_urls.add(url)
@@ -1334,9 +1347,6 @@ class AsyncCrawler:
                 if not is_internal_url(normalized, self.primary_domain, self.additional_domains):
                     continue
 
-                if normalized in self.visited or normalized in self.queued_urls:
-                    continue
-
                 if self._should_skip_url(normalized):
                     continue
 
@@ -1350,7 +1360,13 @@ class AsyncCrawler:
                 # v1.08: نُمرّر الـURL الأصل ليُحفَظ مع المؤجَّل (يُساعد التشخيص:
                 # «من أيّ صفحة جاء هذا الرابط المؤجَّل؟»). v1.08.1: استعمل page.url
                 # — المتغيّر `url` لا يوجد في هذه الـscope (parameter اسمه `page`).
-                await self._enqueue(normalized, depth + 1, source_url=page.url)
+                # F01: check + enqueue atomic تحت visited_lock لمنع workers من
+                # إضافة نفس الرابط مرّتين (race: check→pass→enqueue يتداخل بين 2+).
+                # _enqueue لا يأخذ visited_lock داخلياً ⇒ آمن (لا deadlock).
+                async with self._visited_lock:
+                    if normalized in self.visited or normalized in self.queued_urls:
+                        continue
+                    await self._enqueue(normalized, depth + 1, source_url=page.url)
                 discovered += 1
             increment("crawler.discovered_links", discovered)
             gauge("crawler.queue_size", self.queue.qsize())
@@ -1547,24 +1563,44 @@ class AsyncCrawler:
             return raw_soup, {}
 
         # جمع ملخّص الوصولية (axe-core) إن توفّر للصفحة المُصيَّرة
+        # F06: سقف قابل للضبط (accessibility_max_entries) — نسقط الزائد ونحذّر مرة واحدة
         if getattr(rendered, "accessibility", None):
-            self.all_accessibility.append(rendered.accessibility)
+            if len(self.all_accessibility) < self._a11y_cap:
+                self.all_accessibility.append(rendered.accessibility)
+            else:
+                self._a11y_dropped += 1
+                if not self._a11y_cap_warned:
+                    log.warning(
+                        f"⚠️ accessibility entries cap ({self._a11y_cap}) reached — "
+                        f"إضافيات لن تُسجَّل. ارفع accessibility_max_entries إن لزم.")
+                    self._a11y_cap_warned = True
+                increment("crawler.accessibility.cap_dropped")
 
         rendered_soup = BeautifulSoup(rendered.html, "lxml")
         raw = self._quick_seo(raw_soup)
         ren = self._quick_seo(rendered_soup)
-        self.all_js_diff.append({
-            "page_url": url,
-            "raw_words": raw["word_count"], "rendered_words": ren["word_count"],
-            "words_added": ren["word_count"] - raw["word_count"],
-            "raw_links": raw["link_count"], "rendered_links": ren["link_count"],
-            "links_added": ren["link_count"] - raw["link_count"],
-            "raw_empty": raw["word_count"] < self.js_empty_threshold,
-            "title_changed": raw["title"] != ren["title"],
-            "meta_changed": raw["meta_description"] != ren["meta_description"],
-            "canonical_changed": raw["canonical"] != ren["canonical"],
-            "console_errors": len(rendered.console_errors or []),
-        })
+        # F05: سقف قابل للضبط (js_diff_max_entries) — نسقط الزائد ونحذّر مرة واحدة
+        if len(self.all_js_diff) < self._js_diff_cap:
+            self.all_js_diff.append({
+                "page_url": url,
+                "raw_words": raw["word_count"], "rendered_words": ren["word_count"],
+                "words_added": ren["word_count"] - raw["word_count"],
+                "raw_links": raw["link_count"], "rendered_links": ren["link_count"],
+                "links_added": ren["link_count"] - raw["link_count"],
+                "raw_empty": raw["word_count"] < self.js_empty_threshold,
+                "title_changed": raw["title"] != ren["title"],
+                "meta_changed": raw["meta_description"] != ren["meta_description"],
+                "canonical_changed": raw["canonical"] != ren["canonical"],
+                "console_errors": len(rendered.console_errors or []),
+            })
+        else:
+            self._js_diff_dropped += 1
+            if not self._js_diff_cap_warned:
+                log.warning(
+                    f"⚠️ js_diff entries cap ({self._js_diff_cap}) reached — "
+                    f"إضافيات لن تُسجَّل. ارفع js_diff_max_entries إن لزم.")
+                self._js_diff_cap_warned = True
+            increment("crawler.js_diff.cap_dropped")
         increment("crawler.js.rendered")
         # نستخدم النسخة المُصيَّرة للاستخراج واكتشاف الروابط (قيمة JS الحقيقية)
         return rendered_soup, {

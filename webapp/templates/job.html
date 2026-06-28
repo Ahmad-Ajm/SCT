@@ -173,10 +173,38 @@ window._sctToken = "{{ sct_token }}";
 <script>
 const jobId = "{{ job_id }}";
 
+// v1.13.x (XSS hardening): مهرب HTML بسيط — يُستخدم حيث innerHTML لا مفرّ منه
+// (مثل بناء قوائم متفرّعة من حقول API). للنصوص المسطّحة نُفضّل textContent.
+function _esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// v1.13.x (XSS hardening): تحقّق من رابط الشعار قبل استخدامه — يُسمح بـhttp/https فقط
+// ويُرفض javascript:/data:/vbscript:/file: وأي مخطّط آخر. يُعيد '' عند الرفض.
+function _safeLogoUrl(u) {
+  if (!u) return '';
+  const s = String(u).trim();
+  if (!s) return '';
+  // يجب أن يبدأ بـ http:// أو https:// (case-insensitive)
+  if (!/^https?:\/\//i.test(s)) return '';
+  // رفض صريح للمخطّطات الخطرة حتى لو سبقها whitespace أو حروف خداع
+  if (/^\s*(javascript|data|vbscript|file|blob):/i.test(s)) return '';
+  return s;
+}
+
 // v1.13.2: navigation عاديّ من <a href> أو window.location لا يمرّ عبر
 // fetch monkey-patch، فلا يحقن Authorization header. الحلّ: نُضيف
 // ?token=... للـURLs التي تُفتح كـnavigation. الـtoken نفسه المُحقَن
 // في كل قوالب v1.10-A1 (window._sctToken).
+// F53 DEFERRED: نقل التوكن من query إلى ticket cookie قصير العمر يحتاج
+// refactor معماري (endpoint /ticket + Set-Cookie HttpOnly + قبوله في الـAPI).
+// نُبقي withToken كما هو في هذه الجولة.
 function withToken(url) {
   const t = window._sctToken || "";
   if (!t) return url;
@@ -206,7 +234,12 @@ function renderDownloads(result) {
   lastResult = result;
   const box = document.getElementById('downloads');
   const dlWord = (window.sctT ? window.sctT('download') : 'تنزيل');
-  box.innerHTML = '<span class="dl-label">⬇️ ' + dlWord + ':</span>';
+  // F49/F50: نتجنّب innerHTML تماماً — نبني <span class="dl-label"> عبر DOM API.
+  box.textContent = '';
+  const dlLabel = document.createElement('span');
+  dlLabel.className = 'dl-label';
+  dlLabel.textContent = '⬇️ ' + dlWord + ':';
+  box.appendChild(dlLabel);
   const en = (document.documentElement.lang === 'en');
   // في وضع «both» نعرض أزرار العميل/الخبير المنفصلة بدل تكرار التقرير العام
   const bothMode = result && (result.html_client || result.html_expert);
@@ -303,22 +336,50 @@ async function loadFiles() {
   if (!files.length) { box.innerHTML = ''; return; }
   const byGroup = {};
   files.forEach(f => { (byGroup[f.group] = byGroup[f.group] || []).push(f); });
-  let html = '';
+  // F49/F50: حقول f.label / f.rel / groups[g] / f.size تأتي من الـAPI — لا نمرّرها
+  // عبر innerHTML نصّاً. نبني الشجرة عبر DOM API كي يصير أي إدخال نصّياً بحتاً.
+  box.textContent = '';
   Object.keys(groups).forEach(g => {
     const items = byGroup[g];
     if (!items || !items.length) return;
-    html += '<div class="file-group"><b>' + groups[g] + '</b><ul style="list-style:none;padding:0;margin:6px 0">';
+    const groupDiv = document.createElement('div');
+    groupDiv.className = 'file-group';
+    const groupTitle = document.createElement('b');
+    groupTitle.textContent = String(groups[g] == null ? '' : groups[g]);
+    groupDiv.appendChild(groupTitle);
+    const ul = document.createElement('ul');
+    ul.style.listStyle = 'none';
+    ul.style.padding = '0';
+    ul.style.margin = '6px 0';
     items.forEach(f => {
-      html += '<li style="margin:3px 0">'
-        + '<label class="chk" style="display:inline-flex;gap:6px;align-items:center">'
-        + '<input type="checkbox" class="fchk" value="' + f.rel + '" checked> '
-        + '<a href="' + withToken('/api/jobs/' + jobId + '/download-file?rel=' + encodeURIComponent(f.rel)) + '">'
-        + f.label + '</a> <span class="muted sm">(' + _fmtSize(f.size) + ')</span>'
-        + '</label></li>';
+      const li = document.createElement('li');
+      li.style.margin = '3px 0';
+      const lbl = document.createElement('label');
+      lbl.className = 'chk';
+      lbl.style.display = 'inline-flex';
+      lbl.style.gap = '6px';
+      lbl.style.alignItems = 'center';
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.className = 'fchk';
+      chk.value = String(f.rel == null ? '' : f.rel);
+      chk.checked = true;
+      const a = document.createElement('a');
+      a.href = withToken('/api/jobs/' + jobId + '/download-file?rel=' + encodeURIComponent(String(f.rel == null ? '' : f.rel)));
+      a.textContent = String(f.label == null ? '' : f.label);
+      const sizeSpan = document.createElement('span');
+      sizeSpan.className = 'muted sm';
+      sizeSpan.textContent = ' (' + _fmtSize(f.size) + ')';
+      lbl.appendChild(chk);
+      lbl.appendChild(document.createTextNode(' '));
+      lbl.appendChild(a);
+      lbl.appendChild(sizeSpan);
+      li.appendChild(lbl);
+      ul.appendChild(li);
     });
-    html += '</ul></div>';
+    groupDiv.appendChild(ul);
+    box.appendChild(groupDiv);
   });
-  box.innerHTML = html;
 }
 
 document.addEventListener('click', (e) => {
@@ -597,6 +658,23 @@ function _wireGenButtons() {
       const form = document.getElementById('genForm');
       const fd = new FormData(form);
       fd.set('format', fmt);
+      // F52: تحقّق من رابط الشعار قبل الإرسال — http(s) فقط، نرفض javascript:/data:/...
+      // (client_name يبقى كما هو ويُهرَّب عبر _esc عند العرض.)
+      const rawLogo = (fd.get('logo_url') || '').toString().trim();
+      if (rawLogo) {
+        const safeLogo = _safeLogoUrl(rawLogo);
+        if (!safeLogo) {
+          const isEn = (document.documentElement.lang === 'en');
+          alert(isEn
+            ? 'Invalid logo URL — must start with http:// or https://'
+            : 'رابط الشعار غير صالح — يجب أن يبدأ بـ http:// أو https://');
+          return;
+        }
+        fd.set('logo_url', safeLogo);
+      } else {
+        // حذف الحقل الفارغ كي لا يصل كنصّ فارغ للسيرفر
+        fd.delete('logo_url');
+      }
       btn.disabled = true;
       dl.disabled = true;
       st.textContent = T('gen_running', 'يبني…');
@@ -668,16 +746,30 @@ function _renderDeferred() {
   panel.style.display = '';
   const lang = (document.documentElement.lang === 'en') ? 'en' : 'ar';
   const box = document.getElementById('deferredBreakdown');
-  box.innerHTML = '';
+  // F49/F50: kind يأتي من الـAPI (مفتاح خارجي) — لو لم نجده في KIND_LABELS نضعه كنصّ
+  // فلا بدّ من بناء الكروت عبر DOM API كي لا نُفسّر nameه كـHTML.
+  box.textContent = '';
   Object.entries(_deferredData.by_kind || {}).forEach(([kind, count]) => {
     const meta = KIND_LABELS[kind] || { ar: kind, en: kind, hint_ar: '', hint_en: '' };
     const card = document.createElement('div');
     card.className = 'card';
     card.style.flex = '1 1 200px';
-    card.innerHTML =
-      '<div class="num" style="color:#b45309">' + count.toLocaleString() + '</div>' +
-      '<div class="lbl"><b>' + meta[lang] + '</b></div>' +
-      '<div class="muted sm" style="margin-top:4px">' + meta['hint_' + lang] + '</div>';
+    const numDiv = document.createElement('div');
+    numDiv.className = 'num';
+    numDiv.style.color = '#b45309';
+    numDiv.textContent = Number(count || 0).toLocaleString();
+    const lblDiv = document.createElement('div');
+    lblDiv.className = 'lbl';
+    const lblB = document.createElement('b');
+    lblB.textContent = String(meta[lang] == null ? kind : meta[lang]);
+    lblDiv.appendChild(lblB);
+    const hintDiv = document.createElement('div');
+    hintDiv.className = 'muted sm';
+    hintDiv.style.marginTop = '4px';
+    hintDiv.textContent = String(meta['hint_' + lang] == null ? '' : meta['hint_' + lang]);
+    card.appendChild(numDiv);
+    card.appendChild(lblDiv);
+    card.appendChild(hintDiv);
     box.appendChild(card);
   });
   // رابط CSV
@@ -709,12 +801,14 @@ document.addEventListener('click', async (e) => {
     if (!box) return;
     if (box.style.display === 'none') {
       const lang = (document.documentElement.lang === 'en') ? 'en' : 'ar';
+      // F49/F50: kind و urls يأتيان من الـAPI. الإصدار السابق هرب فقط & و< —
+      // كان يفوته " و' (اللذان قد يستخدمان لكسر سياق آخر). نستخدم _esc الموحّد.
       let html = '';
       Object.entries(_deferredData.samples || {}).forEach(([kind, urls]) => {
         const meta = KIND_LABELS[kind] || { ar: kind, en: kind };
-        html += '<div style="margin-bottom:10px"><b>' + meta[lang] + '</b><br>';
+        html += '<div style="margin-bottom:10px"><b>' + _esc(meta[lang]) + '</b><br>';
         (urls || []).slice(0, 10).forEach(u => {
-          html += '&nbsp;&nbsp;' + (u || '').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '<br>';
+          html += '&nbsp;&nbsp;' + _esc(u || '') + '<br>';
         });
         html += '</div>';
       });
