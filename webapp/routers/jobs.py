@@ -104,6 +104,11 @@ async def start(request: Request):
         "platform_preset": (form.get("platform_preset") or "").strip(),
         "generate_sitemap": _b("generate_sitemap", False),
         "adaptive_throttle": _b("adaptive_throttle", False),
+        # v1.13.18: تصيير JS + فحص الوصولية (كانا مخفيّين عن الـUI حتى v1.13.17)
+        "js_render": _b("js_render", False),
+        "js_max_pages": _safe_int("js_max_pages", 100),
+        "accessibility_check": _b("accessibility_check", False),
+        "accessibility_max_pages": _safe_int("accessibility_max_pages", 50),
         # v1.05: انتحال User-Agent — يُحوَّل preset → سلسلة فعلية في job_runner عبر crawl.user_agent
         "ua_preset": (form.get("ua_preset") or "").strip().lower(),
         "ua_custom": (form.get("ua_custom") or "").strip(),

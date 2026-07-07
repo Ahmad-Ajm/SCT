@@ -198,6 +198,30 @@ class JobRunner:
         if overrides.get("check_resource_status") is not None:
             cfg["extraction"]["check_resource_status"] = bool(overrides["check_resource_status"])
 
+        # v1.13.18: تصيير JS (Playwright/Chromium) — يرى الموقع بعد تنفيذ JS.
+        # بطيء 5-10× لكنّه لازم للـSPA/AJAX. مطفأ افتراضياً.
+        if overrides.get("js_render") is not None:
+            cfg.setdefault("javascript", {})
+            cfg["javascript"]["enabled"] = bool(overrides["js_render"])
+        if overrides.get("js_max_pages") is not None:
+            cfg.setdefault("javascript", {})
+            cfg["javascript"]["max_pages"] = max(0, int(overrides["js_max_pages"] or 0))
+
+        # v1.13.18: فحص الوصولية (axe-core) — يعمل داخل المتصفّح المُصيَّر.
+        # يتطلّب تفعيل javascript. مطفأ افتراضياً.
+        if overrides.get("accessibility_check") is not None:
+            cfg.setdefault("accessibility", {})
+            cfg["accessibility"]["enabled"] = bool(overrides["accessibility_check"])
+            # لتشغيل axe بدون ملفّ محلي: نسمح بجلبه من CDN (jsdelivr).
+            if cfg["accessibility"]["enabled"]:
+                cfg["accessibility"].setdefault("allow_cdn", True)
+                # تفعيل الوصولية يستلزم تفعيل JS render — نضبطه صراحةً.
+                cfg.setdefault("javascript", {})["enabled"] = True
+        if overrides.get("accessibility_max_pages") is not None:
+            cfg.setdefault("accessibility", {})
+            cfg["accessibility"]["max_pages"] = max(
+                0, int(overrides["accessibility_max_pages"] or 0))
+
         # تسريع فحص الروابط الخارجية على المواقع الضخمة
         cfg.setdefault("external_check", {})
         if overrides.get("ext_sample_per_host") is not None:

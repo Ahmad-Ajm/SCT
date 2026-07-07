@@ -182,6 +182,17 @@ window._sctToken = "{{ sct_token }}";
           <label class="chk"><input type="checkbox" name="check_resource_status"> <span data-i18n="check_resource_status">فحص حالة موارد الصفحة (CSS/JS/صور) — أبطأ، يتطلّب جمع الموارد</span><span class="tip time" data-tip-key="tip_check_resource_status">⏱</span></label>
           <label class="chk"><input type="checkbox" name="adaptive_throttle"> <span data-i18n="adaptive_throttle">تحكّم تكيّفي بالسرعة (يبطئ تلقائياً عند 429/5xx/البطء)</span><span class="tip" data-tip-key="tip_adaptive_throttle">?</span></label>
           <label class="chk"><input type="checkbox" name="generate_sitemap"> <span data-i18n="generate_sitemap">توليد sitemap.xml من الصفحات القابلة للفهرسة</span><span class="tip" data-tip-key="tip_generate_sitemap">?</span></label>
+          <!-- v1.13.18: تصيير JS + فحص الوصولية — كانا مخفيّين، الآن ظاهران للـUI. -->
+          <label class="chk"><input type="checkbox" name="js_render"> <span data-i18n="js_render">🌐 تصيير JavaScript (Chromium/Playwright) — يرى الموقع كما يراه المستخدم، أبطأ ~5-10×</span><span class="tip time" data-tip-key="tip_js_render">⏱</span></label>
+          <label class="chk"><input type="checkbox" name="accessibility_check"> <span data-i18n="accessibility_check">♿ فحص الوصولية (axe-core / WCAG) — يتطلّب تصيير JS</span><span class="tip time" data-tip-key="tip_accessibility_check">⏱</span></label>
+          <div class="grid" style="margin-top:6px">
+            <label><span data-i18n="js_max_pages">حدّ صفحات JS render</span>
+              <input type="number" name="js_max_pages" placeholder="100" min="0" title="0 = بلا حدّ. الافتراضي 100. تصيير JS بطيء جداً على مواقع كبيرة">
+            </label>
+            <label><span data-i18n="accessibility_max_pages">حدّ صفحات الوصولية</span>
+              <input type="number" name="accessibility_max_pages" placeholder="50" min="0" title="0 = بلا حدّ. الافتراضي 50">
+            </label>
+          </div>
         </div>
         <details class="adv full" style="margin-top:8px">
           <summary data-i18n="speed_advanced">ضبط دقيق للسرعة (يدوياً — يتجاوز شريط السرعة)</summary>

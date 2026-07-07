@@ -4,6 +4,48 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.18 (2026-07-06 UI toggles for JS-render + accessibility)
+
+The `javascript.enabled` and `accessibility.enabled` config keys have
+existed since v1.03 but were only settable by editing `config.yaml` by
+hand — the crawl-form UI had no checkboxes for them. Users who wanted
+to test a SPA / React storefront or produce an axe-core report had to
+find the config file and edit it, then reset it before running an
+integrations-only job. That's a real friction point.
+
+Two new checkboxes surface both features in the crawl form under
+"Advanced":
+
+- **🌐 تصيير JavaScript (Chromium/Playwright)** — `name="js_render"`,
+  wired to `javascript.enabled`. Extra number field
+  `name="js_max_pages"` (default 100) caps the number of pages rendered
+  via Chromium (rendering is 5-10× slower than plain HTTP, so a cap is
+  essential on big sites).
+- **♿ فحص الوصولية (axe-core / WCAG)** —
+  `name="accessibility_check"`, wired to `accessibility.enabled`.
+  Number field `name="accessibility_max_pages"` (default 50). When
+  the box is checked, `job_runner._build_job_config` also forces
+  `javascript.enabled = true` (axe needs a browser to run) and sets
+  `accessibility.allow_cdn = true` so axe-core is fetched from jsdelivr
+  without needing a local file.
+
+Plumbing:
+- `webapp/templates/index.html`: two `<label class="chk">` blocks +
+  two number inputs added right after `generate_sitemap`.
+- `webapp/static/i18n.js`: 8 new keys (labels + tooltips, AR + EN).
+- `webapp/routers/jobs.py`: 4 new overrides parsed via `_b` and
+  `_safe_int` (the same defensive helpers used everywhere else).
+- `webapp/job_runner.py::_build_job_config`: writes them to
+  `cfg["javascript"]` and `cfg["accessibility"]`.
+
+No new API surface — the config-writing path is the existing one, so
+CLI users can still set the same keys in `config.yaml` and get the
+same behavior.
+
+92/92 tests. Version bumped to 1.13.18.
+
+---
+
 ## v1.13.17 (2026-06-25 Top-10 pre-publication audit fixes — 18 confirmed via parallel agents)
 
 A 14-dimension deep audit surfaced 70 findings (4 critical / 42 high /
