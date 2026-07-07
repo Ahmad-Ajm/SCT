@@ -129,6 +129,44 @@ class WebappEndpointTests(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 404)
 
+    # ─────────── v1.13.20 self-heal ───────────
+
+    def test_read_meta_self_heals_missing_fields(self):
+        """job.json الفاسدة (فقدَت job_id/url/mode/started_at) يجب أن تُعاد
+        هيكلتها في الذاكرة كي لا تظهر صفوف فارغة في قائمة المهام الأخيرة."""
+        import json
+        import tempfile
+        from pathlib import Path as _Path
+        from webapp.job_runner import JobRunner
+
+        with tempfile.TemporaryDirectory() as td:
+            job_dir = _Path(td) / "20260101_120000_abcdef"
+            job_dir.mkdir()
+            # ملفّ فاسد: فقط الحقول النهائيّة، بلا job_id/url/mode/started_at
+            (job_dir / "job.json").write_text(json.dumps({
+                "status": "failed", "return_code": 1,
+                "ended_at": "2026-01-01T12:30:00", "result": {},
+            }), encoding="utf-8")
+            (job_dir / "run.log").write_text(
+                "12:00:00 | INFO | 🌐 Target URL: https://example.com/",
+                encoding="utf-8")
+
+            meta = JobRunner._read_meta(job_dir)
+            self.assertEqual(meta["job_id"], "20260101_120000_abcdef")
+            self.assertEqual(meta["url"], "https://example.com/")
+            self.assertEqual(meta["mode"], "audit")
+            self.assertEqual(meta["started_at"], "2026-01-01T12:00:00")
+            # الحقول الأصليّة تبقى
+            self.assertEqual(meta["status"], "failed")
+
+    def test_jobs_slash_redirects_home(self):
+        """v1.13.19: /jobs و /jobs/ يجب أن يُعيدا 302 إلى / (كانا 404)."""
+        r = self.client.get("/jobs/", follow_redirects=False)
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.headers.get("location"), "/")
+        r2 = self.client.get("/jobs", follow_redirects=False)
+        self.assertEqual(r2.status_code, 302)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,73 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.20 (2026-07-07 self-heal corrupted job.json + repair 3 legacy jobs)
+
+**The bug the user saw.** The "Recent Jobs" (المهام الأخيرة) table on
+the home page had three rows with EMPTY cells for job-id / URL / mode,
+and clicking "عرض" (View) just refreshed the page instead of opening
+the job report. Because `href="/jobs/{{ j.job_id }}"` rendered as
+`/jobs/` when `j.job_id` was empty, hitting the v1.13.19 redirect that
+sent it back to `/`.
+
+**The root cause.** All three `job.json` files on disk had been
+truncated to just the terminal fields (`status`, `return_code`,
+`ended_at`, `result`, `diagnostics`) — the initial `job_id`, `mode`,
+`url`, `started_at`, `config` fields were missing. This was almost
+certainly a race condition from before v1.13.16 F45 (atomic writes):
+if `_watch()` ran during a partial `_write_meta()` write, `_read_meta()`
+would see an empty/corrupt file, return `{}`, then `_watch()` would add
+just the terminal fields to that empty dict and write it back —
+effectively wiping the initial data.
+
+**Self-heal at read time (`_read_meta`).** Now every time a job's meta
+is read, missing fields are backfilled from authoritative alternate
+sources:
+- `job_id` from the directory name (100% reliable — the filesystem is
+  the source of truth for the ID).
+- `url` from `config.yaml::site.start_url`, with fallback to a regex
+  scan of the first 5 KB of `run.log` for `🌐 Target URL:` (works
+  even if `config.yaml` itself is missing).
+- `mode` defaults to `audit` (the overwhelming majority of runs).
+- `started_at` reconstructed from the folder-name timestamp
+  (`YYYYMMDD_HHMMSS_hex`).
+- `config` points at `config.yaml` if the file exists.
+
+**Defense in depth (`_watch`).** Even in the post-atomic-write world, if
+some future refactor or race trips the read again, `_watch()` now
+`setdefault("job_id", job_id)` before writing so the ID never
+disappears. Belt-and-suspenders alongside the read-time self-heal.
+
+**One-time repair of the 3 existing files on disk.** A small script ran
+the new `_backfill_meta` on each `webapp_jobs/*/job.json` and wrote
+the reordered result back. All three jobs now have their correct URL
+(`internal-zid-test.example` / `internal-wp-test.example` / `internal-zid-test.example` again) and
+`mode=audit`.
+
+**Regression tests (94/94 now).** Added `test_read_meta_self_heals_missing_fields`
+that constructs a corrupted `job.json` in a tempdir and verifies
+`_read_meta` fills every expected field. Also added
+`test_jobs_slash_redirects_home` locking in the v1.13.19 302 behavior
+so a future refactor doesn't silently break the /jobs URL that this
+same table's "View" button generates.
+
+---
+
+## v1.13.19 (2026-07-07 redirect /jobs and /jobs/ to home)
+
+User navigated to `http://127.0.0.1:8000/jobs/` expecting a job listing
+and got `{"error":"Not Found","request_id":"..."}`. FastAPI had no
+route for the collection path — only `/jobs/{job_id}`. The home page
+already shows "المهام الأخيرة" (Recent Jobs), so a 302 to `/` is the
+right move.
+
+Added `@router.get("/jobs")` and `@router.get("/jobs/")` in
+`webapp/routers/pages.py` returning `RedirectResponse(url="/",
+status_code=302)`. Both `include_in_schema=False` so they don't
+clutter OpenAPI docs.
+
+---
+
 ## v1.13.18 (2026-07-06 UI toggles for JS-render + accessibility)
 
 The `javascript.enabled` and `accessibility.enabled` config keys have

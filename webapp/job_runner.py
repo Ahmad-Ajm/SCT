@@ -475,6 +475,10 @@ class JobRunner:
     def _watch(self, job_id: str, job_dir: Path, proc: subprocess.Popen) -> None:
         rc = proc.wait()
         meta = self._read_meta(job_dir)
+        # v1.13.20: تحصين إضافي — لو أيّ read أعاد dict بلا job_id (لن يحصل
+        # الآن بعد self-heal في _read_meta لكن دفاع في العمق)، نضبطه هنا كي
+        # لا يُكتب job.json نهائيّاً بدون هذا الحقل حتّى لو خرب شيء لاحقاً.
+        meta.setdefault("job_id", job_id)
         final = self.progress(job_id).get("status")
         if meta.get("status") == "stopped":
             pass  # أوقفها المستخدم عبر الواجهة — نُبقيها
@@ -758,13 +762,66 @@ class JobRunner:
     @staticmethod
     def _read_meta(job_dir: Path) -> dict[str, Any]:
         mp = job_dir / "job.json"
+        meta: dict[str, Any] = {}
         if mp.exists():
             try:
                 with open(mp, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    meta = json.load(f) or {}
             except (json.JSONDecodeError, OSError):
-                return {}
-        return {}
+                meta = {}
+        # v1.13.20: self-heal — corrupt/legacy job.json كانت تفقد الحقول الأوّليّة
+        # (job_id, url, mode, started_at) عبر race قديمة في _write_meta قبل v1.13.16
+        # F45 (atomic write). النتيجة: قائمة "المهام الأخيرة" تعرض صفوفاً فارغة
+        # ورابط "عرض" يُعيد إلى / (لأنّ href="/jobs/{{ j.job_id }}" يصير "/jobs/").
+        # نُعيد بناء ما يمكن من: اسم المجلّد + config.yaml + progress.json.
+        JobRunner._backfill_meta(meta, job_dir)
+        return meta
+
+    @staticmethod
+    def _backfill_meta(meta: dict[str, Any], job_dir: Path) -> None:
+        """يملأ الحقول المفقودة من مصادر مساعدة (اسم المجلّد + config.yaml + run.log)."""
+        # job_id دائماً مستخرَج من اسم المجلّد (المصدر الحقيقي).
+        if not meta.get("job_id"):
+            meta["job_id"] = job_dir.name
+        # url + mode + config من config.yaml إن لزم.
+        cfg_path = job_dir / "config.yaml"
+        if cfg_path.exists():
+            if not meta.get("url") or not meta.get("mode") or not meta.get("config"):
+                try:
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        cfg = yaml.safe_load(f) or {}
+                except (yaml.YAMLError, OSError):
+                    cfg = {}
+                if not meta.get("url"):
+                    meta["url"] = (cfg.get("site") or {}).get("start_url", "")
+                if not meta.get("mode"):
+                    meta["mode"] = "audit"
+                if not meta.get("config"):
+                    meta["config"] = str(cfg_path)
+        # fallback أخير: URL من run.log لو لم يتوفّر config.yaml (مهام قديمة قد
+        # يفقد ملفّ إعدادها كلياً).
+        if not meta.get("url"):
+            log_path = job_dir / "run.log"
+            if log_path.exists():
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                        # نقرأ أوّل 5000 بايت فقط — Target URL يكون في الأسطر الأولى.
+                        head = f.read(5000)
+                    m = re.search(r"Target URL:\s*(\S+)", head)
+                    if m:
+                        meta["url"] = m.group(1)
+                except OSError:
+                    pass
+        # قيم افتراضيّة آمنة للـUI لو لم يُوجَد شيء.
+        meta.setdefault("mode", "audit")
+        meta.setdefault("url", "")
+        # started_at من طابع الوقت في اسم المجلّد (YYYYMMDD_HHMMSS_hex).
+        if not meta.get("started_at"):
+            m = re.match(r"^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})_",
+                         job_dir.name)
+            if m:
+                y, mo, d, hh, mm, ss = m.groups()
+                meta["started_at"] = f"{y}-{mo}-{d}T{hh}:{mm}:{ss}"
 
     @staticmethod
     def _write_progress(pf: Path, data: dict[str, Any]) -> None:
