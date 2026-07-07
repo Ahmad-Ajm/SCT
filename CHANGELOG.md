@@ -163,9 +163,8 @@ disappears. Belt-and-suspenders alongside the read-time self-heal.
 
 **One-time repair of the 3 existing files on disk.** A small script ran
 the new `_backfill_meta` on each `webapp_jobs/*/job.json` and wrote
-the reordered result back. All three jobs now have their correct URL
-(`internal-zid-test.example` / `internal-wp-test.example` / `internal-zid-test.example` again) and
-`mode=audit`.
+the reordered result back. All three jobs now have their correct
+recovered URL and `mode=audit`.
 
 **Regression tests (94/94 now).** Added `test_read_meta_self_heals_missing_fields`
 that constructs a corrupted `job.json` in a tempdir and verifies

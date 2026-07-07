@@ -116,8 +116,8 @@
 ## المرحلة 5 — Crawls على منصّات حقيقيّة
 | # | الفحص | المتوقّع |
 |---|---|---|
-| 5.1 | WordPress (internal-wp-alt-test.example أو internal-zid-test.example) | preset يستبعد `?replytocom=`, `/feed/`, `/tag/`, `/wp-admin` |
-| 5.2 | Zid store (internal-zid-test.example) | preset يستبعد `?sort_by`, `/cart`, `/checkout` |
+| 5.1 | موقع WordPress اختباري | preset يستبعد `?replytocom=`, `/feed/`, `/tag/`, `/wp-admin` |
+| 5.2 | متجر Zid اختباري | preset يستبعد `?sort_by`, `/cart`, `/checkout` |
 | 5.3 | Cloudflare-protected site | 403 Just a moment... تُحصى في `pages_4xx.csv` |
 | 5.4 | Large sitemap (>50k URLs) | `deferred_urls.csv` يحوي pagination-deep + filter-combinations |
 | 5.5 | Multilingual site (hreflang) | `hreflang_issues.csv` غير-متبادَل صحيح |
@@ -293,7 +293,7 @@
 ## المرحلة 18 — الأداء والصمود والتشغيل والرصد ⚙️
 | # | الفحص | كيف | المتوقّع |
 |---|---|---|---|
-| 18.1 | Crawl 33k pages | تشغيل حقيقي على internal-zid-test.example | ✅ نجح في v1.13.22 (5س 17د) |
+| 18.1 | Crawl 33k pages | تشغيل حقيقي على موقع Zid اختباري | ✅ نجح في v1.13.22 (5س 17د) |
 | 18.2 | Memory caps (v1.13.17 F05/F06) | `all_js_diff` cap 100k + `all_accessibility` cap 50k | dropped counter + one-time warning |
 | 18.3 | Playwright cleanup | JS render على 100 صفحة → قتل webapp | Chromium يُغلق بلا zombie |
 | 18.4 | AI provider timeout | DeepSeek/OpenAI مع latency عالٍ | fallback بلا crash (v1.13.17 F28 hardened Gemini) |
