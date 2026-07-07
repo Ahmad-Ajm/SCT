@@ -25,9 +25,23 @@ from webapp.constants import (
     SEVERITIES,
 )
 from webapp.deps import runner, templates
+from webapp.job_runner import JOBS_DIR, _valid_job_id
 from webapp.security import tpl_ctx
 
 router = APIRouter()
+
+
+# v1.13.22: كل صفحات /jobs/{job_id}/* تحوّل المعرّفات غير الصالحة إلى redirect
+# للصفحة الرئيسيّة بدل عرض صفحة مهمّة فارغة أبديّة (الـUI السابق كان يعرضها
+# "يعمل" للأبد لأنّ effectiveStatus fallback = 'running'). لو المستخدم دخل من
+# رابط قديم (مثل /jobs/_google) أو bookmark لمهمّة محذوفة، يُعاد فوراً للصفحة
+# الرئيسيّة حيث توجد قائمة المهام الفعليّة.
+def _validate_or_redirect(job_id: str) -> RedirectResponse | None:
+    if not _valid_job_id(job_id):
+        return RedirectResponse(url="/", status_code=302)
+    if not (JOBS_DIR / job_id).exists():
+        return RedirectResponse(url="/", status_code=302)
+    return None
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -52,6 +66,9 @@ async def jobs_redirect():
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
 async def job_page(request: Request, job_id: str):
+    redirect = _validate_or_redirect(job_id)
+    if redirect:
+        return redirect
     meta = runner.meta(job_id)
     return templates.TemplateResponse(
         "job.html", tpl_ctx({"request": request, "job_id": job_id, "meta": meta})
@@ -60,6 +77,9 @@ async def job_page(request: Request, job_id: str):
 
 @router.get("/jobs/{job_id}/explore", response_class=HTMLResponse)
 async def explore_page(request: Request, job_id: str):
+    redirect = _validate_or_redirect(job_id)
+    if redirect:
+        return redirect
     return templates.TemplateResponse(
         "explore.html", tpl_ctx({"request": request, "job_id": job_id})
     )
@@ -68,6 +88,9 @@ async def explore_page(request: Request, job_id: str):
 @router.get("/jobs/{job_id}/board", response_class=HTMLResponse)
 async def board_page(request: Request, job_id: str):
     """لوحة العمل التفاعلية (Action Board) — تعرض أولويات الإصلاح مجمّعةً وقابلةً للتصفية."""
+    redirect = _validate_or_redirect(job_id)
+    if redirect:
+        return redirect
     return templates.TemplateResponse(
         "board.html", tpl_ctx({"request": request, "job_id": job_id})
     )
@@ -76,6 +99,9 @@ async def board_page(request: Request, job_id: str):
 @router.get("/jobs/{job_id}/compare", response_class=HTMLResponse)
 async def compare_page(request: Request, job_id: str):
     """صفحة مقارنة زمنية: تختار مهمّة أخرى وتعرض المُصلَح/الجديد/الباقي."""
+    redirect = _validate_or_redirect(job_id)
+    if redirect:
+        return redirect
     return templates.TemplateResponse(
         "compare.html", tpl_ctx({"request": request, "job_id": job_id})
     )
@@ -85,6 +111,9 @@ async def compare_page(request: Request, job_id: str):
 async def graph_page(request: Request, job_id: str):
     """v1.04: صفحة تصوير الزحف — شجرة URL + توزيع العمق/الحالة + رسم بياني للروابط
     على المواقع الصغيرة (<500 صفحة)."""
+    redirect = _validate_or_redirect(job_id)
+    if redirect:
+        return redirect
     return templates.TemplateResponse(
         "graph.html", tpl_ctx({"request": request, "job_id": job_id})
     )

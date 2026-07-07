@@ -213,8 +213,10 @@ class JobRunner:
             cfg.setdefault("accessibility", {})
             cfg["accessibility"]["enabled"] = bool(overrides["accessibility_check"])
             # لتشغيل axe بدون ملفّ محلي: نسمح بجلبه من CDN (jsdelivr).
+            # v1.13.22: كان setdefault(True) لا يعمل لأنّ config الأساسي يضبطه على
+            # False صراحةً — setdefault يفشل عند وجود المفتاح. نُبدّله لتعيين صريح.
             if cfg["accessibility"]["enabled"]:
-                cfg["accessibility"].setdefault("allow_cdn", True)
+                cfg["accessibility"]["allow_cdn"] = True
                 # تفعيل الوصولية يستلزم تفعيل JS render — نضبطه صراحةً.
                 cfg.setdefault("javascript", {})["enabled"] = True
         if overrides.get("accessibility_max_pages") is not None:

@@ -4,6 +4,64 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.22 (2026-07-07 graph reads CSV + accessibility CDN fix + invalid-job redirect)
+
+Three surface-level bugs the user hit while testing v1.13.21:
+
+### 1. Force-directed graph on `/jobs/<id>/graph` showed 0 links
+User ran a fresh crawl with JS render on, 34 pages captured, ~3800
+internal links in the DB, but the graph canvas rendered empty (34
+nodes, 0 edges). Because since v1.13's audit-JSON slimming, raw arrays
+(`links`, `images`, `headings`) are OMITTED from `audit.json` — they
+only live in the CSVs. The `raw_arrays_omitted` field explicitly says
+so. But `webapp/routers/analytics.py::_build_graph_payload` still read
+from `audit["links"]`, which is now always empty.
+
+Fix: after loading the audit JSON, if `audit["links"]` is empty, fall
+back to loading `inlinks.csv` (or `all_links.csv` as a secondary
+fallback) from the same job's `csv/` directory, cap at 5 000 rows to
+match the existing link-count limit, and pass through the same
+existing pipeline. Force-directed graphs now populate as expected.
+
+### 2. Accessibility check crashed with "cannot load axe-core"
+User enabled the v1.13.18 accessibility toggle. The subprocess logged
+`فحص الوصولية مفعّل لكن تعذّر تحميل axe-core (حدّد accessibility.axe_source
+محلياً أو فعّل allow_cdn)` and the axe injection silently no-oped for
+every page — no accessibility CSV was produced.
+
+The v1.13.18 code was `cfg["accessibility"].setdefault("allow_cdn",
+True)`, but the merged base config already had
+`accessibility.allow_cdn: false` explicitly. `setdefault` only sets
+missing keys — it never overrides an existing `False`. Fixed by
+switching to explicit assignment
+(`cfg["accessibility"]["allow_cdn"] = True`) whenever the user
+enables the accessibility toggle. Now axe-core loads from jsdelivr
+CDN and the accessibility report populates.
+
+### 3. Old / invalid `/jobs/<id>` URL rendered as "running forever"
+User navigated to what they thought was an old task (turned out to be
+`/jobs/_google`, the OAuth-state folder that just happens to sit
+inside `webapp_jobs/`). The job page rendered with an empty meta dict,
+which in `effectiveStatus()` falls through to a `'running'` default,
+and the polling loop kept ticking the elapsed timer forever while
+showing zero pages. The counterpart also happens for
+`/jobs/<deleted-id>` — an eternally-running page for a job that no
+longer exists.
+
+Added `_validate_or_redirect()` in `webapp/routers/pages.py` and wired
+it into all five `/jobs/<id>/*` GET routes (`job_page`, `explore_page`,
+`board_page`, `compare_page`, `graph_page`). The helper:
+- Rejects any `job_id` that doesn't match the
+  `^\d{8}_\d{6}_[0-9a-f]{6}$` regex (kills the `_google` case).
+- Rejects any `job_id` whose directory doesn't exist under
+  `webapp_jobs/` (kills the stale-bookmark case).
+- Redirects with 302 to `/` so the user lands on a page that actually
+  shows something (the recent-jobs list).
+
+Version bumped to 1.13.22. 94/94 tests still green.
+
+---
+
 ## v1.13.21 (2026-07-07 welcome-banner always-shown + Stop/Kill race fixes + RUNBOOK §9)
 
 Three user-reported issues addressed in one pass:

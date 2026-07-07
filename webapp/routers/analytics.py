@@ -159,7 +159,42 @@ async def jobs_graph(job_id: str):
             audit = _json.load(f)
     except (OSError, ValueError):
         return JSONResponse({"error": "read error"}, status_code=500)
+
+    # v1.13.22: audit JSON يستبعد raw arrays افتراضياً منذ v1.13 (المفتاح
+    # raw_arrays_omitted موجود). لكن graph يحتاج links فعلياً — نقرأها من
+    # inlinks.csv الذي هو أخف من all_links.csv (يحوي internal فقط بلا images).
+    if not audit.get("links"):
+        audit["links"] = _load_links_from_csv(Path(json_path).parent / "csv")
+
     return JSONResponse(_build_graph_payload(audit))
+
+
+def _load_links_from_csv(csv_dir: Path) -> list[dict[str, Any]]:
+    """v1.13.22: يقرأ inlinks.csv (أخف من all_links) لبناء graph payload حين
+    audit JSON يستبعد raw arrays. حدّ عملي 5000 صفّ (نفس حدّ _build_graph_payload).
+    inlinks.csv يحوي is_internal حقيقي (bool) — يكفي المطابقة مع الشرط الموجود.
+    """
+    import csv as _csv
+    p = csv_dir / "inlinks.csv"
+    if not p.exists():
+        p = csv_dir / "all_links.csv"
+        if not p.exists():
+            return []
+    out: list[dict[str, Any]] = []
+    try:
+        with open(p, "r", encoding="utf-8-sig", newline="") as f:
+            reader = _csv.DictReader(f)
+            for row in reader:
+                if len(out) >= 5000:
+                    break
+                out.append({
+                    "from_url": row.get("from_url", ""),
+                    "to_url": row.get("to_url", ""),
+                    "is_internal": row.get("is_internal", "true"),
+                })
+    except (OSError, _csv.Error):
+        return []
+    return out
 
 
 def _build_graph_payload(audit: dict[str, Any]) -> dict[str, Any]:
