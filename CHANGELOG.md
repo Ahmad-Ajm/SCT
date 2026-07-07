@@ -4,6 +4,68 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.21 (2026-07-07 welcome-banner always-shown + Stop/Kill race fixes + RUNBOOK §9)
+
+Three user-reported issues addressed in one pass:
+
+### 1. Welcome banner shows every launch (dismissible)
+Previously the "👋 مرحباً في SCT" card only appeared when there were
+zero jobs on disk (`{% if not jobs and not active_job %}`). The moment
+a user completed one crawl it vanished forever. The user asked for it
+to always show but be dismissible with an X.
+
+Changes in `webapp/templates/index.html`:
+- Removed the Jinja conditional wrapping the `<div class="welcome">`.
+- Added `id="welcomeBanner"`, `id="welcomeDismiss"` (X button),
+  `position:relative` on the container, and CSS for the absolutely
+  positioned close button (uses `inset-inline-end` for RTL/LTR safety).
+- Inline IIFE at the bottom of `<script>` reads
+  `localStorage['sct_welcome_dismissed']`; if the user has clicked X
+  in the past, the banner stays hidden. Otherwise it shows on every
+  page load. Wraps in `try/catch` so that private-browsing mode (where
+  `localStorage` throws) falls through to always-show — no crash.
+
+`webapp/static/i18n.js`: two new keys (AR + EN) —
+`welcome_dismiss_title` and `welcome_show_again`.
+
+### 2. `force_kill()` race condition (Fix 2 in the parallel to Fix 1)
+`stop()` was already patched in v1.13.15 to hold the lock across
+`lookup + write_meta + send_signal`. `force_kill()` still had the old
+pattern where the lock was released between lookup and the actual
+`proc.kill()`, letting `_watch` sweep the proc out from under it
+(returning `False` even though the subprocess was still running). Now
+mirrors the `stop()` pattern: everything under a single `with
+self._lock` block. Same `log.warning` on missing proc so orphan
+subprocesses are visible in the log.
+
+### 3. RUNBOOK §9 — disappearing job folders on Windows
+The user's `webapp_jobs/` folder went from 3 jobs to just `_google`
+between operations, with no user delete action. Comprehensive grep
+confirmed **the tool has zero automatic deletion code** — only user
+button clicks reach `delete_job`/`delete_all_jobs`, and there is no
+scheduler, TTL, or background sweeper. The likely OS-level culprits
+are:
+
+- **Windows Storage Sense** (aggressive default in Windows 11 —
+  deletes files in folders named `logs`, `cache`, `temp`, and stuff
+  older than N days from `%USERPROFILE%`)
+- **Antivirus real-time protection**
+- **OneDrive Files On-Demand** dehydration/sync deletions
+
+Added `docs/RUNBOOK.md` §9 documenting:
+- How to confirm the tool itself never deleted anything (with
+  `grep -rn 'rmtree\|unlink' webapp/` recipe)
+- PowerShell to read Storage Sense state and disable it
+- Antivirus exclusion steps
+- Recommended safe install path: outside `%USERPROFILE%` and outside
+  any sync tool root
+
+Also added a v1.13.21 breadcrumb at the top of RUNBOOK.md.
+
+Version bumped to 1.13.21. 94/94 tests still green.
+
+---
+
 ## v1.13.20 (2026-07-07 self-heal corrupted job.json + repair 3 legacy jobs)
 
 **The bug the user saw.** The "Recent Jobs" (المهام الأخيرة) table on

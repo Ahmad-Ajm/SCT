@@ -43,11 +43,15 @@ window._sctToken = "{{ sct_token }}";
   .start-mode{display:inline-flex;gap:12px;margin:0 12px;align-items:center}
   .start-mode label{display:inline-flex;gap:4px;align-items:center;cursor:pointer}
   .start-summary{font-size:.9rem;color:#64748b;margin:6px 0}
-  /* بطاقة الترحيب لأوّل تشغيل (Phase E) */
+  /* بطاقة الترحيب (Phase E) — قابلة للرفع بزرّ dismiss */
   .welcome{background:linear-gradient(135deg,#1F4E79,#3b82f6);color:#fff;padding:18px 22px;
-    border-radius:12px;margin:14px 0}
-  .welcome h2{color:#fff;margin:0 0 8px}
+    border-radius:12px;margin:14px 0;position:relative}
+  .welcome h2{color:#fff;margin:0 0 8px;padding-inline-end:32px}
   .welcome ol{margin:6px 0 0 18px;padding:0}
+  .welcome-dismiss{position:absolute;top:8px;inset-inline-end:8px;background:transparent;border:none;
+    color:#fff;font-size:1.5rem;line-height:1;cursor:pointer;padding:2px 8px;opacity:0.85;transition:opacity 0.2s}
+  .welcome-dismiss:hover{opacity:1}
+  .welcome-dismiss:active{opacity:0.6}
   /* وسم الإصدار + المؤلّف */
   .version-tag{font-size:.7rem;font-weight:400;opacity:.7;margin-inline-start:8px}
 </style>
@@ -86,9 +90,9 @@ window._sctToken = "{{ sct_token }}";
     </span>
   </div>
 
-  {% if not jobs and not active_job %}
-  <!-- بطاقة ترحيب لأوّل تشغيل (Phase E) — تظهر فقط عندما لا توجد مهام سابقة -->
-  <div class="welcome">
+  <!-- بطاقة ترحيب (Phase E) — تظهر على كل تشغيل، قابلة للرفع بزرّ X، تُذكّر بـ localStorage -->
+  <div class="welcome" id="welcomeBanner">
+    <button type="button" id="welcomeDismiss" class="welcome-dismiss" aria-label="Close" title="Close" data-i18n-title="welcome_dismiss_title" data-i18n-aria-label="welcome_dismiss_title">&times;</button>
     <h2 data-i18n="welcome_h">👋 مرحباً في SCT</h2>
     <ol>
       <li data-i18n="welcome_1">أدخل رابط موقعك في تبويب «الزحف».</li>
@@ -96,7 +100,6 @@ window._sctToken = "{{ sct_token }}";
       <li data-i18n="welcome_3">اضغط «▶️ ابدأ» — وراقب التقدّم لحظةً بلحظة.</li>
     </ol>
   </div>
-  {% endif %}
 
   <nav class="tabs" id="tabbar">
     <button type="button" class="tab active" data-tab="crawl" data-i18n="tab_crawl">🕷️ الزحف</button>
@@ -523,6 +526,30 @@ window._sctToken = "{{ sct_token }}";
 </main>
 
 <script>
+// Welcome banner: shows on every load unless dismissed via localStorage
+(function() {
+  var STORAGE_KEY = 'sct_welcome_dismissed';
+  function initWelcomeBanner() {
+    var banner = document.getElementById('welcomeBanner');
+    var dismissBtn = document.getElementById('welcomeDismiss');
+    if (!banner || !dismissBtn) return;
+    try {
+      if (localStorage.getItem(STORAGE_KEY) === '1') {
+        banner.style.display = 'none';
+      }
+    } catch (e) { /* localStorage may be blocked; show banner anyway */ }
+    dismissBtn.addEventListener('click', function() {
+      try { localStorage.setItem(STORAGE_KEY, '1'); } catch (e) {}
+      banner.style.display = 'none';
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initWelcomeBanner);
+  } else {
+    initWelcomeBanner();
+  }
+})();
+
 const T = (k, fb) => (window.sctT ? window.sctT(k, fb) : (fb || k));
 
 // --- التبويبات ---

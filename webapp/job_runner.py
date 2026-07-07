@@ -514,27 +514,46 @@ class JobRunner:
 
         v1.13.15: تحوّل من blocking إلى async + grace رُفع من 8 إلى 60 ثانية
         ليُتاح للـsubprocess إكمال crawl + analysis + export الجزئيّ.
-        الـHTTP request يعود في <100ms — الواجهة تستطلع حتى الحالة النهائية."""
+        الـHTTP request يعود في <100ms — الواجهة تستطلع حتى الحالة النهائية.
+
+        v1.13.21 (Fix 1 — race condition): send_signal() الآن داخل الـlock نفسه
+        الذي يحمي lookup الـproc. سابقاً كان الـlock يُحرَّر بعد lookup ثمّ يُرسَل
+        الإشارة خارجه — _watch كان يستطيع سحب الـproc من _procs بين الخطوتين،
+        فتُرسَل الإشارة إلى proc منتهٍ (أو تفشل بصمت). النتيجة: UI يرى "stopped"
+        بينما العمليّة ما زالت حيّة. الآن lookup + write meta + send_signal
+        كلّها ذرّيّة."""
         if not _valid_job_id(job_id):
             return False
         with self._lock:
             proc = self._procs.get(job_id)
-        if not proc:
-            return False
-        # B1: اكتب stopped قبل الإشارة — يلغي race مع _watch تماماً.
-        try:
-            meta = self._read_meta(JOBS_DIR / job_id)
-            meta["status"] = "stopped"
-            self._write_meta(JOBS_DIR / job_id, meta)
-        except OSError:
-            log.exception("stop(%s): pre-signal meta write failed", job_id)
-        try:
-            if os.name == "nt":
-                proc.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                proc.send_signal(signal.SIGINT)
-        except (ProcessLookupError, OSError):
-            return False
+            if not proc:
+                # v1.13.21 (Defensive 1): لا توجد عمليّة في السجلّ. هذا طبيعيّ إن
+                # كانت العمليّة انتهت للتوّ، لكنّه قد يكشف عن orphan (subprocess
+                # ما زال يعمل والـwatch أزاله بلا إنهاء). لا يمكننا إرسال إشارة
+                # بلا مقبض، لكن نسجّل بوضوح كي يظهر في اللوغ إن حصلت الحالة.
+                log.warning("stop(%s): proc not in registry — either already "
+                            "finished or orphaned", job_id)
+                return False
+            # B1: اكتب stopped قبل الإشارة — يلغي race مع _watch تماماً.
+            try:
+                meta = self._read_meta(JOBS_DIR / job_id)
+                meta["status"] = "stopped"
+                self._write_meta(JOBS_DIR / job_id, meta)
+            except OSError:
+                log.exception("stop(%s): pre-signal meta write failed", job_id)
+            # v1.13.21 (Fix 1): send_signal داخل الـlock — يضمن أنّ الـproc ما زال
+            # في _procs ولم يُزَل من _watch بين lookup والإرسال.
+            try:
+                if os.name == "nt":
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    proc.send_signal(signal.SIGINT)
+            except (ProcessLookupError, OSError) as e:
+                # meta.status="stopped" مكتوبة بالفعل، فنُبقي النتيجة True كي
+                # لا يعتبر الـUI أنّ الإيقاف فشل. الـescalation ستُنهي العمليّة
+                # عبر terminate/kill إن كانت ما زالت حيّة.
+                log.warning("stop(%s): send_signal failed: %s — proceeding to "
+                            "escalation", job_id, e)
         # spawn background watcher للتصعيد إن لزم — لا نحجز الـrequest.
         threading.Thread(
             target=self._escalate_after_grace,
@@ -561,24 +580,30 @@ class JobRunner:
                     pass
 
     def force_kill(self, job_id: str) -> bool:
-        """قتل فوري بلا مهلة (للحلقات الطويلة العالقة في طرف ثالث مثل PageSpeed)."""
+        """قتل فوري بلا مهلة (للحلقات الطويلة العالقة في طرف ثالث مثل PageSpeed).
+
+        v1.13.21 (Fix 2): lookup + write meta + kill داخل نفس الـlock — نفس
+        نمط stop() لإلغاء race مع _watch الذي قد يسحب الـproc بين lookup و kill.
+        """
         if not _valid_job_id(job_id):
             return False
         with self._lock:
             proc = self._procs.get(job_id)
-        if not proc:
-            return False
-        # v1.13.15 (B1): نفس النمط — اكتب stopped قبل القتل لتجنّب race مع _watch.
-        try:
-            meta = self._read_meta(JOBS_DIR / job_id)
-            meta["status"] = "stopped"
-            self._write_meta(JOBS_DIR / job_id, meta)
-        except OSError:
-            log.exception("force_kill(%s): pre-kill meta write failed", job_id)
-        try:
-            proc.kill()
-        except OSError:
-            pass
+            if not proc:
+                log.warning("force_kill(%s): proc not in registry — either "
+                            "already finished or orphaned", job_id)
+                return False
+            # اكتب stopped قبل القتل لتجنّب race مع _watch.
+            try:
+                meta = self._read_meta(JOBS_DIR / job_id)
+                meta["status"] = "stopped"
+                self._write_meta(JOBS_DIR / job_id, meta)
+            except OSError:
+                log.exception("force_kill(%s): pre-kill meta write failed", job_id)
+            try:
+                proc.kill()
+            except OSError as e:
+                log.warning("force_kill(%s): proc.kill failed: %s", job_id, e)
         return True
 
     # ------------------------------------------------------------------

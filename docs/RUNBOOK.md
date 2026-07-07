@@ -12,6 +12,10 @@
 
 ---
 
+> **v1.13.21 update:** added §9 covering Storage Sense / antivirus /
+> OneDrive-caused job-folder disappearance. Also documents that the
+> tool itself has zero auto-deletion code.
+
 ## Table of contents
 
 1. [Google OAuth `invalid_grant` (7-day Testing-mode expiry)](#1-google-oauth-invalid_grant-7-day-testing-mode-expiry)
@@ -760,6 +764,84 @@ HSTS / referrer policy to the FastAPI middleware is straightforward but
 must be done carefully so the existing inlined `<script>` blocks
 continue to load. It has been considered as a backlog item but is not
 shipped as of v1.13.
+
+---
+
+## 9. Job folders keep disappearing from `webapp_jobs/`
+
+### Symptom
+The "Recent Jobs" panel on the home page shows fewer jobs than the
+user remembers running, or is empty. Direct inspection of
+`webapp_jobs/` confirms the folders are gone — but the user did NOT
+click "🧹 حذف الكل" or any individual delete button.
+
+### The tool has no automatic deletion
+`grep -rn 'rmtree\|unlink' webapp/ seo_crawler/seo_crawler/ --include="*.py"`
+reveals only three code paths that can remove anything under
+`webapp_jobs/*`:
+
+1. `webapp/job_runner.py::delete_job()` — reachable only via
+   `DELETE /api/jobs/{job_id}` (the per-row 🗑️ button).
+2. `webapp/job_runner.py::delete_all_jobs()` — reachable only via the
+   "🧹 حذف الكل (عدا النشطة)" button.
+3. `webapp/routers/downloads.py` — deletes ZIP temporaries in the
+   OS temp dir, never job folders.
+
+There is no scheduler, no TTL, no background sweeper. The tool
+never deletes user data on its own.
+
+### Root cause on Windows: Storage Sense
+Windows 10/11 has a background feature called **Storage Sense** that
+periodically deletes files it decides are "temporary." Its heuristic
+often flags:
+
+- Files under `%TEMP%` older than N days
+- **Files inside folders named `temp`, `tmp`, `cache`, or `logs`**
+- Contents of the Recycle Bin
+- Files not accessed in 30/60/90 days
+
+If SCT is installed under a path Storage Sense monitors (some Windows
+setups include the whole user profile), it can delete job folders
+overnight. Antivirus real-time protection and OneDrive Files On-Demand
+sync can produce similar symptoms.
+
+### How to confirm and stop it
+
+**Check Storage Sense:**
+```powershell
+# Is Storage Sense enabled?
+Get-ItemProperty 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy' -ErrorAction SilentlyContinue | Select 01,04,08,32,2048
+
+# 01 = master toggle (1 = enabled)
+# 04 = temp files cleanup (1 = enabled)
+# 08 = downloads cleanup
+# 2048 = OneDrive dehydration
+```
+
+**Disable it (safest for SCT):**
+1. Open **Settings → System → Storage → Storage Sense**
+2. Turn the master toggle **OFF**, OR
+3. Keep it on but click "Storage Sense" → set "Delete temporary files
+   that my apps aren't using" to **Never**, and add
+   `D:\path\to\SCT\webapp_jobs\` to the exclusion list (Windows 11)
+
+**Add an antivirus exclusion:**
+1. **Windows Security → Virus & threat protection → Manage settings →
+   Add or remove exclusions → Add a folder** → select
+   `D:\...\Simple_Crawler_Tool_SCT\webapp_jobs\`
+
+**Check for OneDrive / Dropbox:**
+```powershell
+# Is the SCT folder under OneDrive?
+$env:OneDrive; (Get-Item .).FullName
+```
+If yes, either move SCT out of OneDrive or right-click the folder →
+"Always keep on this device".
+
+### Prevention going forward
+The safest install location on Windows is a folder NOT under
+`%USERPROFILE%` and NOT under any sync tool: e.g., `D:\SCT\` or
+`C:\Tools\SCT\` directly.
 
 ---
 
