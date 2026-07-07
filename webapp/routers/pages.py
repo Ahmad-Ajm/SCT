@@ -16,7 +16,7 @@ webapp/routers/pages.py — صفحات HTML (Jinja2 templates).
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from webapp.constants import (
     EXTRACTION_GROUPS,
@@ -39,6 +39,15 @@ async def index(request: Request):
                  "sections": SECTIONS, "severities": SEVERITIES,
                  "active_job": runner.active_job()}),
     )
+
+
+# v1.13.19: /jobs و /jobs/ كانا يُعيدان 404 (لا يوجد route). المستخدم قد يكتب
+# الرابط بغير job_id بحثاً عن قائمة، أو يقصّ آخر جزء من URL. نُحوّله للصفحة
+# الرئيسيّة التي تحوي "المهام الأخيرة" فعلياً.
+@router.get("/jobs", include_in_schema=False)
+@router.get("/jobs/", include_in_schema=False)
+async def jobs_redirect():
+    return RedirectResponse(url="/", status_code=302)
 
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
