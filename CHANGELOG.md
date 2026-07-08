@@ -4,6 +4,39 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.24 (2026-07-08 pre-publish cleanup — README, English config, doc parity)
+
+Publication-readiness pass before the first public release.
+
+- **README rewrite (EN + AR).** The old READMEs predated a dozen
+  features. Both are rewritten to cover all shipped functionality
+  (JS rendering, accessibility/axe-core audit, the WordPress preset,
+  Priority Engine v2, Action Board, link-graph view, on-demand report
+  generation, two-phase crawl, all integrations) with quick-start,
+  presets, integrations, output formats, docs table, and requirements.
+- **English-only config + launchers.** `config.example.yaml`,
+  `START.ps1`, `START.bat`, `STOP.bat`, `.env.example` had Arabic
+  comments; translated to English (values / logic byte-for-byte
+  identical — YAML key set verified unchanged at 153 keys).
+- **Removed internal artifacts:** `docs/INSPECTION-PLAN.md` (internal
+  audit plan) and `tools/split_tests.py` (spent migration script).
+- **.gitignore hardening:** `*_token.json`, `client_secret*.json`,
+  `gsc_token.json`, `ga4_token.json`.
+- **Doc parity:** `RUNBOOK_AR.md` §9 (Storage Sense) ported from EN;
+  runbook scenario count fixed 8→9 in USER_GUIDE (EN + AR).
+- **Commit-message author-credit scrub:** all third-party
+  co-authorship trailers removed from every commit via a history
+  rewrite; author is `Ahmad-Ajm` throughout.
+
+Docker kept intentionally (solves the Chromium/Playwright dependency).
+98/98 tests.
+
+Known follow-ups (not blockers): add dedicated CrUX + AI-advisor
+sections to EXTERNAL_TOOLS_GUIDE (EN + AR); the ~19 medium/low logic
+findings from the deep inspection; optional screenshots in the README.
+
+---
+
 ## v1.13.23 (2026-07-08 deep-logic-inspection fixes — 5 high + 3 medium)
 
 A deep LOGIC inspection (8 parallel agents tracing actual algorithm/
