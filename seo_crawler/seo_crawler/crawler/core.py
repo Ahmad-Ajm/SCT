@@ -17,7 +17,7 @@ import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urljoin
 
@@ -272,6 +272,11 @@ class Crawler:
         self.visited: set[str] = set()
         self.queue: deque[tuple[str, int]] = deque()  # (url, depth)
         self.queued_urls: set[str] = set()  # للتحقق السريع من الوجود في queue
+        # v1.13.26 (L4-BUG-3): بذور sitemap مؤجَّلة — لا تُحقَن في الطابور الرئيسيّ
+        # عند depth=0 (كان يُفسد تحليل عمق النقرات إذ يبدو كلّ شيء بعمق 0). بدلاً
+        # من ذلك تُسحب فقط بعد نضوب اكتشاف BFS كي تأخذ الصفحات عمقها الحقيقيّ من
+        # الروابط الداخليّة (نفس تصميم async_core الذي لا يعاني هذا الخلل).
+        self._sitemap_seeds: list[str] = []
 
         # === Results storage ===
         self.pages: list[PageData] = []
@@ -477,16 +482,37 @@ class Crawler:
             for entry in entries:
                 normalized = normalize_url(entry.url)
                 self.sitemap_urls_seen.append(normalized)
+                # v1.13.26 (L4-BUG-3): نؤجّل البذور في قائمة منفصلة ولا نضيفها إلى
+                # queued_urls — كي يستطيع اكتشاف الروابط الداخليّة (BFS) إدراجها
+                # بعمقها الحقيقيّ. تُسحب لاحقاً في _crawl_loop بعد نضوب الطابور فقط
+                # لما تبقّى «يتيماً» (غير مكتشَف عبر الروابط).
                 if (
                     normalized not in self.visited
-                    and normalized not in self.queued_urls
                     and not self._should_skip_url(normalized)
                 ):
-                    self.queue.append((normalized, 0))
-                    self.queued_urls.add(normalized)
+                    self._sitemap_seeds.append(normalized)
                     total_added += 1
 
-        log.info(f"تمت إضافة {total_added} URL من Sitemaps")
+        log.info(f"تمّت جدولة {total_added} بذرة sitemap مؤجَّلة")
+
+    def _refill_from_sitemap_seeds(self) -> int:
+        """v1.13.26 (L4-BUG-3): سحب بذور sitemap المؤجَّلة إلى الطابور بعد نضوب
+        اكتشاف BFS. تُدرَج بعمق 0 (صفحات «يتيمة» لم تُكتشَف عبر الروابط الداخليّة —
+        نفس سلوك async_core._refill_from_sitemap). البذور المزحوفة أو المطابِقة
+        لأنماط التخطّي تُتجاوز."""
+        added = 0
+        while self._sitemap_seeds:
+            url = self._sitemap_seeds.pop()  # O(1) من النهاية — الترتيب غير مهمّ لليتامى
+            if (
+                url in self.visited
+                or url in self.queued_urls
+                or self._should_skip_url(url)
+            ):
+                continue
+            self.queue.append((url, 0))
+            self.queued_urls.add(url)
+            added += 1
+        return added
 
     def _start_js_renderer(self) -> None:
         """بدء JS Renderer إذا كان مفعّلاً."""
@@ -528,7 +554,14 @@ class Crawler:
         )
 
         try:
-            while self.queue and not self._stop_requested:
+            while not self._stop_requested:
+                # v1.13.26 (L4-BUG-3): إن نضب الطابور فقد انتهى اكتشاف BFS —
+                # نسحب عندئذٍ بذور sitemap المتبقّية (الصفحات اليتيمة). إن لم
+                # يتبقَّ شيء فقد انتهى الزحف.
+                if not self.queue:
+                    if not self._refill_from_sitemap_seeds():
+                        break
+
                 # التحقق من حد الصفحات
                 if max_pages > 0 and self.stats.pages_crawled >= max_pages:
                     log.info(f"تم بلوغ الحد الأقصى ({max_pages} صفحة)")
@@ -680,7 +713,7 @@ class Crawler:
             response_time_ms=response.elapsed_ms,
             encoding=response.encoding,
             depth=depth,
-            crawled_at=datetime.now().isoformat(),
+            crawled_at=datetime.now(timezone.utc).isoformat(),  # v1.13.26 (L4-BUG-5): UTC واعٍ بالمنطقة
             redirect_chain=response.redirect_chain,
             is_redirect=bool(response.redirect_chain),
         )
@@ -906,7 +939,7 @@ class Crawler:
             url=url,
             status_code=response.status_code,
             depth=depth,
-            crawled_at=datetime.now().isoformat(),
+            crawled_at=datetime.now(timezone.utc).isoformat(),  # v1.13.26 (L4-BUG-5): UTC واعٍ بالمنطقة
             crawl_error=response.error,
             is_indexable=False,
             indexability_reason=response.error or f"Status {response.status_code}",
@@ -925,7 +958,7 @@ class Crawler:
             size_bytes=response.size_bytes,
             response_time_ms=response.elapsed_ms,
             depth=depth,
-            crawled_at=datetime.now().isoformat(),
+            crawled_at=datetime.now(timezone.utc).isoformat(),  # v1.13.26 (L4-BUG-5): UTC واعٍ بالمنطقة
             is_indexable=False,
             indexability_reason=f"Non-HTML: {response.content_type}",
         )

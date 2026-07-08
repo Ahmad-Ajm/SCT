@@ -69,12 +69,16 @@ def compute_opportunities(
         if impact == 0:
             impact = math.log1p(r.get("internal_links_count", 0)) * 0.3
         score = round(impact * severity, 3)
+        # v1.13.26 (L5-OPP-2): top_fix للمشكلة الأشدّ لا لأول مشكلة بترتيب
+        # الإضافة (issues[0]) — نطابق منطق priority_engine في اختيار المشكلة
+        # الأساسية عبر أوزان _SEVERITY.
+        primary = max(issues, key=lambda i: _SEVERITY.get(i, 1.0))
         scored.append({
             "url": r.get("url"),
             "priority_score": score,
             "tech_issue_count": len(issues),
             "technical_issues": ", ".join(issues),
-            "top_fix": _RECO.get(issues[0], ""),
+            "top_fix": _RECO.get(primary, ""),
             "clicks": r.get("clicks", 0),
             "impressions": r.get("impressions", 0),
             "ctr": r.get("ctr", 0),

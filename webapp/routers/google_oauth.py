@@ -154,12 +154,19 @@ async def google_status():
     expired = False
     if gsc.exists() or ga4.exists():
         try:
-            checks = await asyncio.gather(
-                loop.run_in_executor(None, _probe_token_expired, gsc),
-                loop.run_in_executor(None, _probe_token_expired, ga4),
+            # v1.13.26 (L2-BUG-2): creds.refresh(Request()) داخل _probe_token_expired
+            # نداء شبكة محجوب قد يعلّق الـendpoint للأبد. نلفّ الفحوص بمهلة قصوى
+            # (8ث، مطابقة لـ_run_conn_test في deps.py)؛ عند انتهائها نُرجع حالة آمنة
+            # (expired=False = «تعذّر التحقّق») بدل تعليق الطلب.
+            checks = await asyncio.wait_for(
+                asyncio.gather(
+                    loop.run_in_executor(None, _probe_token_expired, gsc),
+                    loop.run_in_executor(None, _probe_token_expired, ga4),
+                ),
+                timeout=8.0,
             )
             expired = any(checks)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  (يشمل asyncio.TimeoutError)
             expired = False
     return JSONResponse({
         "client_secret": str(cs) if cs.exists() else None,

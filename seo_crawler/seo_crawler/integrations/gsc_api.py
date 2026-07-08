@@ -107,14 +107,18 @@ class GSCClient:
             log.error(f"فشل المصادقة مع GSC: {e}")
             return False
 
+    # v1.13.26 (L6-BUG-3): سقف افتراضي مرتفع بدل 10000 كي لا تُقتطع الخصائص الكبيرة
+    # صمتاً. الـ _query يُقسّم الطلب على صفحات startRow (25000/طلب) حتى بلوغ هذا السقف.
+    DEFAULT_ROW_LIMIT = 50000
+
     def get_top_pages(
-        self, limit: int = 10000, months_back: Optional[int] = None
+        self, limit: int = DEFAULT_ROW_LIMIT, months_back: Optional[int] = None
     ) -> list[dict[str, Any]]:
         """
         جلب أعلى الصفحات في GSC.
 
         Args:
-            limit: عدد النتائج (max 25000)
+            limit: أقصى عدد صفوف إجمالي (يُقسَّم على صفحات 25000؛ الافتراضي 50000)
             months_back: عدد الأشهر (default: من config)
 
         Returns:
@@ -136,7 +140,7 @@ class GSCClient:
         )
 
     def get_top_queries(
-        self, limit: int = 10000, months_back: Optional[int] = None
+        self, limit: int = DEFAULT_ROW_LIMIT, months_back: Optional[int] = None
     ) -> list[dict[str, Any]]:
         """جلب أعلى الكلمات المفتاحية."""
         return self._query(
@@ -146,7 +150,7 @@ class GSCClient:
         )
 
     def get_pages_with_queries(
-        self, limit: int = 10000, months_back: Optional[int] = None
+        self, limit: int = DEFAULT_ROW_LIMIT, months_back: Optional[int] = None
     ) -> list[dict[str, Any]]:
         """جلب صفحات مع الكلمات المرتبطة بها."""
         return self._query(
@@ -173,11 +177,14 @@ class GSCClient:
             start_row = 0
 
             while True:
+                # v1.13.26 (L6-BUG-3): حجم الصفحة الفعلي = الأصغر بين حدّ GSC والمتبقّي
+                # من السقف؛ نستعمله أيضاً لكشف نهاية البيانات (صفحة أقصر منه = النهاية).
+                page_size = max(1, min(row_limit, limit - len(results)))
                 request_body = {
                     "startDate": start_date.isoformat(),
                     "endDate": end_date.isoformat(),
                     "dimensions": dimensions,
-                    "rowLimit": max(1, min(row_limit, limit - len(results))),
+                    "rowLimit": page_size,
                     "startRow": start_row,
                 }
 
@@ -201,11 +208,18 @@ class GSCClient:
                     entry["position"] = round(row.get("position", 0), 2)
                     results.append(entry)
 
-                # هل نحتاج المزيد؟
-                if len(rows) < row_limit or len(results) >= limit:
+                # v1.13.26 (L6-BUG-3): صفحة أقصر من المطلوب = نفدت بيانات GSC.
+                if len(rows) < page_size:
+                    break
+                # بلغنا السقف لكن الصفحة كانت ممتلئة → يُحتمَل وجود صفوف مقتطعة.
+                if len(results) >= limit:
+                    log.warning(
+                        f"GSC: بلغنا سقف {limit} صف للأبعاد {dimensions} — "
+                        f"قد تكون هناك صفوف إضافية مقتطعة (ارفع limit عند الحاجة)"
+                    )
                     break
 
-                start_row += row_limit
+                start_row += len(rows)
 
             log.info(
                 f"GSC: تم جلب {len(results)} صف للأبعاد {dimensions}"

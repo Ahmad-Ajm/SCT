@@ -91,15 +91,34 @@ async def jobs_compare(job_id: str, with_: str = Query("", alias="with")):
     other = (with_ or "").strip()
     if not other:
         return JSONResponse({"error": "missing 'with' job id"}, status_code=400)
+    # v1.13.26 (L2-BUG-4): امنع مقارنة الجوب بنفسه — تُنتج دلتا صفريّة مضلّلة.
+    if other == job_id:
+        return JSONResponse({"error": "cannot compare a job with itself"}, status_code=400)
     meta_a = runner.meta(job_id)
     meta_b = runner.meta(other)
     if not meta_a or not meta_b:
         return JSONResponse({"error": "job not found"}, status_code=404)
+    # v1.13.26 (L2-BUG-4): امنع مقارنة نطاقين مختلفين — الدلتا بلا معنى عبر موقعين.
+    dom_a = urlparse(meta_a.get("url", "")).netloc
+    dom_b = urlparse(meta_b.get("url", "")).netloc
+    if dom_a and dom_b and dom_a != dom_b:
+        return JSONResponse(
+            {"error": f"domain mismatch: {dom_a} vs {dom_b} — compare crawls of the same site"},
+            status_code=400)
     path_a = (meta_a.get("result") or {}).get("json")
     path_b = (meta_b.get("result") or {}).get("json")
     if not path_a or not Path(path_a).exists() or not path_b or not Path(path_b).exists():
         return JSONResponse({"error": "audit json missing for one of the jobs"},
                             status_code=404)
+    # v1.13.26 (L2-BUG-4): رتّب الزحفتين زمنيّاً بـstarted_at كي يكون 'old' الأقدم
+    # و'new' الأحدث بصرف النظر عن ترتيب الوسائط. سابقاً كان job_id دائماً 'old'
+    # فتنعكس دلالة قديم/جديد إن مرّر المستخدم الأحدث كـjob_id.
+    ts_a = meta_a.get("started_at", "")
+    ts_b = meta_b.get("started_at", "")
+    if ts_a and ts_b and ts_a > ts_b:
+        meta_a, meta_b = meta_b, meta_a
+        path_a, path_b = path_b, path_a
+        job_id, other = other, job_id
     # حارس الحجم: لا نحمّل ملفات ضخمة
     for p in (path_a, path_b):
         size_mb = Path(p).stat().st_size / (1024 * 1024)
@@ -215,7 +234,13 @@ def _build_graph_payload(audit: dict[str, Any]) -> dict[str, Any]:
         d = p.get("depth") if isinstance(p, dict) else getattr(p, "depth", None)
         s = p.get("status_code") if isinstance(p, dict) else getattr(p, "status_code", None)
         if d is not None:
-            by_depth[int(d)] += 1
+            # v1.13.26 (L2-BUG-5): depth غير رقميّ (نصّ تالف مثلاً) كان يرفع
+            # ValueError من int() ويُسقط الـendpoint كلّه (500). نحرسه ونضعه في
+            # جرافة آمنة (-1) بدل تعطيل الرسم البياني بأكمله.
+            try:
+                by_depth[int(d)] += 1
+            except (TypeError, ValueError):
+                by_depth[-1] += 1
         if s is not None:
             by_status[str(s)] += 1
 
@@ -242,7 +267,14 @@ def _build_graph_payload(audit: dict[str, Any]) -> dict[str, Any]:
                     cur["status"] = status
         # ورقة: نضع الـURL الكامل عند نهاية المسار
         cur["url"] = url
-        cur["status"] = status
+        # v1.13.26 (L2-BUG-3): لا نطمس حالة الفرع المجمّعة بحالة الورقة إلّا إن
+        # كانت الورقة أسوأ. سابقاً `cur["status"] = status` غير المشروط كان يمحو
+        # حالة 4xx مجمّعة من طفل معطوب (مثلاً /a/b=200 يُعالَج بعد /a/b/c=404)
+        # فيُخفى الفرع الأحمر. نطبّق نفس حارس «الأسوأ» المستعمل في تجميع الفرع.
+        cur_st = cur["status"]
+        if not cur_st or (isinstance(status, int) and status >= 400 and
+                          (not isinstance(cur_st, int) or status > cur_st)):
+            cur["status"] = status
 
     def _to_array(node):
         children = node.pop("children", {}) or {}

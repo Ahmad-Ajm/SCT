@@ -4,6 +4,8 @@ analyzers/duplicate_detector.py
 كشف المحتوى/Title/Description المكرر.
 """
 
+import re
+import unicodedata
 from collections import defaultdict
 from typing import Any
 
@@ -15,6 +17,15 @@ def _get(item: Any, key: str, default: Any = None) -> Any:
     if isinstance(item, dict):
         return item.get(key, default)
     return getattr(item, key, default)
+
+
+def _dup_key(value: Any) -> str:
+    """v1.13.26 (L1-duplicate-whitespace): مفتاح تجميع موحّد حتى لا تُفلت العناوين
+    المتطابقة بصرياً: NFC (composed = decomposed) + دمج المسافات الداخلية (بما فيها
+    المسافة الصلبة nbsp) إلى مسافة واحدة، ثم lowercase."""
+    s = unicodedata.normalize("NFC", str(value))
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.lower()
 
 
 def detect_duplicates(pages: list[PageData]) -> dict[str, Any]:
@@ -55,13 +66,13 @@ def detect_duplicates(pages: list[PageData]) -> dict[str, Any]:
         content_hash = _get(page, "content_hash", "")
 
         if title:
-            title_groups[str(title).strip().lower()].append(url)
+            title_groups[_dup_key(title)].append(url)
         if meta_description:
-            desc_groups[str(meta_description).strip().lower()].append(url)
+            desc_groups[_dup_key(meta_description)].append(url)
         if h1_text:
             # نأخذ أول H1 فقط (h1_text قد يكون list أو string)
             first_h1 = h1_text[0] if isinstance(h1_text, list) else h1_text
-            h1_groups[str(first_h1).strip().lower()].append(url)
+            h1_groups[_dup_key(first_h1)].append(url)
         if content_hash:
             content_groups[content_hash].append(url)
 

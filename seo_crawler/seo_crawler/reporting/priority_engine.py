@@ -139,10 +139,18 @@ def ease_of_fix(issues: list[str], platform: str = "") -> tuple[str, str]:
     if not issues:
         return ("easy", "content")
     rank = {"easy": 0, "moderate": 1, "hard": 2}
+    # v1.13.26 (L5-PE-2): عند تساوي الصعوبة نكسر التعادل بسلطة المالك
+    # (developer > platform > content > seo) بدل «آخر مُضاف يفوز». سابقاً كان
+    # الشرط >= فتُوجَّه صفحة noindex (developer, moderate) إلى seo لمجرّد أنّ
+    # orphan (seo, moderate) أُضيف بعدها بنفس الصعوبة.
+    owner_authority = {"developer": 3, "platform": 2, "content": 1, "seo": 0}
     hardest = ("easy", "content")
     for issue in issues:
         diff, owner = _EASE.get(issue, ("moderate", "developer"))
-        if rank[diff] >= rank[hardest[0]]:
+        if rank[diff] > rank[hardest[0]] or (
+            rank[diff] == rank[hardest[0]]
+            and owner_authority.get(owner, 0) > owner_authority.get(hardest[1], 0)
+        ):
             hardest = (diff, owner)
     difficulty, owner = hardest
     platform = (platform or "").lower()

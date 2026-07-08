@@ -303,20 +303,23 @@ class PageSpeedClient:
             "fetch_time": data.get("analysisUTCTimestamp", ""),
         }
 
-        lighthouse = data.get("lighthouseResult", {})
-        categories = lighthouse.get("categories", {})
-        audits = lighthouse.get("audits", {})
+        # v1.13.26 (L6-BUG-5): احرس ضد null صريحة في الحقول المتداخلة (وليس فقط الغياب)؛
+        # `.get(k, {})` يُعيد None عندما يكون المفتاح موجوداً بقيمة null، فنستعمل `or {}`.
+        lighthouse = data.get("lighthouseResult") or {}
+        categories = lighthouse.get("categories") or {}
+        audits = lighthouse.get("audits") or {}
 
         # === Scores ===
         for cat_name in ["performance", "accessibility", "best-practices", "seo"]:
-            score = categories.get(cat_name, {}).get("score")
+            score = (categories.get(cat_name) or {}).get("score")
             result[f"{cat_name.replace('-', '_')}_score"] = (
                 round(score * 100) if score is not None else None
             )
 
         # === Core Web Vitals (Lab) ===
         def get_audit_value(audit_id: str, field: str = "numericValue") -> Any:
-            audit = audits.get(audit_id, {})
+            # v1.13.26 (L6-BUG-5): `or {}` يحمي من audit موجود بقيمة null
+            audit = audits.get(audit_id) or {}
             return audit.get(field)
 
         result["lcp_lab_ms"] = get_audit_value("largest-contentful-paint")
@@ -328,10 +331,11 @@ class PageSpeedClient:
 
         # === Core Web Vitals (Field - من CrUX) ===
         # هذه البيانات الحقيقية من المستخدمين
-        loading_experience = data.get("loadingExperience", {}).get("metrics", {})
+        # v1.13.26 (L6-BUG-5): loadingExperience/metrics قد تكونان null صريحة
+        loading_experience = (data.get("loadingExperience") or {}).get("metrics") or {}
 
         def get_field_value(metric: str) -> dict[str, Any]:
-            m = loading_experience.get(metric, {})
+            m = loading_experience.get(metric) or {}
             return {
                 "percentile": m.get("percentile"),
                 "category": m.get("category"),  # FAST, AVERAGE, SLOW
@@ -344,24 +348,32 @@ class PageSpeedClient:
         result["ttfb_field"] = get_field_value("EXPERIMENTAL_TIME_TO_FIRST_BYTE")
 
         # === Overall CrUX assessment ===
-        overall = data.get("loadingExperience", {}).get("overall_category", "")
+        # v1.13.26 (L6-BUG-5): احرس من loadingExperience=null قبل .get
+        overall = (data.get("loadingExperience") or {}).get("overall_category", "")
         result["crux_overall"] = overall
 
         # === Opportunities (أهم 10) ===
         opportunities = []
         for audit_id, audit in audits.items():
-            if audit.get("details", {}).get("type") == "opportunity":
-                savings = audit.get("details", {}).get("overallSavingsMs", 0)
+            # v1.13.26 (L6-BUG-5): audit أو details قد تكون null صريحة — `.get('details', {})`
+            # يُعيد None في هذه الحالة فيرمي None.get('type'). نحرس بـ isinstance قبل السلسلة.
+            if not isinstance(audit, dict):
+                continue
+            details = audit.get("details")
+            if not isinstance(details, dict):
+                continue
+            if details.get("type") == "opportunity":
+                # v1.13.26 (L6-BUG-5 follow-up): overallSavingsMs قد تكون null
+                # صراحةً في الاستجابة — get(..,0) يُعيد None فيرمي 'None > 0'.
+                savings = details.get("overallSavingsMs") or 0
                 if savings > 0:
                     opportunities.append(
                         {
                             "id": audit_id,
                             "title": audit.get("title", ""),
-                            "description": audit.get("description", "")[:200],
+                            "description": (audit.get("description") or "")[:200],
                             "savings_ms": savings,
-                            "savings_bytes": audit.get("details", {}).get(
-                                "overallSavingsBytes", 0
-                            ),
+                            "savings_bytes": details.get("overallSavingsBytes", 0),
                         }
                     )
 

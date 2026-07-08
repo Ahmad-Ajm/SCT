@@ -27,14 +27,38 @@ router = APIRouter()
 # سقف رفع ملف اللوغ (يُقرأ كاملاً للذاكرة بعد الـupload — الـstreaming بداخل التحليل)
 _MAX_LOG_UPLOAD_MB = 500
 
+# v1.13.26 (L7-BUG-1): حجم الدفعة لقراءة الرفع على أجزاء محدودة.
+_LOG_READ_CHUNK = 8 * 1024 * 1024  # 8MB
+
+
+async def _read_capped(file: UploadFile, cap_bytes: int) -> bytes | None:
+    """v1.13.26 (L7-BUG-1): يقرأ الملف المرفوع على دفعات ويُجهض فور تجاوز السقف.
+
+    سابقاً كان الكود يفعل `raw = await file.read()` (يبتلع الجسم كاملاً للذاكرة)
+    ثم `.decode()` (~2x) و`.splitlines()` (~3x) قبل فحص len(raw)>الحدّ — فرفع 2GB
+    يُسقط الخادم بـOOM قبل أن يعمل السقف. الآن نراكم حتى الحدّ فقط ونُجهض بلا فكّ
+    ترميز. يُرجع None إذا تجاوز الحجم الحدّ (يُترجَم لـ413 عند المتّصل)."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_LOG_READ_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > cap_bytes:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 @router.post("/api/logs/analyze")
 async def logs_analyze(file: UploadFile = File(...), bot_only: int = 1):
     """يستقبل ملف log (CLF/Combined) ويُرجع ملخّص زحف البوتات + قائمة per-URL."""
-    # نقرأ كاملاً (FastAPI/Starlette لا يدعم streaming قراءة سهلاً من UploadFile)؛
-    # نطبّق سقف الحجم حتى لا تستنزف الذاكرة على ملفات هائلة.
-    raw = await file.read()
-    if len(raw) > _MAX_LOG_UPLOAD_MB * 1024 * 1024:
+    # v1.13.26 (L7-BUG-1): قراءة على دفعات محدودة مع إجهاض مبكّر — نطبّق سقف الحجم
+    # قبل أن يبتلع الجسم كاملاً الذاكرة (كان raw=await file.read() ثم decode/splitlines
+    # قبل الفحص يُسقط الخادم بـOOM على ملف 2GB).
+    raw = await _read_capped(file, _MAX_LOG_UPLOAD_MB * 1024 * 1024)
+    if raw is None:
         return JSONResponse(
             {"error": f"الملف أكبر من الحدّ ({_MAX_LOG_UPLOAD_MB}MB) — قسّمه أو رفع الحدّ."},
             status_code=413,
@@ -74,8 +98,9 @@ async def jobs_log_board(job_id: str, file: UploadFile = File(...), bot_only: in
                      f"with output.json_full=false to keep it light",
         }, status_code=413)
 
-    raw = await file.read()
-    if len(raw) > _MAX_LOG_UPLOAD_MB * 1024 * 1024:
+    # v1.13.26 (L7-BUG-1): قراءة على دفعات محدودة مع إجهاض مبكّر (كما /logs/analyze).
+    raw = await _read_capped(file, _MAX_LOG_UPLOAD_MB * 1024 * 1024)
+    if raw is None:
         return JSONResponse(
             {"error": f"الملف أكبر من الحدّ ({_MAX_LOG_UPLOAD_MB}MB)"},
             status_code=413,

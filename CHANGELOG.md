@@ -4,6 +4,85 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.26 (2026-07-08 deep-logic-inspection round 2 — 24 fixes across 15 files)
+
+The remaining logic findings from the deep inspection, applied via
+6 file-partitioned agents (no two touching the same file) + adversarial
+verification. 24 real fixes landed; 6 reported items were false
+positives (the code was already correct) and skipped. Zero regressions,
+zero out-of-scope edits. 98/98 tests.
+
+Analyzers:
+- **hreflang script/region subtags** — `HREFLANG_PATTERN` now accepts a
+  4-letter Title-case script (`zh-Hant`, `zh-Hant-HK`) and 3-digit
+  UN M.49 region (`es-419`, `en-001`); `_normalize_hreflang` normalizes
+  per-subtag (lang lowercase, script Title-case, region uppercase) so
+  valid tags are no longer flagged as critical invalid-format.
+- **hreflang reciprocity** — a crawled target that emits zero hreflang
+  back-links is now reported as non-reciprocal (was silently skipped —
+  the most common failure mode).
+- **duplicate detection** — grouping key now NFC-normalizes + collapses
+  internal whitespace before lowercasing, so titles differing only by
+  double-space / nbsp / composed-vs-decomposed Unicode group together.
+- **orphan self-link** — `from_url` is normalized before the self-link
+  comparison (was normalized-vs-raw, failing to exclude self-links).
+- **log analyzer** — wasted-crawl-budget trigger now includes
+  `4xx_other` (matched the displayed count); Google-budget board counts
+  only the Googlebot bucket (was summing all bots); Googlebot-detection
+  docstring softened to say it's a spoofable UA heuristic.
+
+Reporting:
+- **priority owner tie-break** — equal-difficulty issues now break ties
+  by owner authority (developer > platform > content > seo) instead of
+  append order, so a noindex page routes to 'developer' not 'seo'.
+- **opportunities top_fix** — picks the most-severe issue, not `issues[0]`.
+- **report filename collision** — HTML/PDF regeneration now uses a
+  format-tagged stem so concurrent generation can't overwrite.
+
+Integrations:
+- **GSC pagination** — `get_top_pages/queries` now paginate via
+  `startRow` up to a 50000 safety cap instead of silently truncating at
+  10000; logs when truncation actually happens.
+- **PageSpeed null-guard** — `_extract_metrics` guards `details is dict`
+  and `overallSavingsMs or 0` so a null field no longer crashes the URL.
+
+Webapp:
+- **compare guards** — rejects self-compare and cross-domain compare;
+  orders the two jobs by `started_at` so old/new is correct regardless
+  of argument order.
+- **graph robustness** — branch status no longer clobbered by a leaf
+  (broken subtrees stay flagged); non-numeric depth can't 500 the endpoint.
+- **log-upload cap** — checks Content-Length / bounded read so a huge
+  upload 413s instead of OOMing after a full read into RAM.
+- **/api/google/status** — token-refresh probes wrapped in
+  `asyncio.wait_for` so a stalled refresh can't hang the endpoint.
+- **TOCTOU on /api/start** — authoritative single-active-job guard now
+  inside `runner.start()` under the lock (raises `ActiveJobError` → 409).
+- **restart reconciliation** — on startup, any `running` job with no
+  live process is marked `failed`/`interrupted` (was stuck 'running'
+  forever after a webapp restart).
+- **`_watch` under lock** — the terminal-status write is lock-guarded so
+  it can't clobber a concurrent `stopped`.
+- **CSV-only result** — a job that produced only CSVs now gets a
+  `kind` + discoverable result (was hidden from the UI).
+- **`_STARTING` sentinel** — the phase-2 placeholder is a distinct
+  sentinel so `_sweep_finished` doesn't reap a still-spawning job.
+
+Crawler:
+- **worker busy-counter race** — the busy count is now incremented
+  atomically with the dequeue so an idle check can't false-positive and
+  end the crawl early.
+- **max_pages exactness** — a claimed-slot counter makes `max_pages`
+  exact instead of overshooting by up to concurrency-1.
+- **UTC timestamps** — `crawled_at` / `checked_at` now use
+  `datetime.now(timezone.utc)` (were naive local time).
+
+Skipped as false positives (code already correct): orphan status
+coercion, GSC→crawl join key, generate.py CSV BOM, jobs.py deferred BOM,
+async_core sitemap depth, TOCTOU (already guarded).
+
+---
+
 ## v1.13.25 (2026-07-08 live-activity line + fix the "frozen" resource-status phase)
 
 The job page could look hung for long stretches even while working hard.

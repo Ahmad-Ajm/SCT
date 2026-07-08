@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urljoin
 
@@ -164,6 +164,11 @@ class AsyncCrawler:
         # عدّاد Workers المشغولة فعلياً بمعالجة صفحة (للكشف الصحيح عن الانتهاء)
         self._busy_workers: int = 0
         self._busy_lock: asyncio.Lock = asyncio.Lock()
+
+        # v1.13.26 (L8-SOFTCAP-05): عدّاد فتحات محجوزة لجعل max_pages دقيقاً —
+        # يُزاد ذرّياً قبل جلب كل صفحة ويُقارن بـ max_pages بدل فحص pages_crawled
+        # بعد الجلب (الذي كان يسمح بتجاوز يصل concurrency-1 صفحة).
+        self._pages_claimed: int = 0
 
         # تتبّع عمق كل URL في الطابور (لاستئناف صحيح + snapshot)
         self._url_depth: dict[str, int] = {}
@@ -692,6 +697,11 @@ class AsyncCrawler:
                 # جلب URL من القائمة (مع timeout للكشف عن الانتهاء)
                 try:
                     url, depth = await asyncio.wait_for(self.queue.get(), timeout=0.5)
+                    # v1.13.26 (L8-RACE-01): نُعلّم أنفسنا مشغولين فوراً بعد السحب من
+                    # الطابور وقبل أيّ await — وإلّا يرى worker آخر (busy==0 && empty)
+                    # في الفجوة فيُعلن انتهاء الزحف مُسقطاً عنصراً مسحوباً لكن غير
+                    # محسوب بعد. (asyncio أُحاديّ الخيط: زيادة int بلا await ذرّيّة.)
+                    self._busy_workers += 1
                 except asyncio.TimeoutError:
                     # نضب الطابور: إن لم يكن أحد مشغولاً والطابور فارغ، فقد انتهى
                     # الزحف بالروابط (BFS). عندها نسحب دفعة من بذور sitemap.
@@ -708,8 +718,7 @@ class AsyncCrawler:
                     break
 
                 # من هنا حصلنا على عنصر: نضمن task_done() مرة واحدة بالضبط
-                async with self._busy_lock:
-                    self._busy_workers += 1
+                # (عدّاد busy زِيدَ أعلاه ذرّياً مع السحب — إصلاح L8-RACE-01).
                 try:
                     self.queued_urls.discard(url)
                     self._url_depth.pop(url, None)
@@ -749,6 +758,16 @@ class AsyncCrawler:
                         continue
 
                     # === زحف الصفحة ===
+                    # v1.13.26 (L8-SOFTCAP-05): نحجز فتحة max_pages ذرّياً قبل الجلب
+                    # عبر عدّاد claimed تحت القفل — بدل فحص pages_crawled بعد الجلب
+                    # الذي كان يسمح بتجاوز يصل concurrency-1 صفحة (السلوك السابق).
+                    if max_pages > 0:
+                        async with self._busy_lock:
+                            if self._pages_claimed >= max_pages:
+                                self._reached_max_pages = True
+                                self._stop_requested = True
+                                continue
+                            self._pages_claimed += 1
                     # v1.13.25: نسجّل الرابط الحاليّ (O(1)، بلا I/O) قبل الجلب
                     # كي يظهر في سطر النشاط الحيّ بالواجهة.
                     self._current_url = url
@@ -1147,7 +1166,7 @@ class AsyncCrawler:
                 size_bytes=size_bytes,
                 response_time_ms=elapsed_ms,
                 depth=depth,
-                crawled_at=datetime.now().isoformat(),
+                crawled_at=datetime.now(timezone.utc).isoformat(),  # v1.13.26 (L4-BUG-5): UTC واعٍ بالمنطقة
                 redirect_chain=redirect_chain,
                 is_redirect=bool(redirect_chain),
             )
@@ -1450,7 +1469,7 @@ class AsyncCrawler:
             url=url,
             status_code=status,
             depth=depth,
-            crawled_at=datetime.now().isoformat(),
+            crawled_at=datetime.now(timezone.utc).isoformat(),  # v1.13.26 (L4-BUG-5): UTC واعٍ بالمنطقة
             crawl_error=error,
             is_indexable=False,
             indexability_reason=error,
@@ -1475,7 +1494,7 @@ class AsyncCrawler:
             size_bytes=size,
             response_time_ms=elapsed,
             depth=depth,
-            crawled_at=datetime.now().isoformat(),
+            crawled_at=datetime.now(timezone.utc).isoformat(),  # v1.13.26 (L4-BUG-5): UTC واعٍ بالمنطقة
             is_indexable=False,
             indexability_reason=f"Non-HTML: {content_type}",
         )

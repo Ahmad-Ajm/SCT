@@ -42,6 +42,11 @@ _JOB_ID_RE = re.compile(r"^\d{8}_\d{6}_[0-9a-f]{6}$")
 # فنعدّه حسب المستوى الفعلي بدل البحث عن الكلمة في نص الرسالة (يتجنّب التضخيم).
 _LOG_LEVEL_RE = re.compile(r"\|\s*(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s*\|")
 
+# v1.13.26 (L3-SCT-JR-04): حارس «قيد الإطلاق» — يُوضَع في _procs بين حجز الخانة
+# ذرّياً وربط الـProcess الحقيقي. نميّزه عن None (proc منتهٍ) بكائن سنتينل خاصّ كي
+# لا يعدّه _sweep_finished منتهياً ويُزيل الحجز (فيمرّ طلب /api/start موازٍ ثانٍ).
+_STARTING = object()
+
 
 def _valid_job_id(job_id: str) -> bool:
     return bool(_JOB_ID_RE.match(str(job_id or "")))
@@ -102,6 +107,33 @@ class JobRunner:
         # L3-SCT-JR-01: نربط _secret_env بمعرّف المهمّة التي بُنيت لها كي لا يُطبَّق
         # على مهمّة أخرى (Phase 2 بعد restart أو بعد بناء config لمهمّة مختلفة).
         self._secret_env_job_id: str = ""
+        # v1.13.26 (L3-SCT-JR-02): بعد إعادة تشغيل الخادم، _procs فارغة ولا عمليّة
+        # حيّة لأيّ مهمّة؛ نُصالح القرص كي لا تبقى مهمّة status='running' عالقة للأبد.
+        self._reconcile_on_startup()
+
+    def _reconcile_on_startup(self) -> None:
+        """v1.13.26 (L3-SCT-JR-02): يمسح المهام «قيد التشغيل» اليتيمة بعد restart.
+
+        عند إعادة تشغيل الويب، __init__ يبني _procs فارغة بلا مصالحة مع القرص، فأيّ
+        مهمّة كانت تزحف ماتت عمليّتها مع الخادم لكنّ job.json ما زال status='running'.
+        نمسح كلّ مهمّة running لا عمليّة حيّة لها في _procs إلى 'failed' مع ended_at.
+        """
+        try:
+            job_dirs = list(JOBS_DIR.glob("*"))
+        except OSError:
+            return
+        for d in job_dirs:
+            if not d.is_dir():
+                continue
+            meta = self._read_meta(d)
+            if meta.get("status") == "running" and d.name not in self._procs:
+                meta["status"] = "failed"
+                meta["interrupted"] = True
+                meta.setdefault("ended_at", datetime.now().isoformat())
+                try:
+                    self._write_meta(d, meta)
+                except OSError:
+                    log.exception("reconcile: failed to mark %s as failed", d.name)
 
     # ------------------------------------------------------------------
     def _load_base_config(self) -> dict[str, Any]:
@@ -337,7 +369,8 @@ class JobRunner:
             self._sweep_finished()
             if self._procs:
                 raise ActiveJobError(next(iter(self._procs), None))
-            self._procs[job_id] = None  # type: ignore[assignment]  placeholder
+            # v1.13.26 (L3-SCT-JR-04): سنتينل بدل None كي لا يُزيله _sweep_finished.
+            self._procs[job_id] = _STARTING  # type: ignore[assignment]  placeholder
 
         try:
             return self._start_locked(job_id, overrides)
@@ -401,19 +434,36 @@ class JobRunner:
         if overrides.get("phase2"):
             args.append("--phase2")
 
-        # v1.08: في Phase 2 نُلحق بالـrun.log بدل الكتابة من جديد، كي يحتفظ المستخدم
-        # بسجلّ Phase 1 الذي تابعه. أيضاً نستخدم اسم تقدّم مختلف لتجنّب الالتباس.
-        log_file = open(job_dir / "run.log", "a" if overrides.get("phase2") else "w",
-                        encoding="utf-8")
         creationflags = 0
         if os.name == "nt":
             creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        proc = subprocess.Popen(
-            args, cwd=str(ROOT), env=env,
-            stdout=log_file, stderr=subprocess.STDOUT,
-            creationflags=creationflags,
-        )
+        # v1.08: في Phase 2 نُلحق بالـrun.log بدل الكتابة من جديد، كي يحتفظ المستخدم
+        # بسجلّ Phase 1 الذي تابعه. أيضاً نستخدم اسم تقدّم مختلف لتجنّب الالتباس.
+        # v1.13.26 (L3-SCT-JR-02): meta كُتبت status='running' قبل قليل؛ لو فشل فتح
+        # اللوغ أو Popen نقلبها إلى 'failed' بدل تركها «قيد التشغيل» على القرص للأبد.
+        log_file = None
+        try:
+            log_file = open(job_dir / "run.log", "a" if overrides.get("phase2") else "w",
+                            encoding="utf-8")
+            proc = subprocess.Popen(
+                args, cwd=str(ROOT), env=env,
+                stdout=log_file, stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+            )
+        except Exception:
+            if log_file is not None:
+                try:
+                    log_file.close()
+                except OSError:
+                    pass
+            try:
+                meta["status"] = "failed"
+                meta["ended_at"] = datetime.now().isoformat()
+                self._write_meta(job_dir, meta)
+            except OSError:
+                log.exception("start(%s): failed to mark 'failed' after spawn error", job_id)
+            raise
         # v1.13.16 (F46): أغلق الـhandle في الـparent بعد Popen — الـsubprocess
         # ورث fd مضاعفاً ويكتب عبره. ترك الـhandle مفتوحاً هنا يسبّب على Windows
         # «file in use» عند محاولة قراءة/حذف run.log لاحقاً من الواجهة.
@@ -441,7 +491,8 @@ class JobRunner:
                         "active_job": next(iter(self._procs), None)}
             # نضع placeholder سريع لمنع طلب موازٍ ثانٍ من المرور (سيُستبدل ببروسس
             # حقيقي بعد قليل أسفل).
-            self._procs[job_id] = None  # type: ignore[assignment]
+            # v1.13.26 (L3-SCT-JR-04): سنتينل بدل None كي لا يُزيله _sweep_finished.
+            self._procs[job_id] = _STARTING  # type: ignore[assignment]
         # v1.09-B9: إن فشلنا في أيّ pre-check، نُحرّر الـplaceholder من _procs
         # كي لا يبقى job_id «نشطاً» وهميّاً يمنع المهام المستقبليّة.
         def _cleanup_and_return(err: str) -> dict[str, Any]:
@@ -534,19 +585,26 @@ class JobRunner:
         meta["ended_at"] = datetime.now().isoformat()
         meta["result"] = self._discover_result(job_dir, meta.get("mode", "audit"))
         meta["diagnostics"] = self._summarize_run_log(job_dir / "run.log")
-        # v1.13.11 (F5): مزامنة progress.json مع الحالة النهائية كي لا تظهر
-        # شارة "فشل" مع شريط "جار التحليل..." في الواجهة (race condition سابق:
-        # meta.status="failed" وprogress.status="analyzing" تتعايشان دون مزامنة).
-        # نقرأ الموجود ونحدّث حقل status فقط — العدّادات والمراحل تُحفَظ كما هي.
         progress_file = job_dir / "progress.json"
-        try:
-            cur = self.progress(job_id) or {}
-            cur["status"] = meta["status"]
-            self._write_progress(progress_file, cur)
-        except OSError:
-            log.exception("Failed to sync final status to progress.json for %s", job_id)
-        self._write_meta(job_dir, meta)
+        # v1.13.26 (L8-RACE-02): نُجري re-read → preserve 'stopped' → write معاً
+        # تحت القفل. سابقاً كانت قراءة meta أعلى _watch خارج القفل، فلو كتب
+        # stop()/force_kill() الحالة 'stopped' بعد قراءتنا وقبل كتابتنا طمسناها.
+        # القسم الحرج صغير (قراءة حقل + كتابتان) ولا يستدعي stop() ⇒ لا deadlock.
         with self._lock:
+            latest = self._read_meta(job_dir)
+            if latest.get("status") == "stopped":
+                meta["status"] = "stopped"
+            # v1.13.11 (F5): مزامنة progress.json مع الحالة النهائية كي لا تظهر
+            # شارة "فشل" مع شريط "جار التحليل..." في الواجهة (race condition سابق:
+            # meta.status="failed" وprogress.status="analyzing" تتعايشان دون مزامنة).
+            # نقرأ الموجود ونحدّث حقل status فقط — العدّادات والمراحل تُحفَظ كما هي.
+            try:
+                cur = self.progress(job_id) or {}
+                cur["status"] = meta["status"]
+                self._write_progress(progress_file, cur)
+            except OSError:
+                log.exception("Failed to sync final status to progress.json for %s", job_id)
+            self._write_meta(job_dir, meta)
             self._procs.pop(job_id, None)
 
     def stop(self, job_id: str, grace_seconds: float = 60.0) -> bool:
@@ -671,6 +729,11 @@ class JobRunner:
         _watch بصمت ولم يُزل القيد)."""
         for jid in list(self._procs):
             proc = self._procs.get(jid)
+            # v1.13.26 (L3-SCT-JR-04): _STARTING = مهمّة تُطلَق الآن (بين الحجز
+            # الذرّي وربط الـProcess). لا نعدّها منتهية وإلّا أزلنا الحجز الذي
+            # يمنع طلب /api/start موازياً ثانياً من المرور.
+            if proc is _STARTING:
+                continue
             if proc is None or proc.poll() is not None:
                 self._procs.pop(jid, None)
 
@@ -781,12 +844,26 @@ class JobRunner:
         if xml_dir.exists():
             for xml_file in sorted(xml_dir.glob("*.xml")):
                 result[f"xml_{xml_file.stem}"] = str(xml_file)
+        # v1.13.26 (L3-SCT-JR-05): مهمّة CSV-فقط (بلا HTML/JSON/PDF) كانت تنتهي
+        # بـresult بلا مسار CSV وبلا 'kind'، فتُخفى مخرجاتها في الواجهة. نلتقط أحدث
+        # مجلّد CSV (والمجلّد نفسه لإتاحة روابط التنزيل) كي تظهر في الواجهة.
+        csv_dir = out / "csv"
+        if csv_dir.exists():
+            csv_files = sorted(csv_dir.glob("*.csv"),
+                               key=lambda p: p.stat().st_mtime, reverse=True)
+            if csv_files:
+                result["csv"] = str(csv_files[0])
+                result["csv_dir"] = str(csv_dir)
         # v1.06: علامة kind تساعد الواجهة على اتّخاذ قرار «هل أُظهر أزرار توليد التقارير؟»
         # — لا audit JSON ⇒ مهمّة تكاملات-فقط ⇒ يظهر شريط نتائج التكاملات بدل أزرار التوليد.
         if result.get("json"):
             result["kind"] = "audit"
         elif result.get("integrations_json"):
             result["kind"] = "integrations_only"
+        # v1.13.26 (L3-SCT-JR-05): CSV-فقط بلا JSON تكامل ⇒ نُعلّمها 'csv' كي تظهر
+        # روابط التنزيل بدل اختفاء المهمّة تماماً من الواجهة.
+        elif result.get("csv"):
+            result["kind"] = "csv"
         return result
 
     def _summarize_run_log(self, log_path: Path) -> dict[str, Any]:

@@ -52,7 +52,9 @@ def find_orphan_pages(
 
         # نستخدم normalized URL للمقارنة الدقيقة
         to_url = link.get("to_url_normalized") or normalize_url(link.get("to_url", ""))
-        from_url = link.get("from_url", "")
+        # v1.13.26 (L1-orphan-selflink): طبّع from_url أيضاً قبل مقارنة self-link؛
+        # مقارنة to_url المُطبّع مع from_url الخام كانت تُفشل استبعاد self-links.
+        from_url = normalize_url(link.get("from_url", ""))
 
         # لا نحسب self-links
         if to_url == from_url:

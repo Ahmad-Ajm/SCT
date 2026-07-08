@@ -24,8 +24,11 @@ from utils.helpers import normalize_url
 
 # تنسيقات صحيحة لـ hreflang بعد التطبيع.
 # نقبل الإدخال case-insensitive مثل ar-sa ونطبّعه إلى ar-SA قبل الحكم.
+# v1.13.26 (L1-hreflang-format): نسمح بـsubtag سكربت اختياري (4 أحرف Title-case
+# مثل Hant) وإقليم UN M.49 (3 أرقام مثل 419/001) إضافةً للإقليم ثنائي الأحرف،
+# حتى لا نرفض قيم Google الصحيحة zh-Hant, zh-Hant-HK, es-419, en-001.
 HREFLANG_PATTERN = re.compile(
-    r"^(?:x-default|[a-z]{2,3}(?:-[A-Z]{2})?)$"
+    r"^(?:x-default|[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?)$"
 )
 
 
@@ -43,8 +46,17 @@ def _normalize_hreflang(value: str) -> str:
         return "x-default"
     if "-" not in value:
         return value.lower()
-    lang, region = value.split("-", 1)
-    return f"{lang.lower()}-{region.upper()}"
+    # v1.13.26 (L1-hreflang-format): طبّع كل subtag حسب نوعه — اللغة lowercase،
+    # subtag السكربت (4 أحرف) Title-case (Hant لا HANT)، الإقليم (حرفان) uppercase،
+    # وإقليم M.49 (3 أرقام) يبقى كما هو (upper لا يؤثّر على الأرقام).
+    parts = value.split("-")
+    normalized = [parts[0].lower()]
+    for part in parts[1:]:
+        if len(part) == 4 and part.isalpha():
+            normalized.append(part.capitalize())
+        else:
+            normalized.append(part.upper())
+    return "-".join(normalized)
 
 
 def validate_hreflang(pages: list[Any]) -> dict[str, Any]:
@@ -187,6 +199,17 @@ def validate_hreflang(pages: list[Any]) -> dict[str, Any]:
                         "target_url": href,
                         "issue": f"{href} لا يحتوي على hreflang يشير لـ {source_url}",
                     })
+            # v1.13.26 (L1-hreflang-reciprocity): الحالة الأشيع — الهدف مزحوف لكنه
+            # لا يُصدر أيّ hreflang عائد إطلاقاً، فكان يُتخطّى بصمت لأنه غائب عن
+            # pages_with_hreflang. نفحصه مقابل مجموعة الزحف الكاملة (page_data_map).
+            elif (normalized_href != source_url
+                  and normalized_href in page_data_map):
+                non_reciprocal.append({
+                    "page_url": source_url,
+                    "hreflang_value": hreflang_code,
+                    "target_url": href,
+                    "issue": f"{href} مزحوفة لكنها لا تُصدر أيّ hreflang يشير لـ {source_url}",
+                })
 
         # 3. x-default check
         if not has_x_default:

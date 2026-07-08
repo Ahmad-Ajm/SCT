@@ -41,7 +41,12 @@ DEFAULT_BOTS: dict[str, str] = {
 
 
 def detect_bot(user_agent: str, bots: Optional[dict[str, str]] = None) -> str:
-    """يعيد اسم البوت إن طابق توقيعاً، وإلا سلسلة فارغة."""
+    """كشف heuristic للبوت من نصّ user-agent فقط.
+
+    v1.13.26 (L7-BUG-4): هذا كشف يعتمد على سلسلة الـUA وحدها — بلا تحقّق IP أو
+    reverse-DNS، لذا يمكن انتحاله (أيّ عميل قد يدّعي أنّه Googlebot). النتيجة
+    مؤشّر heuristic لا إثبات قاطع. يعيد اسم البوت إن طابق توقيعاً، وإلا سلسلة فارغة.
+    """
     ua = (user_agent or "").lower()
     if not ua:
         return ""
@@ -159,6 +164,9 @@ def analyze_log(
         rows.append({
             "path": key,
             "hits": rec["hits"],
+            # v1.13.26 (L7-NEW-1): احمِل عدّاد Googlebot تحديداً حتى لا تحسب لوحة
+            # «ميزانية زحف Google» كلّ البوتات على أنها Googlebot.
+            "googlebot_hits": rec["bots"].get("Googlebot", 0),
             "last_seen": rec["last_seen"],
             "top_bot": (rec["bots"].most_common(1)[0][0] if rec["bots"] else ""),
             "status_200": statuses.get(200, 0),
@@ -264,8 +272,14 @@ def join_log_with_audit(
         path = (raw_path or "/").rstrip("/") or "/"
         page = by_path.get(path)
         crawl_url = page["url"] if page else None
-        hits = int(row.get("hits", 0) or 0)
-        bad_hits = int(row.get("status_404", 0) or 0) + int(row.get("status_5xx", 0) or 0)
+        # v1.13.26 (L7-NEW-1): استخدم عدّاد Googlebot تحديداً لا مجموع كل البوتات،
+        # حتى لا نحسب Bingbot/GPTBot وغيرها ضمن «ميزانية زحف Google».
+        hits = int(row.get("googlebot_hits", row.get("hits", 0)) or 0)
+        # v1.13.26 (L7-BUG-3): ضمّ status_4xx_other لمطابقة الحقل المعروض
+        # googlebot_4xx (= 404 + 4xx_other)؛ كان المُطلِق يتجاهلها فيختلّ العدّ.
+        bad_hits = (int(row.get("status_404", 0) or 0)
+                    + int(row.get("status_4xx_other", 0) or 0)
+                    + int(row.get("status_5xx", 0) or 0))
 
         # (أ) ميزانية مهدورة: Google يزحف الصفحة بكثرة وتعطي 4xx/5xx
         if bad_hits > 0:
@@ -303,7 +317,10 @@ def join_log_with_audit(
     orphans = find_orphan_bot_urls(log_per_url or [], by_path.keys())
 
     # 5) إحصاءات ملخّصة لعرض البطاقات في الواجهة
-    total_googlebot_hits = sum(int(r.get("hits", 0) or 0) for r in (log_per_url or []))
+    # v1.13.26 (L7-NEW-1): اجمع زيارات Googlebot تحديداً لا كلّ البوتات.
+    total_googlebot_hits = sum(
+        int(r.get("googlebot_hits", r.get("hits", 0)) or 0)
+        for r in (log_per_url or []))
     wasted_hits = sum(r["googlebot_hits"] for r in wasted)
     return {
         "summary": {

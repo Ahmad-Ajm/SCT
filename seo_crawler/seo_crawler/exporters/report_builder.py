@@ -20,8 +20,13 @@ log = get_logger(__name__)
 
 
 def _default_stem() -> str:
+    # v1.13.26 (L7-BUG-2): نضيف لاحقة uuid قصيرة لجذر الاسم كي لا تتصادم
+    # عمليّتا بناء تقرير متزامنتان تقعان في نفس الثانية (الطابع الزمني بدقّة
+    # الثانية وحده غير كافٍ فيدهس أحدهما ملفّات الآخر). نُبقي بادئة "report_"
+    # كي تبقى أنماط الـglob (report_*) لدى المستدعي قادرة على إيجاد الملفّ.
     from datetime import datetime
-    return "report_" + datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    from uuid import uuid4
+    return "report_" + datetime.now().strftime("%Y-%m-%d_%H%M%S") + "_" + uuid4().hex[:8]
 
 
 def build_report(
