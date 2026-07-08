@@ -209,8 +209,52 @@ async def run_resource_status_check(crawler, config, mode: CrawlMode) -> dict[st
         retry_attempts=checker_config.get("retry_attempts", 2),
         verify_ssl=checker_config.get("verify_ssl", True),
     )
+
+    # v1.13.25: هذه المرحلة كانت "صامتة" — على متجر بآلاف الموارد قد تستغرق
+    # ساعات دون أيّ تحديث في progress.json، فتبدو الواجهة معلّقة. نضيف نفس نمط
+    # التقدّم المستعمل في فحص الروابط الخارجية (Phase 2.5): emit أوّليّ + callback
+    # مُخنَّق كل 0.5 ثانية يُظهر [عدد/إجمالي] + الرابط الحالي + شريط نسبة يتحرّك.
+    total_res = len(urls)
+    emit_phase(
+        crawler,
+        "checking_resource_status",
+        phase_label="checking_resource_status",
+        phase_percent=0,
+        phase_detail=f"0/{total_res}",
+        resource_status_total=total_res,
+        resource_status_checked=0,
+    )
+    res_totals = {"checked": 0, "ok": 0, "broken": 0, "blocked": 0, "errors": 0}
+    res_last_emit = 0.0
+
+    def on_resource_progress(delta: dict[str, Any]) -> None:
+        nonlocal res_last_emit
+        res_totals["checked"] += int(delta.get("checked", 0))
+        for key in ("ok", "broken", "blocked", "errors"):
+            res_totals[key] += int(delta.get(key, 0))
+        now = time.time()
+        is_last = res_totals["checked"] >= total_res
+        if is_last or now - res_last_emit >= 0.5:
+            res_last_emit = now
+            pct = int(res_totals["checked"] * 100 / max(total_res, 1))
+            cur = str(delta.get("url", "") or "")
+            detail = f"{res_totals['checked']}/{total_res} (✓ {res_totals['ok']} · ✗ {res_totals['broken']})"
+            if cur:
+                detail = f"{detail} · {cur}"
+            emit_phase(
+                crawler,
+                "checking_resource_status",
+                phase_label="checking_resource_status",
+                phase_percent=pct,
+                phase_detail=detail,
+                resource_status_total=total_res,
+                resource_status_checked=res_totals["checked"],
+                resource_status_broken=res_totals["broken"],
+            )
+
     with span("phase.resource_status", urls=len(urls)):
-        results = await checker.check_urls(urls, progress=True)
+        results = await checker.check_urls(
+            urls, progress=True, progress_callback=on_resource_progress)
 
     # ربط كل نتيجة بنوع المورد (للتقرير)
     type_by_url: dict[str, str] = {}

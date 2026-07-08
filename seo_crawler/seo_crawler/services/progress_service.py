@@ -36,6 +36,15 @@ def emit_phase(crawler: Any, status: str, **extra: Any) -> None:
     except (OSError, json.JSONDecodeError):
         data = {}
 
+    # v1.13.25: عند انتقال المرحلة (phase_label جديد بلا phase_detail)، نمسح
+    # phase_detail/phase_percent القديمَين حتى لا يعرض سطر النشاط الحيّ تفصيلاً
+    # بائتاً من المرحلة السابقة (مثل آخر رابط زحف أثناء عرض "جارٍ التحليل").
+    new_label = extra.get("phase_label")
+    if new_label and new_label != data.get("phase_label") and "phase_detail" not in extra:
+        data.pop("phase_detail", None)
+        data.pop("phase_percent", None)
+        data.pop("phase_current_url", None)
+
     elapsed = getattr(st, "duration_seconds", None) if st else None
     data = {
         **data,

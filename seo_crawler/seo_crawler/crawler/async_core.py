@@ -128,6 +128,12 @@ class AsyncCrawler:
         self._js_diff_cap_warned = False
         self._a11y_cap_warned = False
 
+        # v1.13.25: سطر النشاط الحيّ — الرابط الجاري زحفه/تصييره الآن. يظهر في
+        # الواجهة تحت الحالة كي لا يبدو الزحف معلّقاً. الكتابة على القرص مُخنَّقة
+        # بـ250ms (بوّابة زمنيّة) لتفادي إرهاق I/O عند التزامن العالي.
+        self._current_url = ""
+        self._last_progress_write = 0.0
+
         # === Domain info ===
         self.start_url = normalize_url(self.site_config["start_url"])
         self.primary_domain = self.site_config["domain"]
@@ -743,6 +749,9 @@ class AsyncCrawler:
                         continue
 
                     # === زحف الصفحة ===
+                    # v1.13.25: نسجّل الرابط الحاليّ (O(1)، بلا I/O) قبل الجلب
+                    # كي يظهر في سطر النشاط الحيّ بالواجهة.
+                    self._current_url = url
                     await self._crawl_page(url, depth)
                     worker_pages += 1
                     self._snapshot_state()
@@ -797,11 +806,26 @@ class AsyncCrawler:
         return "partial" if remaining > 0 else "complete"
 
     def _emit_progress(self, status: str = "running") -> None:
-        """استدعاء progress_callback إن وُجد (للواجهة المرئية)."""
+        """استدعاء progress_callback إن وُجد (للواجهة المرئية).
+
+        v1.13.25: الكتابة مُخنَّقة بـ250ms أثناء 'running' فقط — حالة running
+        عالية التردّد (لكل صفحة، آلاف/دقيقة) فلا داعي لكتابة القرص كل مرّة.
+        أيّ حالة نهائيّة/غير-running تُكتب فوراً (force). النتيجة: I/O أقلّ من
+        السابق (كان يكتب لكل صفحة بلا خنق) + سطر نشاط حيّ يُظهر الرابط الحاليّ.
+        """
         if self.progress_callback is None:
             return
+        # بوّابة زمنيّة: نتخطّى كتابة running المتكرّرة خلال 250ms من الأخيرة.
+        if status == "running":
+            now = time.time()
+            if now - self._last_progress_write < 0.25:
+                return
+            self._last_progress_write = now
         try:
             remaining_seeds = max(0, len(self.sitemap_seeds) - self._seed_index)
+            cur = self._current_url or ""
+            max_pages = self.crawl_config.get("max_pages", 0) or 0
+            detail = f"[{self.stats.pages_crawled}/{max_pages or '∞'}] {cur}" if cur else ""
             self.progress_callback({
                 "pages_crawled": self.stats.pages_crawled,
                 "pages_failed": self.stats.pages_failed,
@@ -810,6 +834,10 @@ class AsyncCrawler:
                 "elapsed_seconds": round(self.stats.duration_seconds, 1),
                 "pages_per_second": round(self.stats.pages_per_second, 2),
                 "status": status,
+                # v1.13.25: سطر النشاط الحيّ — الرابط الجاري زحفه الآن
+                "phase_label": "crawling",
+                "phase_detail": detail,
+                "phase_current_url": cur,
                 # v1.04: نُبلِّغ الواجهة فور بلوغ الحدّ كي تُخفي عدّاد الطابور المضلّل
                 # (يبقى الطابور يحوي مئات الآلاف من الروابط المكتشفة لكنّها لن تُزحف)
                 "reached_max_pages": bool(self._reached_max_pages),

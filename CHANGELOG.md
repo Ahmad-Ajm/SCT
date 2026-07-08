@@ -4,6 +4,49 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.25 (2026-07-08 live-activity line + fix the "frozen" resource-status phase)
+
+The job page could look hung for long stretches even while working hard.
+Two root causes, both fixed:
+
+- **Resource Status Check (Phase 2.6) emitted zero progress.** On a
+  store with tens of thousands of CSS/JS/image resources this phase
+  ran for **2+ hours** while `progress.json` still showed the previous
+  phase — the UI looked frozen. `run_resource_status_check` now emits an
+  initial `checking_resource_status` phase and a throttled (0.5 s)
+  per-resource callback identical to the external-links path, so the
+  progress bar advances and a live `[checked/total (✓ · ✗)] · <url>`
+  line shows what's being checked. This is the biggest first-impression
+  fix.
+- **The main crawl showed counters but never "which URL".** The
+  per-page progress writer now includes the current URL and a
+  `[pages/max] <url>` detail. The write is time-gated to 250 ms during
+  `running` (strictly *less* disk I/O than the old unthrottled
+  per-page write) so it never slows the crawl; the `self._current_url`
+  assignment on the hot path is an O(1) attribute set with no I/O.
+
+- **New prominent live-activity line (job.html).** A pulsing-dot line
+  under the status/timer shows the current phase + detail on every tick
+  (`renderLiveActivity`), in AR and EN, using `textContent` (XSS-safe
+  since it carries live URLs). It hides on terminal states.
+- **Stale-detail guard (progress_service).** On a phase transition that
+  carries no `phase_detail`, the writer clears the previous phase's
+  `phase_detail`/`phase_percent` so the live line never shows a stale
+  URL from the prior phase (e.g. the last crawled URL during
+  "analyzing").
+- The checker's per-URL progress payload now includes the `url`, which
+  also enriches the existing external-links line for free.
+- i18n: `ph_checking_resource_status` (AR + EN).
+
+Operational note for large stores: the resource-status check
+(`extraction.check_resource_status`) is the single most expensive
+option — it HEAD-checks every unique resource. Leave it off for routine
+crawls; the new progress line makes its cost visible when it is on.
+
+98/98 tests.
+
+---
+
 ## v1.13.24 (2026-07-08 pre-publish cleanup — README, English config, doc parity)
 
 Publication-readiness pass before the first public release.

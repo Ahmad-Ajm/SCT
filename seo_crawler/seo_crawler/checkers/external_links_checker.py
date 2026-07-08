@@ -260,6 +260,8 @@ class ExternalLinksChecker:
                         "blocked": 1 if result.get("is_blocked") else 0,
                         "ok": 1 if 200 <= result.get("status_code", 0) < 400 else 0,
                         "errors": 1 if result.get("error") else 0,
+                        # v1.13.25: الرابط الحاليّ يظهر في سطر النشاط الحيّ بالواجهة
+                        "url": url,
                     })
 
                 return result

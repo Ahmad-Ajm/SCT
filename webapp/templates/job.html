@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>مهمة {{ job_id }} — SCT</title>
 <link rel="stylesheet" href="/static/app.css">
+<style>
+  /* v1.13.25: سطر النشاط الحيّ تحت الحالة/المؤقّت */
+  .live-activity{display:flex;align-items:center;gap:8px;margin:10px 0 4px;
+    padding:8px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
+    font-size:.9rem;color:#1e3a5f;direction:ltr;unicode-bidi:plaintext}
+  html[dir="rtl"] .live-activity{direction:ltr;text-align:left}
+  .live-dot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:#2563eb;
+    animation:livepulse 1.1s ease-in-out infinite}
+  .live-phase{flex:0 0 auto;font-weight:700;white-space:nowrap}
+  .live-detail{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;font-family:ui-monospace,Consolas,monospace;font-size:.82rem;
+    color:#475569}
+  @keyframes livepulse{0%,100%{opacity:1;transform:scale(1)}
+    50%{opacity:.35;transform:scale(.7)}}
+  @media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
+</style>
 <script>
 window._sctToken = "{{ sct_token }}";
 (function () {
@@ -40,6 +56,14 @@ window._sctToken = "{{ sct_token }}";
     <div class="timer-box">
       <span class="timer-label" data-i18n="elapsed">⏱️ الوقت المنقضي</span>
       <span id="timer" class="timer">00:00:00</span>
+    </div>
+
+    <!-- v1.13.25: سطر النشاط الحيّ — يُظهر دائماً العمليّة الجارية (الرابط
+         الجاري زحفه/فحصه، المورد الحاليّ، عنصر التكامل) كي لا يبدو النظام معلّقاً. -->
+    <div class="live-activity" id="liveActivity" style="display:none">
+      <span class="live-dot"></span>
+      <span class="live-phase" id="liveActivityPhase"></span>
+      <span class="live-detail" id="liveActivityDetail"></span>
     </div>
 
     <!-- v1.13.6: tooltip لكلّ بطاقة يشرح ما يقيس + لماذا يهمّ. -->
@@ -469,10 +493,29 @@ function _checkSilence() {
 }
 setInterval(_checkSilence, 5000);
 
+// v1.13.25: سطر النشاط الحيّ البارز تحت الحالة/المؤقّت. يُظهر دائماً اسم
+// المرحلة + التفصيل الحاليّ (رابط، مورد، عنصر تكامل). textContent فقط (أمان XSS
+// لأنّ التفصيل يحمل روابط حيّة). يختفي عند الحالات النهائيّة.
+function renderLiveActivity(p, label) {
+  const box = document.getElementById('liveActivity');
+  if (!box) return;
+  const status = (p && p.status) || 'running';
+  const detail = (p && p.phase_detail) || '';
+  if (FINISHED.includes(status) || (!detail && !label)) {
+    box.style.display = 'none';
+    return;
+  }
+  document.getElementById('liveActivityPhase').textContent = phaseLabel(label);
+  document.getElementById('liveActivityDetail').textContent = detail;
+  box.style.display = detail ? 'flex' : 'none';
+}
+
 function applyPhaseDetails(p) {
   const status = p.status || 'running';
   // v1.02: نُفضّل phase_label الصريح إن وُجد (مثل "pagespeed") على الحالة العامة (running)
   const label = p.phase_label || status;
+  // v1.13.25: حدّث سطر النشاط الحيّ في كل tick
+  renderLiveActivity(p, label);
   // v1.02: شريط التقدّم يأخذ من phase_percent (المراحل) أو report_percent (التقرير)
   const pct = Number(p.phase_percent || p.report_percent || 0);
   document.getElementById('phaseText').textContent = phaseLabel(label);
