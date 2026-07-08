@@ -12,6 +12,7 @@ analyzers/orphan_finder.py
 from collections import defaultdict
 from typing import Any
 
+from analyzers._coerce import status_of  # L1-orphan: توحيد مع بقيّة المحلّلات
 from crawler.core import PageData
 from utils.helpers import normalize_url
 
@@ -65,7 +66,10 @@ def find_orphan_pages(
 
     for page in pages:
         # تخطّي الصفحات الفاشلة والـ redirects
-        if _get(page, "crawl_error") or _get(page, "status_code", 0) != 200:
+        # L1-orphan (v1.09-B2 class): نستعمل status_of() لا مقارنة status_code
+        # الخام — عند إعادة استيراد الزحف من JSON يأتي status_code كسلسلة "200"
+        # فتفشل "200" != 200 لكلّ الصفحات وتُخفى كلّ الصفحات اليتيمة بصمت.
+        if _get(page, "crawl_error") or status_of(page) != 200:
             continue
 
         url = _get(page, "url", "")

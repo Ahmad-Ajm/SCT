@@ -119,3 +119,68 @@ class TestPriority(unittest.TestCase):
         self.assertIn("factor_severity", top)
         self.assertGreater(top["priority_score"], 0)
 
+    def test_priority_summary_counts_full_set_before_truncation(self):
+        """L5-PE-1: pages_with_issues + by_band يجب أن يعكسا كلّ الصفحات، لا
+        top_n فقط. نمرّر 30 صفحة بمشاكل و top_n=5."""
+        from reporting.priority_engine import compute_priority
+        rows = [
+            {"url": f"https://x.com/p/{i}", "technical_issues": ["missing_title"],
+             "depth": 1, "internal_links_count": 10, "clicks": i, "impressions": 100 + i,
+             "sessions": i}
+            for i in range(30)
+        ]
+        r = compute_priority(rows, platform="zid", top_n=5)
+        # العرض مقتطع إلى 5، لكن الملخّص يعدّ الكلّ (30).
+        self.assertEqual(len(r["pages"]), 5)
+        self.assertEqual(r["summary"]["pages_with_issues"], 30)
+        self.assertEqual(r["summary"]["displayed"], 5)
+        band_total = sum(r["summary"]["by_band"].values())
+        self.assertEqual(band_total, 30)
+
+
+class TestReportJoinLogic(unittest.TestCase):
+    def test_ga4_sessions_aggregate_not_overwrite(self):
+        """L6-BUG-1: عدّة صفوف GA4 بنفس المسار (اختلاف query) تُجمَع لا تُستبدَل."""
+        from reporting.report_join import build_unified
+        pages = [MinimalPage(url="https://x.com/p", status_code=200)]
+        ga4 = [
+            {"path": "/p?variant=1", "sessions": 400, "users": 40, "engagement_rate": 0.5},
+            {"path": "/p?variant=2", "sessions": 600, "users": 60, "engagement_rate": 0.7},
+        ]
+        rows = build_unified(pages, {}, gsc_pages=None, ga4_pages=ga4)
+        row = next(r for r in rows if r["url"].rstrip("/").endswith("/p"))
+        self.assertEqual(row["sessions"], 1000)   # 400 + 600, لا 600
+        self.assertEqual(row["users"], 100)
+        # engagement متوسّط مرجّح بالجلسات: (0.5*400 + 0.7*600)/1000 = 0.62
+        self.assertAlmostEqual(row["engagement_rate"], 0.62, places=3)
+
+
+class TestEncodingResolution(unittest.TestCase):
+    def test_charset_less_arabic_decodes_utf8_not_latin1(self):
+        """L4-BUG-1: صفحة UTF-8 عربيّة بلا charset في الترويسة تُقرأ utf-8
+        لا ISO-8859-1."""
+        sys.path.insert(0, str(APP))
+        from crawler.http_client import _resolve_encoding
+        arabic = "دار الكتب".encode("utf-8")
+        # لا charset في الترويسة، لا meta → utf-8
+        self.assertEqual(_resolve_encoding("text/html", arabic), "utf-8")
+        # charset صريح في الترويسة → يُحترَم
+        self.assertEqual(
+            _resolve_encoding("text/html; charset=windows-1256", arabic),
+            "windows-1256")
+        # meta charset في الجسم → يُستشعَر
+        body = b'<html><head><meta charset="utf-8"></head>' + arabic
+        self.assertEqual(_resolve_encoding("text/html", body), "utf-8")
+
+
+class TestSecretRedaction(unittest.TestCase):
+    def test_majestic_key_redacted_from_error(self):
+        """L6-BUG-2: مفتاح Majestic لا يظهر في نصّ الخطأ/السجلّ."""
+        sys.path.insert(0, str(APP))
+        from integrations.backlinks_api import _redact
+        leaked = ("HTTPSConnectionPool: Max retries exceeded with url: "
+                  "/api/json?app_api_key=SECRET123&cmd=GetIndexItemInfo")
+        out = _redact(leaked)
+        self.assertNotIn("SECRET123", out)
+        self.assertIn("<redacted>", out)
+

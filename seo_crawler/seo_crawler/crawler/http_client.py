@@ -9,6 +9,7 @@ crawler/http_client.py
 - timeout مرن
 """
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -20,6 +21,26 @@ from urllib3.util.retry import Retry
 from utils.logger import get_logger
 
 log = get_logger(__name__)
+
+# L4-BUG-1: استشعار الترميز. charset صريح في ترويسة Content-Type → نثق به.
+# غيابه (شائع على خوادم عربيّة قديمة) → نبحث عن <meta charset> في أوّل 4KB،
+# ثم utf-8 كملاذ أخير (لا ISO-8859-1 الذي يفترضه requests افتراضاً).
+_HEADER_CHARSET_RE = re.compile(r"charset=([^\s;]+)", re.IGNORECASE)
+_META_CHARSET_RE = re.compile(
+    rb"""<meta[^>]+charset\s*=\s*["']?\s*([a-zA-Z0-9_\-]+)""", re.IGNORECASE)
+
+
+def _resolve_encoding(content_type_header: str, body: bytes) -> str:
+    m = _HEADER_CHARSET_RE.search(content_type_header or "")
+    if m:
+        return m.group(1).strip().strip("\"'")
+    m2 = _META_CHARSET_RE.search(body[:4096])
+    if m2:
+        try:
+            return m2.group(1).decode("ascii", "ignore") or "utf-8"
+        except Exception:  # noqa: BLE001
+            return "utf-8"
+    return "utf-8"
 
 
 @dataclass
@@ -238,8 +259,13 @@ class HTTPClient:
                 return result
             content = b"".join(chunks)
 
-            # تحديد الترميز
-            encoding = response.encoding or "utf-8"
+            # تحديد الترميز (L4-BUG-1): requests يضبط response.encoding إلى
+            # ISO-8859-1 لأيّ text/html بلا charset صريح في الترويسة (RFC 2616)،
+            # فتُقرأ صفحات UTF-8 العربيّة التي تُصرّح بالترميز في <meta> فقط
+            # كـLatin-1 → طلاسم. نثق بترويسة charset الصريحة فقط؛ وإلا نستشعر
+            # <meta charset> من أوّل البايتات، ثم نرجع إلى utf-8 (يطابق المسار async).
+            ctype_header = response.headers.get("Content-Type", "")
+            encoding = _resolve_encoding(ctype_header, content)
             try:
                 text = content.decode(encoding, errors="replace")
             except (LookupError, TypeError):

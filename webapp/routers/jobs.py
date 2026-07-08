@@ -28,6 +28,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from webapp.deps import FINISHED_STATUSES, _job_output_dir, runner
+from webapp.job_runner import ActiveJobError
 
 router = APIRouter()
 
@@ -222,7 +223,17 @@ async def start(request: Request):
     analysis["url_flag_non_ascii"] = _b("url_flag_non_ascii", False)
     overrides["analysis"] = analysis
 
-    job_id = runner.start(overrides)
+    # TOCTOU-START: الفحص النهائي الذرّيّ داخل runner.start() تحت القفل —
+    # فحص active_job() أعلاه سريع للردّ المبكّر لكنّه ليس ذرّياً (await للـform
+    # بينهما). لو سبقنا طلب آخر، start() يرفع ActiveJobError.
+    try:
+        job_id = runner.start(overrides)
+    except ActiveJobError as e:
+        return JSONResponse(
+            {"error": "مهمة زحف نشطة بالفعل. أوقفها أو انتظر انتهاءها.",
+             "active_job": e.active_job},
+            status_code=409,
+        )
     return JSONResponse({"job_id": job_id})
 
 
@@ -293,7 +304,7 @@ async def job_deferred(job_id: str):
     by_kind: dict[str, int] = {}
     samples: dict[str, list[str]] = {}
     try:
-        with open(csv_path, "r", encoding="utf-8", newline="") as f:
+        with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
             for row in _csv.DictReader(f):
                 k = row.get("kind", "other") or "other"
                 by_kind[k] = by_kind.get(k, 0) + 1

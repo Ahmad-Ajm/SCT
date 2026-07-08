@@ -47,6 +47,14 @@ def _valid_job_id(job_id: str) -> bool:
     return bool(_JOB_ID_RE.match(str(job_id or "")))
 
 
+class ActiveJobError(RuntimeError):
+    """تُرفَع من start() عند وجود مهمّة نشطة (حجز ذرّي — TOCTOU-START)."""
+
+    def __init__(self, active_job: Optional[str] = None):
+        self.active_job = active_job
+        super().__init__(f"active job: {active_job}")
+
+
 # v1.13.16 (F61): قائمة المفاتيح الحسّاسة التي يجب ألا تظهر في أيّ ملفّ على القرص.
 # تُمرَّر للعمليّة الفرعيّة عبر متغيّرات بيئة فقط (انظر _secret_env في JobRunner).
 _SENSITIVE_KEYS = frozenset({
@@ -91,6 +99,9 @@ class JobRunner:
         self._procs: dict[str, subprocess.Popen] = {}
         self._lock = threading.Lock()
         self._secret_env: dict[str, str] = {}  # أسرار تُمرَّر للعملية الفرعية فقط
+        # L3-SCT-JR-01: نربط _secret_env بمعرّف المهمّة التي بُنيت لها كي لا يُطبَّق
+        # على مهمّة أخرى (Phase 2 بعد restart أو بعد بناء config لمهمّة مختلفة).
+        self._secret_env_job_id: str = ""
 
     # ------------------------------------------------------------------
     def _load_base_config(self) -> dict[str, Any]:
@@ -113,6 +124,7 @@ class JobRunner:
 
     def _build_job_config(self, job_dir: Path, overrides: dict[str, Any]) -> Path:
         self._secret_env = {}   # تُعاد تعبئتها أدناه ثم تُقرأ في start()
+        self._secret_env_job_id = job_dir.name   # L3-SCT-JR-01: مالك الأسرار
         cfg = self._load_base_config()
         cfg.setdefault("site", {})
         cfg.setdefault("crawl", {})
@@ -317,6 +329,24 @@ class JobRunner:
     # ------------------------------------------------------------------
     def start(self, overrides: dict[str, Any]) -> str:
         job_id = datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6]
+        # TOCTOU-START: نحجز خانة المهمّة النشطة ذرّياً تحت القفل قبل أيّ عمل.
+        # الـrouter يفحص active_job() ثم يقرأ الـform (await → yield للـevent loop)،
+        # فطلب /api/start ثانٍ متزامن كان يمرّ ويُطلق زحفاً موازياً. الحجز هنا
+        # يجعل الثاني يفشل بـActiveJobError الذي يلتقطه الـrouter → 409.
+        with self._lock:
+            self._sweep_finished()
+            if self._procs:
+                raise ActiveJobError(next(iter(self._procs), None))
+            self._procs[job_id] = None  # type: ignore[assignment]  placeholder
+
+        try:
+            return self._start_locked(job_id, overrides)
+        except Exception:
+            with self._lock:
+                self._procs.pop(job_id, None)
+            raise
+
+    def _start_locked(self, job_id: str, overrides: dict[str, Any]) -> str:
         job_dir = JOBS_DIR / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -441,7 +471,17 @@ class JobRunner:
         env["SCT_PROGRESS_FILE"] = str(progress_file)
         env["PYTHONIOENCODING"] = "utf-8"
         env["SCT_NONINTERACTIVE"] = "1"
-        env.update(self._secret_env)
+        # L3-SCT-JR-01: نطبّق _secret_env فقط إن كان يخصّ هذه المهمّة نفسها.
+        # وإلاّ (Phase 2 بعد restart أو بعد بناء config لمهمّة أخرى) نعتمد على
+        # os.environ فقط (أسرار .env/المُشغّل) بدل إرسال مفاتيح مهمّة خاطئة أو
+        # فارغة تفشل مصادقتها بصمت. الأسرار المُدخَلة عبر الفورم لا تُخزَّن على
+        # القرص (F61) فلا يمكن استرجاعها لـPhase 2 — وهذا مقصود أمنيّاً.
+        if self._secret_env_job_id == job_id and self._secret_env:
+            env.update(self._secret_env)
+        elif self._secret_env:
+            log.warning("start_phase2(%s): skipping stale _secret_env owned by "
+                        "%s — relying on os.environ for integration secrets",
+                        job_id, self._secret_env_job_id or "?")
 
         args = [
             sys.executable, str(MAIN_PY),

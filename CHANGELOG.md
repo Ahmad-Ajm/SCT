@@ -4,6 +4,113 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.23 (2026-07-08 deep-logic-inspection fixes — 5 high + 3 medium)
+
+A deep LOGIC inspection (8 parallel agents tracing actual algorithm/
+data-flow correctness, not structural presence — each adversarially
+verified) found 27 confirmed + 11 plausible defects. The heavy numeric
+core (PageRank mass-conservation, SimHash/LSH pigeonhole banding, the
+priority product formula, path-traversal defenses) was verified
+**correct**. This release fixes the 5 high-severity data-corruption /
+security bugs plus 3 cheap-but-real medium ones. The rest are queued
+for follow-up reviews.
+
+### High (data corruption / secret leak)
+
+- **L4-BUG-1 — Arabic mojibake on the sync crawler.** `requests` sets
+  `response.encoding` to ISO-8859-1 for any charset-less `text/html`
+  (RFC 2616), so UTF-8 Arabic pages that declare their charset only in
+  a `<meta>` tag were decoded as Latin-1 → garbage titles / descriptions
+  / content-hash. The async path already fell back to utf-8; the sync
+  path (`crawler/http_client.py`) trusted `response.encoding` blindly.
+  Fix: new `_resolve_encoding()` — trust an explicit HTTP-header
+  charset, else sniff `<meta charset>` from the first 4 KB, else utf-8.
+  Directly on-brand for an Arabic-market tool.
+
+- **L6-BUG-1 — GA4 sessions silently lost.** `report_join.build_unified`
+  indexed GA4 rows into a plain dict keyed by normalized path, so
+  `/p?variant=1` and `/p?variant=2` both collapsed to `/p` with
+  last-write-wins — the first variant's sessions vanished. Fix:
+  aggregate colliding rows (sum sessions/users, session-weighted-average
+  the engagement_rate) instead of overwriting.
+
+- **L6-BUG-2 — Majestic API key leaked into logs.** Majestic passes its
+  key as a query param; on any network exception `str(e)` from
+  urllib3 embeds the full URL including `app_api_key=SECRET`, which was
+  logged verbatim. Fix: `_redact()` regex-scrubs
+  `app_api_key|api_key|token|key=…` from every logged/returned error
+  string in `backlinks_api.py` (all 5 sites, Ahrefs + Majestic).
+
+- **L3-SCT-JR-01 — Phase 2 sent stale/cross-contaminated secrets.**
+  `start_phase2` did `env.update(self._secret_env)`, but `_secret_env`
+  is instance state reset to `{}` on every `_build_job_config`. After a
+  webapp restart it was empty (integrations silently fail auth); after
+  building config for a *different* job it held that job's keys
+  (cross-contamination). Fix: tag `_secret_env` with the job_id it was
+  built for; Phase 2 applies it only if it owns that exact job, else
+  relies on `os.environ` (the `.env`/launcher secrets) and logs a
+  warning. Form-only keys aren't persisted to disk (F61) so they can't
+  be recovered for Phase 2 — that's intentional.
+
+- **L5-PE-1 — Priority summary undercounted large crawls.**
+  `compute_priority` sliced `scored = scored[:top_n]` (default 500)
+  *before* tallying `pages_with_issues` / `by_band` / `do_now`, so on a
+  33k-page crawl the summary reflected only the top 500 rows. Fix:
+  compute all aggregates on the full scored list, then slice to `top_n`
+  for the returned `pages` array only. Added a `displayed` field so the
+  UI can show "500 of N".
+
+### Medium (real, narrow)
+
+- **TOCTOU-START — concurrent `/api/start` could spawn two crawls.** The
+  router checked `active_job()` then `await request.form()` (yields the
+  event loop) before the unguarded `runner.start()`. A second
+  simultaneous request slipped through. Fix: `start()` now reserves the
+  active-job slot atomically under `self._lock` at entry (mirroring
+  `start_phase2`) and raises `ActiveJobError` → the router returns 409.
+
+- **L4-BUG-2 — BOM corrupted CSV regeneration.** `CSVExporter` writes
+  utf-8-**sig** (BOM), but `generate.py::_load_csv_rows` and the
+  `deferred_urls.csv` reader opened plain utf-8, leaving the BOM glued
+  to the first column name (`﻿from_url`) so every lookup on the first
+  column missed. Fix: read with `utf-8-sig`.
+
+- **L1-orphan — orphan finder skipped every page on JSON re-import.**
+  `orphan_finder` was the lone analyzer still comparing
+  `status_code != 200` on the raw value instead of
+  `_coerce.status_of()`. When status arrives as the string `"200"`
+  (re-imported crawl JSON / compare mode), `"200" != 200` is true for
+  every page → all pages skipped → Orphan Pages + Low Internal Linking
+  silently empty. Fix: use `status_of()` like every sibling analyzer.
+
+### Regression tests (98/98 now)
+
+Added `test_priority_summary_counts_full_set_before_truncation`,
+`test_ga4_sessions_aggregate_not_overwrite`,
+`test_charset_less_arabic_decodes_utf8_not_latin1`,
+`test_majestic_key_redacted_from_error`.
+
+### Verified correct (no change needed)
+
+PageRank (mass conservation + dangling redistribution + 0-inlink base
+score), SimHash/LSH (pigeonhole banding guarantees no missed
+near-dupes), broken-links 4xx/5xx via `status_of`, canonical
+self/cross/loop logic, thin-content thresholds, the priority product
+formula with div-by-zero guards, path-traversal defenses, the
+rate-limiter and OAuth `_paste_flows` locks, E-Stop export (no
+KeyError), PageSpeed cache keying (no mobile/desktop collision).
+
+### Deferred to follow-up reviews
+
+~19 remaining medium/low: hreflang script-subtag/UN-M.49 false
+positives + missed reciprocity, GSC 10k-row truncation, worker
+busy-counter idle-race, job-stuck-running after restart (needs a
+startup reconciliation pass), and the L2/L7/L8 narrow findings.
+
+Version bumped to 1.13.23.
+
+---
+
 ## v1.13.22 (2026-07-07 graph reads CSV + accessibility CDN fix + invalid-job redirect)
 
 Three surface-level bugs the user hit while testing v1.13.21:

@@ -134,22 +134,47 @@ def build_unified(
     """صفوف موحّدة تدمج التقني + GSC + GA4 لكل URL."""
     tech = build_technical_index(pages, analysis)
 
+    # GSC: مطابقة بالـURL الكامل المُطبَّع، مع فهرس احتياطيّ بالمسار (L6-BUG-4)
+    # كي لا تُفقَد بيانات GSC عندما يختلف رابط GSC عن رابط الزحف بشرطة مائلة
+    # أخيرة أو حالة أحرف المسار فقط.
     gsc_by_url: dict[str, dict[str, Any]] = {}
+    gsc_by_path: dict[str, dict[str, Any]] = {}
     for g in gsc_pages or []:
         page = g.get("page") or g.get("url") or ""
         if page:
             gsc_by_url[normalize_url(page)] = g
+            gsc_by_path.setdefault(_path_of(page), g)
 
+    # GA4: تجميع (لا استبدال) — عدّة صفوف بمعاملات query مختلفة تنهار لنفس
+    # المسار؛ نجمع sessions/users ونحسب engagement_rate كمتوسّط مرجّح بالجلسات
+    # بدل «آخر كتابة تفوز» الذي كان يُفقد جلسات كل الاختلافات (L6-BUG-1).
     ga4_by_path: dict[str, dict[str, Any]] = {}
     for a in ga4_pages or []:
-        path = a.get("path") or a.get("page_path") or a.get("landing_page") or ""
-        if path:
-            ga4_by_path[_path_of(path if path.startswith("http") else "http://x" + path)] = a
+        raw = a.get("path") or a.get("page_path") or a.get("landing_page") or ""
+        if not raw:
+            continue
+        key = _path_of(raw if raw.startswith("http") else "http://x" + raw)
+        s = _int(a.get("sessions"))
+        u = _int(a.get("users") or a.get("active_users"))
+        er = _sf(a.get("engagement_rate"))
+        bucket = ga4_by_path.get(key)
+        if bucket is None:
+            ga4_by_path[key] = {
+                "sessions": s, "users": u,
+                "_er_weighted": er * s, "_er_weight": s,
+            }
+        else:
+            bucket["sessions"] += s
+            bucket["users"] += u
+            bucket["_er_weighted"] += er * s
+            bucket["_er_weight"] += s
 
     rows: list[dict[str, Any]] = []
     for url, t in tech.items():
-        g = gsc_by_url.get(url, {})
+        g = gsc_by_url.get(url) or gsc_by_path.get(t["path"], {})
         a = ga4_by_path.get(t["path"], {})
+        _erw = a.get("_er_weight", 0)
+        ga4_engagement = (a.get("_er_weighted", 0.0) / _erw) if _erw else 0.0
         rows.append({
             "url": t["url"],
             "status_code": t["status_code"],
@@ -163,9 +188,9 @@ def build_unified(
             "impressions": _int(g.get("impressions")),
             "ctr": _sf(g.get("ctr")),
             "position": _sf(g.get("position")),
-            # GA4
+            # GA4 (مجموعة عبر اختلافات query لنفس المسار)
             "sessions": _int(a.get("sessions")),
-            "users": _int(a.get("users") or a.get("active_users")),
-            "engagement_rate": _sf(a.get("engagement_rate")),
+            "users": _int(a.get("users")),
+            "engagement_rate": round(ga4_engagement, 4),
         })
     return rows

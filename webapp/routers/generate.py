@@ -117,7 +117,10 @@ def _load_csv_rows(p: Path) -> list[dict[str, Any]]:
     import csv as _csv
     rows: list[dict[str, Any]] = []
     try:
-        with open(p, "r", encoding="utf-8", newline="") as f:
+        # L4-BUG-2: CSVExporter يكتب utf-8-sig (BOM). القراءة بـutf-8 عاديّة تُبقي
+        # الـBOM ملصقاً بأوّل اسم عمود ('﻿from_url')، فتفشل كلّ عمليّات lookup
+        # على العمود الأوّل. utf-8-sig يبتلع الـBOM إن وُجد.
+        with open(p, "r", encoding="utf-8-sig", newline="") as f:
             for row in _csv.DictReader(f):
                 rows.append(dict(row))
     except OSError:

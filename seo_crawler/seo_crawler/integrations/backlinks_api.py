@@ -17,11 +17,22 @@ v1.04: تكاملات الروابط الخلفيّة الحيّة (Ahrefs / Maj
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from utils.logger import get_logger
 
 log = get_logger(__name__)
+
+# L6-BUG-2: Majestic يمرّر المفتاح كـquery param؛ نصوص استثناءات requests/urllib3
+# تُضمّن الـURL الكامل (بالمفتاح) في str(e). نُنظّف أيّ مفتاح من نصوص السجلّ/الأخطاء
+# قبل كتابتها (يشمل app_api_key و token و apiKey الشائعة).
+_KEY_LEAK_RE = re.compile(
+    r"((?:app_api_key|api_key|apikey|token|key)=)[^&\s'\"]+", re.IGNORECASE)
+
+
+def _redact(text: str) -> str:
+    return _KEY_LEAK_RE.sub(r"\1<redacted>", str(text))
 
 
 class _BaseBacklinks:
@@ -84,7 +95,7 @@ class AhrefsClient(_BaseBacklinks):
                 "organic_traffic": metrics.get("traffic"),
             }
         except Exception as e:  # noqa: BLE001
-            return {**out, "error": f"overview: {type(e).__name__}: {str(e)[:160]}"}
+            return {**out, "error": _redact(f"overview: {type(e).__name__}: {str(e)[:160]}")}
 
         # أعلى نطاقات مُحيلة (نطلب أوّل 50)
         try:
@@ -107,7 +118,7 @@ class AhrefsClient(_BaseBacklinks):
                 ]
         except Exception as e:  # noqa: BLE001
             # v1.09-B9: warning بدل debug — العامل يحتاج إشارة عند فشل refdomains
-            log.warning(f"Ahrefs refdomains failed: {e}")
+            log.warning(_redact(f"Ahrefs refdomains failed: {e}"))
 
         # توزيع نصوص الروابط
         try:
@@ -124,7 +135,7 @@ class AhrefsClient(_BaseBacklinks):
                     for it in items[:30]
                 ]
         except Exception as e:  # noqa: BLE001
-            log.warning(f"Ahrefs anchors failed: {e}")
+            log.warning(_redact(f"Ahrefs anchors failed: {e}"))
 
         return out
 
@@ -177,7 +188,7 @@ class MajesticClient(_BaseBacklinks):
                 "backlinks_total": row.get("ExtBackLinks"),
             }
         except Exception as e:  # noqa: BLE001
-            return {**out, "error": f"overview: {type(e).__name__}: {str(e)[:160]}"}
+            return {**out, "error": _redact(f"overview: {type(e).__name__}: {str(e)[:160]}")}
 
         # 2) Top referring domains (نأخذ من GetTopBackLinks)
         try:
@@ -212,7 +223,7 @@ class MajesticClient(_BaseBacklinks):
                     key=lambda x: (-x["trust_flow_max"], -x["backlinks"]),
                 )[:50]
         except Exception as e:  # noqa: BLE001
-            log.warning(f"Majestic topbacklinks failed: {e}")
+            log.warning(_redact(f"Majestic topbacklinks failed: {e}"))
 
         return out
 

@@ -258,18 +258,24 @@ def compute_priority(
             f"ظهور {s['impressions']}، نقرات {s['clicks']}، جلسات {s['sessions']}"
         )
 
-    scored = scored[:top_n]
+    # L5-PE-1: نحسب الملخّص على القائمة الكاملة قبل الاقتطاع — سابقاً كان
+    # scored يُقتطع إلى top_n (500) أوّلاً فتعكس pages_with_issues/by_band/
+    # do_now أعلى 500 فقط على زحف 33 ألف صفحة. الاقتطاع الآن للعرض فقط.
     bands = {"high": 0, "medium": 0, "low": 0}
     groups: dict[str, int] = {}
     for s in scored:
         bands[s["priority_band"]] += 1
         groups[s["action_group"]] = groups.get(s["action_group"], 0) + 1
 
+    total_with_issues = len(scored)
+    display = scored[:top_n]
+
     return {
-        "pages": scored,
-        "count": len(scored),
+        "pages": display,
+        "count": len(display),
         "summary": {
-            "pages_with_issues": len(scored),
+            "pages_with_issues": total_with_issues,
+            "displayed": len(display),
             "by_band": bands,
             "by_action_group": groups,
             "do_now": groups.get("do_now", 0),
