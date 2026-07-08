@@ -1584,6 +1584,22 @@ class AsyncCrawler:
         async with self._js_sem:
             if self.js_max_pages and self._js_rendered_count >= self.js_max_pages:
                 return raw_soup, {}
+            # v1.13.25: نُظهر الرابط الجاري تصييره في سطر النشاط الحيّ —
+            # التصيير قد يأخذ ثوانٍ (networkidle) فيبدو معلّقاً بلا هذا.
+            if self.progress_callback is not None:
+                cap = self.js_max_pages or "∞"
+                try:
+                    self.progress_callback({
+                        "status": "running",
+                        "phase_label": "rendering_js",
+                        "phase_detail": f"[{self._js_rendered_count + 1}/{cap}] {url}",
+                        "phase_current_url": url,
+                        "pages_crawled": self.stats.pages_crawled,
+                        "pages_failed": self.stats.pages_failed,
+                        "pages_skipped": self.stats.pages_skipped,
+                    })
+                except Exception as e:  # noqa: BLE001
+                    log.debug(f"render progress emit error: {e}")
             rendered = await self.js_renderer.render(url)
             self._js_rendered_count += 1
         if not rendered.is_success or not rendered.html:

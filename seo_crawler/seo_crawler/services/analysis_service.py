@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from services.export_helpers import get_value
 from utils.logger import get_logger
+from services.progress_service import emit_phase
 from utils.monitoring import gauge, span
 
 if TYPE_CHECKING:
@@ -62,22 +63,38 @@ def run_analysis(
 
     results: dict[str, Any] = {}
 
+    # v1.13.25: كل خطوة محلّل تُسجَّل في اللوغ وتُبثّ لسطر النشاط الحيّ كي لا
+    # تبدو مرحلة التحليل معلّقة (بعض الخطوات مثل PageRank تأخذ دقيقة على المواقع
+    # الكبيرة). عدّاد خطوات تقريبيّ لتحريك شريط التقدّم.
+    _steps_total = 18
+    _step_i = {"n": 0}
+
+    def _astep(detail: str) -> None:
+        _step_i["n"] += 1
+        log.info(f"→ {detail}")
+        try:
+            emit_phase(crawler, "analyzing", phase_label="analyzing",
+                       phase_detail=detail,
+                       phase_percent=int(_step_i["n"] * 100 / _steps_total))
+        except Exception:  # noqa: BLE001
+            pass
+
     if "duplicates" in enabled_analyzers:
-        log.info("→ Detecting duplicates...")
+        _astep("Detecting duplicates...")
         with span("analysis.duplicates", pages=len(pages)):
             results["duplicate_data"] = detect_duplicates(pages)
     else:
         results["duplicate_data"] = {}
 
     if "orphans" in enabled_analyzers:
-        log.info("→ Finding orphan pages...")
+        _astep("Finding orphan pages...")
         with span("analysis.orphans", pages=len(pages), links=len(links)):
             results["orphan_data"] = find_orphan_pages(pages, links)
     else:
         results["orphan_data"] = {}
 
     if "redirects" in enabled_analyzers:
-        log.info("→ Analyzing redirects...")
+        _astep("Analyzing redirects...")
         with span("analysis.redirects", redirects=len(redirects)):
             results["redirect_data"] = analyze_redirects(
                 pages,
@@ -91,7 +108,7 @@ def run_analysis(
     analysis_config = config.get("analysis", {})
 
     if "thin_content" in enabled_analyzers:
-        log.info("→ Detecting thin content...")
+        _astep("Detecting thin content...")
         with span("analysis.thin_content", pages=len(pages)):
             results["thin_content_data"] = detect_thin_content(
                 pages,
@@ -103,7 +120,7 @@ def run_analysis(
         results["thin_content_data"] = {}
 
     if "broken_links" in enabled_analyzers:
-        log.info("→ Detecting broken links...")
+        _astep("Detecting broken links...")
         with span("analysis.broken_links", pages=len(pages), links=len(links)):
             results["broken_data"] = detect_broken_links(pages, links)
         bd = results["broken_data"]
@@ -115,14 +132,14 @@ def run_analysis(
         results["broken_data"] = {}
 
     if "images" in enabled_analyzers:
-        log.info("→ Analyzing images...")
+        _astep("Analyzing images...")
         with span("analysis.images", images=len(images)):
             results["images_analysis"] = analyze_images(images)
     else:
         results["images_analysis"] = {}
 
     if "url_issues" in enabled_analyzers:
-        log.info("→ Analyzing URL issues...")
+        _astep("Analyzing URL issues...")
         with span("analysis.url_issues", pages=len(pages)):
             results["url_issues"] = analyze_url_issues(
                 pages,
@@ -134,7 +151,7 @@ def run_analysis(
         results["url_issues"] = {}
 
     if "canonicals" in enabled_analyzers:
-        log.info("→ Analyzing canonicals...")
+        _astep("Analyzing canonicals...")
         with span("analysis.canonicals", pages=len(pages)):
             results["canonical_data"] = analyze_canonicals(
                 pages,
@@ -146,7 +163,7 @@ def run_analysis(
 
     # === التحسينات v3.0 ===
     if "schema_validator" in enabled_analyzers:
-        log.info("→ Validating Schema.org...")
+        _astep("Validating Schema.org...")
         with span("analysis.schema_validator", schema_entries=len(schema_entries)):
             results["schema_validation"] = validate_schemas(schema_entries)
         sv = results["schema_validation"]
@@ -157,7 +174,7 @@ def run_analysis(
         results["schema_validation"] = {}
 
     if "hreflang_validator" in enabled_analyzers:
-        log.info("→ Validating Hreflang...")
+        _astep("Validating Hreflang...")
         with span("analysis.hreflang_validator", pages=len(pages)):
             results["hreflang_validation"] = validate_hreflang(pages)
         hv = results["hreflang_validation"]
@@ -169,7 +186,7 @@ def run_analysis(
         results["hreflang_validation"] = {}
 
     if "sitemap_diff" in enabled_analyzers:
-        log.info("→ Comparing Sitemap vs Crawl...")
+        _astep("Comparing Sitemap vs Crawl...")
         # نأخذ sitemap URLs الكاملة من crawler (تراكمية عبر كل الـ sitemaps)
         sitemap_urls = list(getattr(crawler, "sitemap_urls_seen", []) or [])
         if not sitemap_urls and hasattr(crawler, "sitemap_parser") and crawler.sitemap_parser:
@@ -189,7 +206,7 @@ def run_analysis(
     # === Pagination (rel=next/prev) — يعمل تلقائياً عند وجود صفحات مرقّمة ===
     if any(get_value(p, "is_paginated") for p in pages):
         from analyzers.pagination_analyzer import analyze_pagination
-        log.info("→ Analyzing pagination...")
+        _astep("Analyzing pagination...")
         with span("analysis.pagination", pages=len(pages)):
             results["pagination_data"] = analyze_pagination(pages)
         pgd = results["pagination_data"]
@@ -200,7 +217,7 @@ def run_analysis(
     # === درجة الروابط الداخلية (PageRank داخلي) ===
     if links:
         from analyzers.link_score import compute_link_score
-        log.info("→ Computing internal link score...")
+        _astep("Computing internal link score...")
         with span("analysis.link_score", pages=len(pages), links=len(links)):
             results["link_score"] = compute_link_score(pages, links)
         ls = results["link_score"].get("summary", {})
@@ -212,7 +229,7 @@ def run_analysis(
     # === التدقيق الإملائي (اختياري، مطفأ افتراضياً) ===
     if analysis_config.get("spell_check"):
         from analyzers.spell_check import run_spell_check
-        log.info("→ Spell check...")
+        _astep("Spell check...")
         with span("analysis.spell_check", pages=len(pages)):
             results["spelling"] = run_spell_check(
                 pages, max_pages=int(analysis_config.get("spell_check_max_pages", 0) or 0))
@@ -224,7 +241,7 @@ def run_analysis(
     # === التشابه التقريبي بين الصفحات (Near-Duplicate) ===
     if any(get_value(p, "content_simhash") for p in pages):
         from analyzers.near_duplicate import detect_near_duplicates
-        log.info("→ Detecting near-duplicate content...")
+        _astep("Detecting near-duplicate content...")
         with span("analysis.near_duplicate", pages=len(pages)):
             results["near_duplicate"] = detect_near_duplicates(pages)
         log.info(f"   Near-duplicate pairs: {results['near_duplicate'].get('pairs_count', 0)}")
@@ -235,7 +252,7 @@ def run_analysis(
     resources = getattr(crawler, "get_resources", lambda: [])()
     if resources:
         from analyzers.resources_analyzer import analyze_resources
-        log.info("→ Analyzing resources...")
+        _astep("Analyzing resources...")
         with span("analysis.resources", resources=len(resources)):
             results["resources_data"] = analyze_resources(resources)
         rdz = results["resources_data"]
@@ -246,7 +263,7 @@ def run_analysis(
 
     # === Security headers (الخطة #8) ===
     if "security" in enabled_analyzers:
-        log.info("→ Analyzing security headers...")
+        _astep("Analyzing security headers...")
         sec_headers = crawler.get_headers()
         with span("analysis.security", pages=len(pages), headers=len(sec_headers)):
             results["security_data"] = analyze_security(pages, sec_headers)
@@ -257,7 +274,7 @@ def run_analysis(
 
     # === SEO Issues تجميع شامل ===
     if "seo_issues" in enabled_analyzers:
-        log.info("→ Collecting SEO issues...")
+        _astep("Collecting SEO issues...")
         with span("analysis.seo_issues", pages=len(pages)):
             results["seo_issues"] = collect_seo_issues(
                 pages=pages,
