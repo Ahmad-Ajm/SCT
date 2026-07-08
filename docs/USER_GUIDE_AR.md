@@ -407,7 +407,7 @@ AI_API_KEY=your_ai_key
   مسارات معفاة: `GET /` و`GET /jobs/{id}` (صفحات HTML) و`GET /health`
   و`GET /readyz` و`/static/*`. للتدوير: احذف الملف وأعد التشغيل
   (يُولَّد رمز جديد). حدود الإفراط: `/api/start` 10/دقيقة/IP،
-  باقي `/api/*` 120/دقيقة/IP. الدليل التشغيلي الكامل (8 سيناريوهات
+  باقي `/api/*` 120/دقيقة/IP. الدليل التشغيلي الكامل (9 سيناريوهات
   بأوامر shell + PowerShell) في [docs/RUNBOOK_AR.md](RUNBOOK_AR.md).
 - حماية SSRF تمنع الزحف/التحويل إلى عناوين داخلية/loopback/ميتاداتا (تجاوزها لكل تشغيل عبر
   `crawl.allow_private_hosts`).

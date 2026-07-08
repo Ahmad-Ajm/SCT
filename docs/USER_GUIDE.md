@@ -426,7 +426,7 @@ If the key/library is missing or the call fails, the crawl still completes norma
   `/static/*`. Rotate by deleting the file and restarting (a fresh token is
   generated on first start). Rate limits: `/api/start` 10/min/IP,
   `/api/*` 120/min/IP. Full operator playbook in
-  [docs/RUNBOOK.md](RUNBOOK.md) (8 scenarios with shell + PowerShell).
+  [docs/RUNBOOK.md](RUNBOOK.md) (9 scenarios with shell + PowerShell).
 - SSRF protection blocks crawling/redirecting to internal/loopback/metadata addresses
   (override per‑run with `crawl.allow_private_hosts`).
 - CSV/Excel exports neutralize formula injection for safe opening in spreadsheet apps.

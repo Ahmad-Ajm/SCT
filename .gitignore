@@ -42,3 +42,9 @@ _review/
 # so a fresh clone runs without setup. Copy the example to config.yaml only
 # when you need local overrides — keeps your real start_url / domain out of git.
 config.yaml
+
+# v1.13.24: defense-in-depth for OAuth token / secret files
+*_token.json
+client_secret*.json
+gsc_token.json
+ga4_token.json

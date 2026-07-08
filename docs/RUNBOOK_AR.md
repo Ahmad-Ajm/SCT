@@ -555,6 +555,80 @@ ergonomics للمطوّر المحلّي:
 
 ---
 
+## 9. مجلّدات المهام تختفي من `webapp_jobs/`
+
+### العَرَض
+لوحة «المهام الأخيرة» في الصفحة الرئيسيّة تعرض مهاماً أقلّ ممّا يتذكّر
+المستخدم، أو تكون فارغة. الفحص المباشر لـ`webapp_jobs/` يؤكّد اختفاء
+المجلّدات — لكنّ المستخدم لم يضغط «🧹 حذف الكل» ولا أيّ زرّ حذف.
+
+### الأداة لا تحذف تلقائياً
+`grep -rn 'rmtree\|unlink' webapp/ seo_crawler/seo_crawler/ --include="*.py"`
+يكشف ثلاثة مسارات فقط قد تحذف شيئاً تحت `webapp_jobs/*`:
+
+1. `webapp/job_runner.py::delete_job()` — يُبلَغ فقط عبر
+   `DELETE /api/jobs/{job_id}` (زرّ 🗑️ لكلّ صفّ).
+2. `webapp/job_runner.py::delete_all_jobs()` — عبر زرّ «🧹 حذف الكل
+   (عدا النشطة)» فقط.
+3. `webapp/routers/downloads.py` — يحذف ملفّات ZIP المؤقّتة في مجلّد
+   temp النظام، لا مجلّدات المهام أبداً.
+
+لا يوجد scheduler ولا TTL ولا sweeper خلفيّ. الأداة لا تحذف بيانات
+المستخدم من نفسها إطلاقاً.
+
+### السبب الجذريّ على Windows: Storage Sense
+لدى Windows 10/11 ميزة خلفيّة اسمها **Storage Sense** تحذف دورياً
+الملفّات التي تعتبرها «مؤقّتة». استدلالها كثيراً ما يشمل:
+
+- ملفّات تحت `%TEMP%` أقدم من N يوم
+- **ملفّات داخل مجلّدات اسمها `temp` أو `tmp` أو `cache` أو `logs`**
+- محتويات سلّة المحذوفات
+- ملفّات لم يُوصَل إليها منذ 30/60/90 يوماً
+
+إن كان SCT مُثبَّتاً تحت مسار يراقبه Storage Sense (بعض إعدادات Windows
+تشمل ملفّ المستخدم كاملاً)، فقد يحذف مجلّدات المهام ليلاً. حماية مضاد
+الفيروسات الفوريّة ومزامنة OneDrive Files On-Demand قد تُنتجان الأعراض
+نفسها.
+
+### كيف تؤكّد وتوقف ذلك
+
+**افحص Storage Sense:**
+```powershell
+# هل Storage Sense مُفعَّل؟
+Get-ItemProperty 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy' -ErrorAction SilentlyContinue | Select 01,04,08,32,2048
+
+# 01 = المفتاح الرئيسيّ (1 = مُفعَّل)
+# 04 = تنظيف الملفّات المؤقّتة (1 = مُفعَّل)
+# 08 = تنظيف التنزيلات
+# 2048 = تجفيف OneDrive
+```
+
+**عطّله (الأأمن لـSCT):**
+1. افتح **Settings → System → Storage → Storage Sense**
+2. أطفئ المفتاح الرئيسيّ، أو
+3. أبقِه مُفعَّلاً لكن اضبط «حذف الملفّات المؤقّتة التي لا تستخدمها
+   تطبيقاتي» إلى **أبداً (Never)**، وأضف
+   `D:\path\to\SCT\webapp_jobs\` إلى قائمة الاستثناء (Windows 11)
+
+**أضف استثناء مضاد الفيروسات:**
+1. **Windows Security → Virus & threat protection → Manage settings →
+   Add or remove exclusions → Add a folder** → اختر
+   `D:\...\Simple_Crawler_Tool_SCT\webapp_jobs\`
+
+**افحص OneDrive / Dropbox:**
+```powershell
+# هل مجلّد SCT تحت OneDrive؟
+$env:OneDrive; (Get-Item .).FullName
+```
+إن كان كذلك، إمّا انقل SCT خارج OneDrive أو انقر بزرّ الفأرة الأيمن على
+المجلّد → «Always keep on this device».
+
+### الوقاية مستقبلاً
+أأمن مكان تثبيت على Windows هو مجلّد **ليس** تحت `%USERPROFILE%` و**ليس**
+تحت أيّ أداة مزامنة: مثلاً `D:\SCT\` أو `C:\Tools\SCT\` مباشرة.
+
+---
+
 ## ملحق: one-liners مفيدة
 
 ```bash

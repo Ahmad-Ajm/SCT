@@ -1,42 +1,42 @@
 @echo off
 REM ============================================================
-REM  SCT — إيقاف الخادم وكل المهام النشطة (Windows)
+REM  SCT — Stop the server and all active tasks (Windows)
 REM
-REM  الاستخدام: انقر مزدوجاً
+REM  Usage: double-click
 REM
-REM  ما يفعله:
-REM    - يجد عمليّة Python التي تُشغّل webapp/run.py على المنفذ 8000
-REM    - يُنهيها بأمان (Ctrl+Break) ثمّ بـkill إن لزم
+REM  What it does:
+REM    - Finds the Python process running webapp/run.py on port 8000
+REM    - Terminates it gracefully (Ctrl+Break) then by kill if needed
 REM ============================================================
 setlocal
 
 echo.
-echo [SCT] البحث عن عمليّة الخادم على المنفذ 8000...
+echo [SCT] Searching for the server process on port 8000...
 
-REM ابحث عن PID للخدمة المستمعة على 8000
+REM Find the PID of the service listening on 8000
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000 " ^| findstr "LISTENING"') do (
     set "PID=%%a"
     goto :found
 )
 
-echo [SCT] لا يوجد خادم نشط على المنفذ 8000.
+echo [SCT] No active server on port 8000.
 pause
 exit /b 0
 
 :found
-echo [SCT] وُجدت عمليّة بـPID=%PID%، جارٍ الإيقاف...
+echo [SCT] Found process PID=%PID%, stopping...
 taskkill /PID %PID% /T /F >nul 2>nul
 if errorlevel 1 (
-    echo [SCT] ✗ تعذّر الإيقاف. شغّل cmd كـAdministrator وأعد المحاولة.
+    echo [SCT] ✗ Could not stop it. Run cmd as Administrator and try again.
 ) else (
-    echo [SCT] ✓ تمّ الإيقاف.
+    echo [SCT] ✓ Stopped.
 )
 
-REM امهلها ثانية وتأكّد
+REM Give it a second and verify
 timeout /t 1 >nul
 netstat -ano | findstr ":8000 " | findstr "LISTENING" >nul
 if not errorlevel 1 (
-    echo [SCT] ⚠ لا تزال هناك عمليّة على المنفذ. أعد المحاولة كـAdministrator.
+    echo [SCT] ⚠ There is still a process on the port. Try again as Administrator.
 )
 
 pause

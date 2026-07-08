@@ -1,76 +1,133 @@
-# SCT — أداة زحف وتدقيق SEO
+# SCT — أداة الزحف البسيطة
 
 [![CI](https://github.com/Ahmad-Ajm/SCT/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmad-Ajm/SCT/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Docs: AR + EN](https://img.shields.io/badge/docs-AR%20%2B%20EN-brightgreen.svg)](README.md)
 
-SCT هي أداة مفتوحة المصدر مبنية ببايثون لفحص SEO التقني والداخلي للمواقع. تساعدك على اكتشاف مشاكل الزحف، الفهرسة، العناوين، الوصف، الروابط، الصور، structured data، canonical، hreflang، mixed content، redirects، وتصدير تقارير قابلة للتحليل.
+> **أداة زحف وتدقيق SEO تقني تعمل محلياً بالكامل — مكتوبة بلغة Python، تُدار من واجهة متصفّح، وكل شيء يجري على جهازك أنت.**
 
-بدأ المشروع كأداة صغيرة لفحص موقع واحد، ثم تطور إلى Crawler متعدد الأوضاع مع زحف async، تخزين SQLite، تصدير CSV/JSON/Excel، سجلات تفصيلية، وملف `metrics.json` لقياس الأداء، وواجهة محلية متكاملة بـSSE، وتقارير HTML/PDF عربيّة RTL.
+تزحف SCT إلى الموقع، وتستخرج بيانات SEO داخل الصفحات، وتُشغّل مجموعة كاملة من المحلّلات التقنية، وتربط اختيارياً بيانات Google Search Console / Analytics 4 / PageSpeed، ثم تُنتج تقارير قابلة للتنزيل (HTML / PDF / Excel / CSV / JSON / XML). لا تغادر أي بيانات جهازك ما لم تُفعّل تكاملاً بنفسك.
 
-النسخة الإنجليزية متاحة في [README.md](README.md).
+بدأت كبديل خفيف للفحوص التقنية، ثم صارت أداة زحف متعدّدة الأوضاع مع زحف غير متزامن، وتخزين SQLite، ومحرّك شفّاف لترتيب أولويّات الإصلاح، وعرض تفاعلي لخريطة الروابط، وتقارير عملاء قابلة للتخصيص (بما فيها العربية / RTL).
 
-## الميزات
+التوثيق بالإنجليزية: [README.md](README.md).
 
-- زاحف Async مع إعدادات concurrency وdelay.
-- زاحف Sync احتياطي.
-- تخزين SQLite للمواقع الكبيرة.
-- أوضاع تشغيل: `audit` و`competitor` و`compare`.
-- قراءة `robots.txt` وsitemaps.
-- التحكم في SSL verification.
-- تحليل مشاكل URL hygiene + canonical.
-- كشف التكرارات (العناوين/الوصف/المحتوى) + thin content.
-- تحليل الروابط الداخلية المكسورة + فحص الروابط الخارجية + تحليل الصور.
-- فحص Schema.org + hreflang + مقارنة sitemap مع نتائج الزحف.
-- كشف mixed content + محلّل ترويسات الأمان (HSTS/CSP/X-Frame-Options/إلخ).
-- جرد الموارد (CSS/JS/صور/خطوط/iframes) مع علامات mixed-content.
-- استخراج مخصّص (CSS/Attribute/Text/Regex rules).
-- تصيير JavaScript اختياري عبر Playwright + فرق raw-vs-rendered.
-- استيراد Lighthouse/PageSpeed JSON (بلا مفاتيح).
-- تكاملات Google اختيارية: GSC (+URL Inspection)، GA4، PageSpeed (+جداول Lighthouse العميقة)،
-  CrUX History — كلها مطفأة افتراضياً.
-- تحليلات GSC: تكلّس الكلمات وفُرَص الروابط الداخلية. ومقارنة زمنية بين زحفتين (قبل/بعد).
-- درجة الروابط الداخلية (PageRank)، وكشف الصفحات شبه‑المكرّرة (SimHash + LSH)، وكاشف الصفحات اليتيمة.
-- محرّك أولويات v2 + لوحة عمل: درجة متعددة العوامل لكل صفحة (شدّة × أثر × سهولة × ثقة) مع
-  تصنيف نوع الصفحة وسهولة الإصلاح ومالكه، وتجميعها في «افعل الآن/يحتاج مطوّراً/…».
-- مولّد `sitemap.xml`، تحكّم تكيّفي بالسرعة، قوالب منصّات جاهزة
-  (زد/سلة/Shopify/WooCommerce للمتاجر، WordPress للمدوّنات/المواقع التحريريّة —
-  يستبعد `?replytocom=`، `/feed/`، `/tag/`، `/author/`، `/wp-admin`،
-  `/wp-json/`، `/xmlrpc.php` + 7 query params).
-- ضبط المتطلبات الاختيارية (التثبيت التلقائي صار **opt-in** عبر `SCT_AUTO_INSTALL=1` بعد v1.12؛
-  الافتراضي يُسجّل خطأ واضحاً باسم الحزمة وأمر `pip install …` الدقيق).
-- متصفّح النتائج (تصفية/فرز/بحث) وإعدادات قابلة للتعديل بالكامل من الواجهة.
-- تصدير CSV وJSON وExcel وHTML/PDF.
-- واجهة مرئية محلية متكاملة (FastAPI + HTMX + SSE) مع متابعة مباشرة للزحف.
-- تقارير HTML/PDF قابلة للتخصيص للعميل (عربي/RTL عبر Playwright).
-- استئناف async موثوق وإعادة تشغيل آمنة بلا تكرار صفوف.
-- حماية SSRF، سقف لقنابل gzip، وتحييد حقن الصيغ في CSV/Excel.
-- سجلات تفصيلية وملف `metrics.json` للمراقبة.
-- GitHub Actions CI.
+---
 
-## البدء السريع
+## المحتويات
 
-**أسرع طريقة — نقرة واحدة (v1.10):** انقر مزدوجاً على `START.bat` (Windows) /
-نقرة يمين → «Run with PowerShell» على `START.ps1` / `./start.sh` (macOS/Linux).
-المُشغّل يكتشف Python، يثبّت requirements عند أوّل تشغيل، يفتح المتصفّح على
-`http://127.0.0.1:8000`، ويطبع الـlocal auth token لـ`curl`/scripts. `STOP.bat`
-يُنهي الخادم.
+- [لماذا SCT](#لماذا-sct)
+- [أبرز الميزات](#أبرز-الميزات)
+- [بدء سريع](#بدء-سريع)
+- [لقطات الشاشة](#لقطات-الشاشة)
+- [قوالب المنصّات](#قوالب-المنصّات)
+- [التكاملات](#التكاملات)
+- [صيغ المخرجات](#صيغ-المخرجات)
+- [التوثيق](#التوثيق)
+- [المتطلبات](#المتطلبات)
+- [الرخصة والمساهمة](#الرخصة-والمساهمة)
 
-**التشغيل و مصادقة الـAPI.** الواجهة المرئيّة تعمل على `127.0.0.1` فقط
-ومحميّة بـtoken خاصّ بكلّ install في `~/.sct/local_token` بصلاحيّات `0600`.
-المتصفّح يحقنه تلقائياً؛ scripts يُمرّرونه عبر
-`Authorization: Bearer <token>` **أو** `?token=<token>` كـquery param. المُشغّل
-يطبع القيمة عند البدء، وأيّ `/api/*` بلا token يُرجع 401 مع تلميح يذكر مسار
-ملف الـtoken. نقطتا فحص للصحّة معفاتان من auth و rate limits:
-`GET /health` (liveness) و `GET /readyz` (readiness — يفحص فعلاً الكتابة في
-`webapp_jobs/`). الـrate limiter يضع سقف 10 طلبات/دقيقة/IP على `/api/start`
-و 120/دقيقة على باقي `/api/*` — رحب لاستخدام تفاعلي؛ موثَّق هنا كي لا
-تخنق automation deployment نفسها. دليل الحوادث الكامل للمشغّلين (8 سيناريوهات
-مع أوامر shell + PowerShell): [`docs/RUNBOOK_AR.md`](docs/RUNBOOK_AR.md) ·
-[English](docs/RUNBOOK.md).
+---
 
-**يدويّاً (متقدّم):**
+## لماذا SCT
+
+- **تعمل محلياً بالكامل.** تربط على `127.0.0.1`، تزحف وتدقّق وتُصدّر — لا يُرفع شيء ما لم تُشغّل تكاملاً.
+- **تشغيل بنقرة واحدة.** `START.bat` / `START.ps1` / `start.sh` تكتشف Python، وتُثبّت المتطلبات في أول تشغيل، وتفتح المتصفّح، وتطبع رمز الدخول المحلّي.
+- **مخرجات صادقة وقابلة للتنفيذ.** كل مشكلة تحمل: الأثر، الجهد، لماذا تهمّ، وكيف تُصلَح، ودرجة أولويّة — لا مجرّد قائمة مشاكل.
+- **مبنيّة لمواقع حقيقية.** الزحف على مرحلتين، والتحكّم التكيّفي بالسرعة، وقوالب المنصّات، والاستئناف الآمن ضدّ الأعطال تُبقي المتاجر والمدوّنات الكبيرة تحت السيطرة.
+- **صديقة للعربية أولاً.** معالجة UTF-8 صحيحة، وواجهة RTL، وتقارير عربية، وتوثيق ثنائي اللغة كامل.
+
+---
+
+## أبرز الميزات
+
+### الزحف
+
+- زاحف غير متزامن بتزامن وتأخير قابلين للضبط؛ ويتوفّر زاحف متزامن كبديل / لوضع التنقيح.
+- تخزين زحف مدعوم بـ SQLite للمواقع الكبيرة، مع **استئناف آمن ضدّ الأعطال** (بلا صفوف مكرّرة) وحالات إكمال صريحة (`complete` / `partial` / `partial_max_pages` / `stopped` / `failed`).
+- **ثلاث طرق لاكتشاف الروابط** — من الرئيسية (عرضاً أولاً)، من sitemap (تغطية واسعة للمنتجات)، أو هجين (الافتراضي).
+- **زحف على مرحلتين:** المرحلة 1 تُصنّف الروابط المكتشفة أثناء الطيران وتؤجّل الأنماط المُهدِرة لميزانية الزحف (الترقيم العميق، أغلفة تسجيل الدخول/إعادة التوجيه، انفجار تركيبات الفلاتر)؛ ثم تعرض لوحة ما جرى تأجيله لتراجعه وتُشغّل المرحلة 2 عليه اختيارياً.
+- **تحكّم تكيّفي بالسرعة** يُبطئ تلقائياً عند 429 / 5xx / البطء ثم يتعافى.
+- احترام `robots.txt` (قابل للتبديل)، وضبط التحقّق من شهادة HTTPS، وإعادات محاولة قابلة للضبط.
+- **قوالب User-Agent** (زائر عادي، Googlebot، Googlebot Mobile، Bingbot، أو مخصّص) لإعادة إنتاج مشاكل حجب البوتات في Cloudflare / WAF.
+- **تصيير JavaScript اختياري** (Chromium عبر Playwright) مع مقارنة الخام مقابل المُصيَّر (روابط، محتوى، عنوان، canonical، أخطاء الـ console).
+- شريط سرعة (لطيف → أقصى) مع حدّ أدنى من جهة الخادم لحماية المواقع الهدف.
+
+### التحليل
+
+- SEO داخل الصفحة: العناوين، أوصاف meta، الترويسات (H1–H6)، وسوم canonical، توجيهات robots، Open Graph، الترقيم (`rel=next/prev`)، وعدد الكلمات.
+- كشف تكرار العناوين / الأوصاف / H1 / المحتوى، إضافةً إلى **كشف شبه التكرار** (SimHash + LSH).
+- فحص **المحتوى الرقيق** مقابل عتبات قابلة للضبط لعدد الكلمات / نسبة النص.
+- تحليل **الروابط الداخلية المكسورة** وفحص حالة الروابط الخارجية (بأخذ عيّنة لكل نطاق للسرعة).
+- **تقييم الروابط الداخلية (PageRank)** و**كاشف الصفحات اليتيمة** (بلا روابط داخلية واردة).
+- نظافة الروابط (الطول، الأحرف الكبيرة، الشرطات السفلية، معاملات التتبّع، عدد المعاملات، غير ASCII) — مع مفتاح تبديل لـ non-ASCII مناسب للمواقع العربية.
+- تحليل canonical (نحو أهداف غير 200 / غير قابلة للفهرسة / خارجية، حلقات، سلاسل).
+- **التحقّق من hreflang** (التبادليّة / رابط العودة، أهداف 404 / noindex، صيغة غير صالحة، غياب x-default / الإشارة الذاتية).
+- **التحقّق من Schema.org** (JSON-LD / microdata — النوع والاسم).
+- **محلّل ترويسات الأمان** (HSTS / CSP / X-Frame-Options وغيرها)، وكشف غير-HTTPS، وكشف **المحتوى المختلط**.
+- **جرد الموارد** (CSS / JS / صور / خطوط / وسائط / iframes) مع أعلام المحتوى المختلط وفحص اختياري لحالة HTTP لكل مورد.
+- **تحليل الصور** — غياب alt، غياب الأبعاد (خطر CLS)، الصيغة، والتحميل الكسول.
+- **تدقيق وصولية اختياري** (axe-core / WCAG) مع عدد المخالفات لكل صفحة وتوزيعها حسب الأثر (يتطلّب تصيير JS).
+- **استخراج مخصّص** — اسحب أي قيمة بقواعد CSS أو Regex.
+- **محرّك الأولويّة v2 + لوحة الإجراءات:** درجة شفّافة متعدّدة العوامل لكل صفحة (الخطورة × الأثر × السهولة × الثقة) مع تصنيف نوع الصفحة والسهولة/المالك، مجمّعة في *افعل الآن / يحتاج مطوّراً / يحتاج منصّة / يحتاج محتوى / أجّله / أثر منخفض*.
+- **مقارنة عبر الزمن** — اختر تشغيلَين وشاهد المشاكل المُصلَحة / الجديدة / المستمرّة.
+- **محلّل اللوغ** — ارفع سجلّ وصول Apache/Nginx لترى ميزانية زحف Googlebot لكل رابط (200 / 3xx / 404 / 5xx).
+
+### التكاملات (كلّها اختيارية ومطفأة افتراضياً)
+
+- **Google Search Console** — نقرات / ظهور / CTR / موضع لكل صفحة واستعلام، مع **تكاذب الكلمات المفتاحية** و**فرص الربط الداخلي** المشتقّة.
+- **GSC URL Inspection** — حالة فهرسة حقيقية لكل رابط (verdict / coverage / canonical)، محدودة بالحصّة.
+- **Google Analytics 4** — جلسات / مستخدمون / تفاعل لصفحات الهبوط والقنوات.
+- **PageSpeed Insights API** — درجات الأداء / SEO مع **جداول Lighthouse العميقة** (كل الفحوص، طلبات الشبكة، خريطة JS، الفحوص الفاشلة).
+- **CrUX History** — اتجاه Core Web Vitals عبر الزمن (p75).
+- **استيراد Lighthouse** — قراءة مجلّد ملفات Lighthouse JSON محلّية (بلا مفاتيح، بلا إنترنت).
+- **استيراد Ahrefs Webmaster (AWT)** — روابط خلفية / كلمات مفتاحية مجّانية لمالكي المواقع (CSV).
+- **Backlinks API (حيّ)** — النطاقات المُحيلة وأعلى الروابط الخارجية من Ahrefs API v3 أو Majestic OpenApp.
+- **مستشار الذكاء الاصطناعي** — ملخّص تنفيذي وتوصيات مرتّبة اختيارية من OpenAI أو Google Gemini أو DeepSeek أو OpenRouter أو Hugging Face أو أي نقطة متوافقة مع OpenAI (بما فيها النماذج المحلية مثل Ollama / LM Studio). لا تُرسَل بيانات شخصية — فقط روابط وأنواع مشاكل وأرقام مجمّعة.
+
+عند تفعيل GSC / GA4، يربط **التقرير الموحّد** المشاكل التقنية بحركة المرور الحقيقية لإنتاج **فرص ذات أولويّة** (`priority_score = أثر الحركة × خطورة المشكلة`).
+
+### التقارير
+
+- تقرير **الخبير** — الوثيقة التقنية الكاملة (ملخّص تنفيذي، فرص ذات أولويّة، كل المشاكل حسب الخطورة مع روابط عيّنة، الصفحات المشكِلة، الظهور في البحث، سلوك المستخدم، إعادات التوجيه، الترقيم، hreflang، جرد الموارد، Schema.org).
+- تقرير **العميل** — ملخّص قصير بلغة بسيطة مع درجة/تقييم صحّة إجمالي.
+- **كلاهما** — يُنتج ملفَّين منفصلَين.
+- **توليد عند الطلب** — البيانات الخام (CSV / JSON) تُكتب دائماً بعد الزحف؛ أمّا HTML / PDF / Excel / XML فتُولَّد عند الطلب من صفحة المهمّة. ويمكنك **إعادة بناء** التقرير لاحقاً بتغيير اللغة واسم العميل والجمهور وما إن كنت تريد PDF.
+- تقارير HTML / PDF قابلة للتخصيص مع **دعم العربية / RTL** (PDF عبر Playwright).
+
+### واجهة الويب
+
+- واجهة ويب محلّية مدمجة (**FastAPI + HTMX + SSE**) بثلاثة تبويبات: **الزحف**، و**التكاملات والذكاء**، و**المتقدّم**.
+- مراقبة حيّة للزحف — المرحلة، الزمن المنقضي، وستّة عدّادات حيّة (الصفحات، الطابور، الفاشلة، المفحوصة خارجياً، صفحات/ث، الثواني) لكلٍّ تلميح توضيحي.
+- **استكشاف النتائج** — فلترة / فرز / بحث في الصفحات داخل المتصفّح وتصدير المجموعة المُفلترة كـ CSV.
+- **لوحة الإجراءات** — أولويّات الإصلاح مجمّعة وقابلة للفلترة، مع لوحة منزلقة لكل رابط تجمع بيانات الزحف + GSC + URL Inspection + GA4 + PageSpeed + الأولويّة + الوصولية في عرض واحد.
+- **عرض خريطة الروابط** — شجرة مقاطع مسار ملوّنة بحسب رمز الحالة، ورسوم توزيع للعمق / الحالة، وخريطة روابط داخلية موجّهة بالقوى (محدودة للاستجابة).
+- صفحتا **المقارنة قبل/بعد** و**محلّل اللوغ**.
+- زرّ **إيقاف** يُصدّر النتائج الجزئية فوراً فلا يضيع شيء.
+- قائمة المهام الأخيرة مع مخرجات كل مهمّة تحت `webapp_jobs/<job_id>/`.
+
+### الأمان والتشغيل
+
+- **رمز دخول محلّي** — كل مسار `/api/*` يتطلّب رمزاً لكل تثبيت في `~/.sct/local_token` (بصلاحيّة `0600`)؛ المُشغّل يطبعه، والسكربتات تمرّره كـ bearer أو معامل `?token=`. نقطتا الحيويّة (`/health`) والجاهزيّة (`/readyz`) معفاتان.
+- **حماية SSRF** — تمنع الزحف / إعادة التوجيه إلى عناوين داخلية / loopback / بيانات وصفيّة (قابلة للتجاوز لكل تشغيل).
+- **تحييد حقن الصيغ** لفتح آمن لـ CSV / Excel، وحدّ أقصى ضدّ **قنابل gzip**.
+- المفاتيح السرّية تعيش في `.env` / إعداد المهمّة المحلّي (مُستبعَدة من Git) وتُمرَّر لعملية الزحف عبر متغيّرات البيئة — لا تُلتزم أبداً.
+- سجلّات مفصّلة ومخرَج رصد `metrics.json` (عدّادات، توقيتات لكل مرحلة، أبطأ المراحل). تكامل مستمرّ عبر GitHub Actions.
+
+---
+
+## بدء سريع
+
+### أسرع طريق — بنقرة واحدة
+
+- **ويندوز:** انقر مرّتين على `START.bat`.
+- **ويندوز (PowerShell):** انقر يميناً على `START.ps1` ← *تشغيل باستخدام PowerShell*.
+- **macOS / Linux:** `./start.sh`.
+
+يكتشف المُشغّل Python، ويُثبّت المتطلبات في أول تشغيل، ويفتح `http://127.0.0.1:8000`، ويطبع رمز الدخول المحلّي للسكربتات. `STOP.bat` يُنهي الخادم على ويندوز.
+
+### يدوياً (متقدّم)
 
 ```bash
 python -m pip install -r requirements.txt
@@ -78,141 +135,145 @@ python main.py --help
 python main.py --mode audit --url https://example.com/
 ```
 
-ولتفعيل JavaScript rendering وتقارير PDF:
-
-```bash
-playwright install chromium
-```
-
-### الواجهة المرئية
+واجهة الويب فقط:
 
 ```bash
 python -m pip install fastapi "uvicorn[standard]" jinja2 python-multipart
 python webapp/run.py            # ثم افتح http://127.0.0.1:8000
 ```
 
-### Docker (أمر واحد، يتضمّن Chromium)
+لتصيير JavaScript الاختياري وتقارير PDF:
+
+```bash
+playwright install chromium
+```
+
+### Docker (أمر واحد، يحزم Chromium)
 
 ```bash
 docker compose up --build       # ثم افتح http://127.0.0.1:8000
 ```
 
-مبنية على صورة Playwright الرسمية، فيعمل تصيير JavaScript وتقارير PDF مباشرةً. تُحفظ المخرجات
-في `./webapp_jobs`. الأسرار تُقرأ وقت التشغيل من `.env` (لا تُخبز في الصورة)، ويمكن وصل
-اعتماد Google تحت `./credentials`.
+مبنيّ على صورة Playwright الرسمية، فيعمل تصيير JavaScript وتقارير PDF مباشرةً. تبقى المخرجات في `./webapp_jobs`؛ وتُقرأ الأسرار وقت التشغيل من `.env` (لا تُخبز في الصورة)؛ ويمكن ربط اعتمادات Google الاختيارية تحت `./credentials`.
 
-### مُثبِّت Windows (بلا Docker، بلا صلاحيات admin)
+### مُثبّت ويندوز (بلا Docker، بلا صلاحيات مدير)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File installer\install.ps1
 ```
 
-يُنشئ venv معزولاً، يُثبّت كل المتطلبات + Chromium لـ Playwright، ويُضيف اختصارات
-سطح المكتب وقائمة ابدأ تُشغّل الواجهة المرئية. التفاصيل في `installer/README.md`.
+يُنشئ `.venv` معزولة، ويُثبّت كل المتطلبات إضافةً إلى Chromium لـ Playwright، ويضيف اختصارات سطح المكتب وقائمة ابدأ لتشغيل واجهة الويب المحلّية. انظر [`installer/README.md`](installer/README.md).
 
-الواجهة تتيح تخصيص الإعدادات، إدخال الرابط، اختيار الوضع، تشغيل/إيقاف الزحف ومتابعته
-مباشرة (SSE)، وتنزيل تقارير HTML/PDF/Excel/JSON. مخرجات كل مهمة تُحفظ تحت
-`webapp_jobs/<job_id>/`.
-
-## الاستخدام
+### الاستخدام من سطر الأوامر
 
 ```bash
-python main.py --mode audit
 python main.py --mode audit --url https://example.com/
 python main.py --mode competitor --url https://competitor.example/
 python main.py --mode compare
 python main.py --analyze-only --skip-external
+python main.py --phase2            # ازحف الروابط المؤجّلة من تشغيل سابق
 python main.py --clear-cache
 ```
 
-## هيكل المشروع
+---
 
-```text
-Simple_Crawler_Tool_SCT/
-├── main.py                  # مشغل من جذر المشروع
-├── config.yaml              # إعدادات التشغيل المحلية
-├── config.example.yaml      # قالب إعدادات عام وآمن للنشر
-├── requirements.txt         # الاعتمادات
-├── ROADMAP.md               # خارطة الطريق
-├── docs/                    # خطط وتصميمات تقنية
-└── seo_crawler/seo_crawler/ # التطبيق الأساسي
-```
+## لقطات الشاشة
 
-المسار المعتمد للتطوير هو `seo_crawler/seo_crawler`.
+> _مكان مخصّص — أضف لقطاتك هنا._ لقطات مقترحة: تبويب الزحف، وصفحة مهمّة حيّة مع العدّادات الستّة، ولوحة الإجراءات، وعرض خريطة الروابط، وتقرير عميل مُصيَّر. ضع الصور تحت `docs/screenshots/` وأشِر إليها هنا، مثلاً `![لوحة الإجراءات](docs/screenshots/action-board.png)`.
 
-## أوضاع التشغيل
+---
 
-| الوضع | الاستخدام |
-| --- | --- |
-| `audit` | تدقيق SEO تقني كامل لموقع تملكه أو تديره. |
-| `competitor` | زحف خفيف ومحترم لتحليل المنافسين. |
-| `compare` | مقارنة عدة مواقع من `sites_to_compare` وتصدير ملخصات المقارنة. |
+## قوالب المنصّات
 
-## الإعدادات
+اختر قالباً من الواجهة (خيارات الزحف المتقدّمة) أو اضبط `site.platform_preset` في `config.yaml`. القالب **يُضيف** أنماط استبعاد موصى بها وتطبيعاً لمعاملات الاستعلام دون مسح ما وضعته أنت — فتبقى ضوضاء السلّة / الدفع / الحساب وروابط الترتيب المكرّرة خارج الزحف.
 
-استخدم `config.example.yaml` كقالب عام، ثم انسخه إلى `config.yaml` وعدله حسب موقعك.
+| القالب | الأنسب لـ | ما يستبعده / يُطبّعه |
+|---|---|---|
+| **Zid (زد)** | متاجر زد | السلّة / الدفع / الحساب / add-to-cart؛ ويُطبّع `sort_by` / `sort` / `order_by` / `order` / `view`. |
+| **Salla (سلة)** | متاجر سلة | السلّة / الدفع / الملف الشخصي / تسجيل الدخول / add-to-cart؛ ويُطبّع `sort` / `order` / `view`. |
+| **Shopify** | متاجر Shopify | السلّة / الدفع / الحساب / نقاط `products.json`؛ ويُطبّع `sort_by` / `view`. |
+| **WooCommerce** | متاجر مبنية على WordPress | السلّة / الدفع / my-account / add-to-cart / wp-admin؛ ويُطبّع `orderby` / `order` / فلاتر السعر. |
+| **WordPress** | مواقع WP عادية (مدوّنات، أخبار، شركات، حكومي) | `?replytocom=` (فخّ زحف التعليقات اللانهائي الكلاسيكي)، `/feed/`، `/tag/`، `/author/`، `/wp-admin`، `/wp-login.php`، `/wp-json/`، `/xmlrpc.php`، إضافةً إلى 7 معاملات تُزال (`replytocom`، `attachment_id`، `unapproved`، `moderation-hash`، `preview`، `preview_id`، `preview_nonce`). |
 
-أهم الأقسام:
+اختر **WordPress** لمواقع WP العادية و**WooCommerce** للمتاجر المبنية على WP. ويمكن أيضاً كشف المنصّة تلقائياً من HTML / ترويسات الصفحة.
 
-- `site`: رابط البداية والدومين الأساسي.
-- `crawl`: حدود الزحف، التأخير، المحاولات، robots، SSL، concurrency.
-- `extraction`: العناصر التي يتم استخراجها.
-- `analysis`: حدود العناوين والوصف والمحتوى والـ URL والعمق.
-- `output`: صيغ التصدير ومجلد المخرجات.
-- `state`: إعدادات SQLite والـ cache.
-- `external_check`: فحص الروابط الخارجية.
-- `observability`: اللوغ وملف metrics.
+---
 
-## المخرجات
+## التكاملات
 
-افتراضياً تحفظ الأداة المخرجات داخل `output/` في مجلد باسم يحتوي التاريخ والوقت.
+كل التكاملات **اختيارية ومطفأة افتراضياً**، تُفعَّل من **الإعدادات المتقدّمة ← التكاملات** في الواجهة. تُحفظ المفاتيح والمسارات فقط في إعداد المهمّة المحلّي ولا تُكتب أبداً في المستودع؛ وتُمرَّر المفاتيح السرّية لعملية الزحف عبر متغيّرات البيئة.
 
-المخرجات تشمل:
+| التكامل | ما يضيفه | ما تُقدّمه |
+|---|---|---|
+| **Google Search Console** | نقرات / ظهور / CTR / موضع لكل صفحة واستعلام + تكاذب الكلمات المفتاحية + فرص الربط الداخلي | اعتماد OAuth (Desktop) + رابط موقع موثّق |
+| **GSC URL Inspection** | حالة فهرسة حقيقية لكل رابط (verdict / coverage / canonical)، محدودة بالحصّة | نفس اعتماد GSC |
+| **Google Analytics 4** | جلسات / مستخدمون / تفاعل لصفحات الهبوط + القنوات | ملف حساب خدمة JSON + معرّف الخاصيّة (يتطلّب `google-analytics-data`) |
+| **PageSpeed Insights** | درجات الأداء / SEO + جداول Lighthouse العميقة (فحوص / شبكة / خريطة JS / فاشلة) | مفتاح API (أو `PAGESPEED_API_KEY` في `.env`) |
+| **CrUX History** | اتجاه Core Web Vitals عبر الزمن (p75) | نفس مفتاح PageSpeed |
+| **استيراد Lighthouse** | قراءة Lighthouse JSON محلّي — بلا مفاتيح، بلا إنترنت | مجلّد ملفات Lighthouse `.json` |
+| **Ahrefs Webmaster (AWT)** | روابط خلفية / كلمات مجّانية لمالكي المواقع | مجلّد ملفات AWT CSV |
+| **Backlinks API (حيّ، مدفوع)** | النطاقات المُحيلة + أعلى الروابط الخارجية | مفتاح API في `.env` (`BACKLINKS_API_KEY`) — Ahrefs API v3 أو Majestic OpenApp |
+| **مستشار الذكاء الاصطناعي** | ملخّص تنفيذي + توصيات مرتّبة | مفتاح API (أو نقطة محلّية متوافقة مع OpenAI) |
 
-- `complete_audit.json`
-- ملفات CSV للصفحات، الروابط، الصور، العناوين، schema، redirects، SEO issues، URL issues، canonical issues.
-- ملف Excel اختياري `master_audit.xlsx` إذا كانت `openpyxl` مثبتة.
-- ملفّا `report.html` و`report.pdf` عند إضافة `html`/`pdf` إلى `output.formats` (الـ PDF يحتاج Playwright).
-- ملف `metrics.json` يحتوي timings وcounters وgauges وrecent events.
+تُوفّر الواجهة تسجيل دخول Google بنقرة (مع قوائم منسدلة لاختيار مواقع GSC / خصائص GA4)، وبديل «لصق الرمز» للأجهزة بلا متصفّح، ودليل إعداد لأوّل مرّة بروابط مباشرة إلى Google Cloud. انظر [`docs/EXTERNAL_TOOLS_GUIDE.md`](docs/EXTERNAL_TOOLS_GUIDE.md).
 
-## الواجهة والتقارير
+---
 
-الواجهة المرئية، وتقارير HTML/PDF القابلة للتخصيص، والتقرير الموحّد (تقني + GSC + GA4 +
-أولويات متقاطعة) كلها مُنفَّذة فعلياً. لإعداد التكاملات الاختيارية (Lighthouse / GSC / GA4 / ZAP)
-راجع [docs/EXTERNAL_TOOLS_GUIDE_AR.md](docs/EXTERNAL_TOOLS_GUIDE_AR.md).
+## صيغ المخرجات
 
-## الاختبارات
+تُكتب البيانات الخام (**CSV** و**JSON**) دائماً بعد الزحف؛ ويُولَّد الباقي عند الطلب.
+
+| الصيغة | المحتوى |
+|---|---|
+| **CSV** (`csv/`) | البيت الكامل للبيانات — ملفات صغيرة أحاديّة الغرض: pages، all_links / inlinks / outlinks_external، images (+ no-alt / no-dimensions)، headings، schema، headers، redirects (+ chains / loops / issues)، seo_issues، duplicates، orphans، thin_content، 4xx / 5xx / 404-with-inlinks، url_issues، canonical_issues، security_issues، pagination (+ issues)، hreflang_issues، resources (+ issues / status)، custom_extraction، excluded_urls، deferred_urls، و — عند التفعيل — gsc_pages / gsc_queries / gsc_index_status، keyword_cannibalization، internal_link_opportunities، ga4_landing_pages / ga4_channels، pagespeed_* (جداول Lighthouse العميقة)، crux_history، priority_opportunities، page_priority، action_board، ai_recommendations، lighthouse_import، js_diff، accessibility (+ issues). |
+| **JSON** | أرشيف التدقيق الكامل القابل للقراءة آلياً (يُبنى منه التقرير). مصفوفات الروابط / الصور / الترويسات الخام مُستبعَدة افتراضياً لإبقائه خفيفاً؛ اضبط `output.json_full: true` لتضمينها. |
+| **Excel** (`.xlsx`) | مصنّف عميل متعدّد الأوراق ومحدود (أوراق مُقيّدة للقراءة). يتطلّب `openpyxl`؛ يُتخطّى بسلاسة عند غيابه. |
+| **HTML / PDF** | التقرير المنسّق القابل للمشاركة — خبير أو عميل أو كلاهما. العربية / RTL مدعومة. PDF يتطلّب Playwright. |
+| **XML** (`xml/`) | نفس البيانات الأساسية بصيغة XML للأدوات التي تفضّلها (مطفأة افتراضياً؛ محدودة الصفوف). |
+| **sitemap.xml** | يُولَّد من الصفحات القابلة للفهرسة عند تفعيل `output.generate_sitemap`. |
+| **metrics.json** | مقاييس التشغيل — عدّادات، توقيتات لكل مرحلة، وأبطأ المراحل. |
+
+لا تظهر الملفات إلا عند وجود البيانات المطابقة أو تفعيل التكامل المطابق. في صفحة المهمّة يمكنك تنزيل أي ملف منفرداً، أو الكل كـ ZIP واحد، أو مجموعة مختارة.
+
+---
+
+## التوثيق
+
+| لِـ… | اقرأ |
+|---|---|
+| المستخدمون النهائيون (جولة الواجهة، التكاملات، حلّ المشاكل) | [`docs/USER_GUIDE_AR.md`](docs/USER_GUIDE_AR.md) · [English](docs/USER_GUIDE.md) |
+| أعلام سطر الأوامر + سيناريوهات | [`docs/CLI_AR.md`](docs/CLI_AR.md) · [English](docs/CLI.md) |
+| المعمارية، خريطة الوحدات، قرارات التصميم | [`docs/ARCHITECTURE_AR.md`](docs/ARCHITECTURE_AR.md) · [English](docs/ARCHITECTURE.md) |
+| تكاملات الأدوات الخارجية (Lighthouse، ZAP، Backlinks) | [`docs/EXTERNAL_TOOLS_GUIDE_AR.md`](docs/EXTERNAL_TOOLS_GUIDE_AR.md) · [English](docs/EXTERNAL_TOOLS_GUIDE.md) |
+| دليل الحوادث (للمشغّلين) | [`docs/RUNBOOK_AR.md`](docs/RUNBOOK_AR.md) · [English](docs/RUNBOOK.md) |
+| المساهمة / توسيع الأداة | [`CONTRIBUTING_AR.md`](CONTRIBUTING_AR.md) · [English](CONTRIBUTING.md) |
+| ميثاق السلوك | [`CODE_OF_CONDUCT_AR.md`](CODE_OF_CONDUCT_AR.md) · [English](CODE_OF_CONDUCT.md) |
+| سياسة الأمان | [`SECURITY.md`](SECURITY.md) |
+| مُثبّت ويندوز | [`installer/README.md`](installer/README.md) |
+| سجلّ الإصدارات | [`CHANGELOG.md`](CHANGELOG.md) |
+| ما هو مخطّط | [`ROADMAP.md`](ROADMAP.md) |
+
+---
+
+## المتطلبات
+
+- **Python 3.10+**.
+- الاعتماديّات الأساسية من `requirements.txt` (تشمل واجهة الويب: `fastapi`، `uvicorn`، `jinja2`، `python-multipart`).
+- **Playwright + Chromium** (اختياري) — فقط لتصيير JavaScript وتدقيق الوصولية وتقارير PDF: `playwright install chromium`.
+- **`openpyxl`** (اختياري) — فقط لتصدير Excel؛ يُتخطّى بسلاسة عند غيابه.
+- **`google-analytics-data`** (اختياري) — فقط لتكامل GA4.
+
+شغّل الاختبارات بـ:
 
 ```bash
 python -B -m compileall -q seo_crawler/seo_crawler tests
 python -B -m unittest discover -s tests
 ```
 
-## ملاحظات مهمة
+---
 
-- الأداة تحترم `robots.txt` عند تفعيل ذلك في الإعدادات.
-- استخدم concurrency منخفضاً عند زحف مواقع لا تملكها.
-- JavaScript rendering اختياري ويجب تفعيله بشكل انتقائي لأنه مكلف.
-- إذا لم تكن `openpyxl` مثبتة يتم تخطي Excel مع استمرار CSV/JSON/metrics.
+## الرخصة والمساهمة
 
-## الوثائق
+**رخصة MIT** — حقوق النشر (c) 2026 **Ahmad-Ajm**. يمكنك النسخ والتعديل والتوزيع والاستخدام التجاري لهذا البرنامج. انظر [LICENSE](LICENSE).
 
-| لمن… | اقرأ |
-|---|---|
-| المستخدم النهائي (جولة الواجهة، التكاملات، استكشاف الأخطاء) | [`docs/USER_GUIDE_AR.md`](docs/USER_GUIDE_AR.md) · [English](docs/USER_GUIDE.md) |
-| أعلام سطر الأوامر + سيناريوهات | [`docs/CLI_AR.md`](docs/CLI_AR.md) · [English](docs/CLI.md) |
-| البنية، خريطة الوحدات، القرارات المعمارية | [`docs/ARCHITECTURE_AR.md`](docs/ARCHITECTURE_AR.md) · [English](docs/ARCHITECTURE.md) |
-| المساهمة / توسعة الأداة | [`CONTRIBUTING_AR.md`](CONTRIBUTING_AR.md) · [English](CONTRIBUTING.md) |
-| ميثاق السلوك | [`CODE_OF_CONDUCT_AR.md`](CODE_OF_CONDUCT_AR.md) · [English](CODE_OF_CONDUCT.md) |
-| سياسة الأمان | [`SECURITY.md`](SECURITY.md) |
-| دليل الحوادث للمشغّلين (RUNBOOK) | [`docs/RUNBOOK_AR.md`](docs/RUNBOOK_AR.md) · [English](docs/RUNBOOK.md) |
-| سجلّ الإصدارات | [`CHANGELOG.md`](CHANGELOG.md) |
-| ما هو مخطّط | [`ROADMAP.md`](ROADMAP.md) |
-| تكاملات الأدوات الخارجية (Lighthouse, ZAP) | [`docs/EXTERNAL_TOOLS_GUIDE_AR.md`](docs/EXTERNAL_TOOLS_GUIDE_AR.md) · [English](docs/EXTERNAL_TOOLS_GUIDE.md) |
-| مُثبِّت Windows | [`installer/README.md`](installer/README.md) |
-
-## الترخيص
-
-ترخيص MIT — Copyright (c) 2026 Ahmad-Ajm. يحقّ لك النسخ والتعديل والتوزيع والاستخدام
-التجاري لهذه الأداة. راجع [LICENSE](LICENSE). المساهمات تُقبَل بنفس الترخيص (راجع
-[`CONTRIBUTING_AR.md`](CONTRIBUTING_AR.md)).
+المساهمات مُرحَّب بها ومقبولة تحت الرخصة نفسها. الرجاء قراءة [`CONTRIBUTING_AR.md`](CONTRIBUTING_AR.md) (و[ميثاق السلوك](CODE_OF_CONDUCT_AR.md)) قبل فتح طلب دمج. لمشاكل الأمان: انظر [`SECURITY.md`](SECURITY.md).

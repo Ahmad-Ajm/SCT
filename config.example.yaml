@@ -5,9 +5,9 @@ site:
   start_url: "https://example.com/"
   domain: "example.com"
   additional_internal_domains: []
-  # قالب منصّة جاهز (IMP-11 + v1.13.5): "" أو zid | salla | shopify | woocommerce | wordpress
-  # متاجر: يستبعد السلّة/الدفع/الحساب؛ wordpress: يستبعد wp-admin/feed/replytocom/author/tag.
-  # يدمج الأنماط دون مسح ما تضعه أنت في filters.exclude_patterns.
+  # Ready-made platform preset (IMP-11 + v1.13.5): "" or zid | salla | shopify | woocommerce | wordpress
+  # Stores: excludes cart/checkout/account; wordpress: excludes wp-admin/feed/replytocom/author/tag.
+  # Merges patterns without erasing what you set in filters.exclude_patterns.
   platform_preset: ""
 
 crawl:
@@ -19,17 +19,17 @@ crawl:
   retry_delay_seconds: 2
   respect_robots: true
   robots_failure_policy: "allow"
-  # homepage | sitemap | hybrid (موصى به)
+  # homepage | sitemap | hybrid (recommended)
   seed_strategy: "hybrid"
   verify_ssl: true
-  # السماح بزحف عناوين داخلية/loopback. اتركه false لحماية SSRF.
+  # Allow crawling internal/loopback hosts. Keep false for SSRF protection.
   allow_private_hosts: false
   concurrent_requests: 5
-  user_agent: "SCTBot/1.0 (+https://github.com/your-org/simple-crawler-tool)"
+  user_agent: "SCTBot/1.0 (+https://github.com/Ahmad-Ajm/SCT)"
   max_page_size_mb: 10
   follow_redirects: true
   max_redirect_hops: 5
-  # تحكّم تكيّفي بالسرعة (IMP-10): يزيد التأخير عند 429/5xx/بطء ويتعافى تلقائياً.
+  # Adaptive rate control (IMP-10): increases delay on 429/5xx/slowness and recovers automatically.
   adaptive_throttle:
     enabled: false
     min_delay: 0.0
@@ -38,16 +38,16 @@ crawl:
     step_down: 0.25
     slow_ms: 3000
 
-  # v1.08: زحف على مرحلتين — Phase 1 يفحص الروابط الأساسيّة (sitemap +
-  # navigation + غيرها) ويُؤجّل الأنماط الضوضائيّة المعروفة (pagination_deep،
-  # /auth/login، تركيبيّات الفلاتر). بعد Phase 1 تظهر لوحة عرض الأعداد + زرّ
-  # Phase 2 لفحص المؤجَّلة.
+  # v1.08: two-phase crawl — Phase 1 scans the core links (sitemap +
+  # navigation + others) and defers known noisy patterns (pagination_deep,
+  # /auth/login, filter combinations). After Phase 1 a counts panel appears + a
+  # Phase 2 button to scan the deferred ones.
   deferred_crawl:
     enabled: true
-    pagination_max: 3      # ?page=N أكبر من هذا يُؤجَّل
-    filter_max: 1          # تركيبيّات فلاتر أكثر تُؤجَّل
-    max_tracked: 50000     # سقف عدد المؤجَّلة المُسجَّلة
-    # phase2: تُضبط تلقائياً بـ--phase2 CLI flag — لا تعدّلها يدوياً.
+    pagination_max: 3      # ?page=N greater than this is deferred
+    filter_max: 1          # more filter combinations are deferred
+    max_tracked: 50000     # cap on the number of deferred entries tracked
+    # phase2: set automatically by the --phase2 CLI flag — do not edit it manually.
 
 javascript:
   enabled: false
@@ -56,13 +56,13 @@ javascript:
   browser: "chromium"
   headless: true
 
-# فحص الوصولية (axe-core) — اختياري، يتطلّب javascript.enabled (يعمل داخل المتصفّح المُصيّر)
+# Accessibility check (axe-core) — optional, requires javascript.enabled (runs inside the rendered browser)
 accessibility:
   enabled: false
-  max_pages: 50            # سقف عدد الصفحات التي يُفحَص فيها axe
-  axe_source: ""           # مسار محلي لـ axe.min.js (موصى به للعمل دون إنترنت)
-  cdn_url: ""              # رابط CDN بديل (يُستعمل عند allow_cdn فقط؛ الافتراضي jsdelivr)
-  allow_cdn: false         # السماح بجلب axe-core من CDN عند غياب الملف المحلي
+  max_pages: 50            # cap on the number of pages axe checks
+  axe_source: ""           # local path to axe.min.js (recommended for offline operation)
+  cdn_url: ""              # alternate CDN URL (used only when allow_cdn; default jsdelivr)
+  allow_cdn: false         # allow fetching axe-core from CDN when the local file is missing
 
 extraction:
   extract_meta: true
@@ -114,23 +114,23 @@ output:
   formats:
     - csv
     - json
-    # - xml    # يكرّر بيانات CSV (لا معلومات إضافية) — أضِفه فقط عند الحاجة
-    # - html   # تقرير HTML
-    # - pdf    # تقرير PDF (يحتاج Playwright)
-    # - excel  # يحتاج openpyxl
+    # - xml    # duplicates CSV data (no extra info) — add only when needed
+    # - html   # HTML report
+    # - pdf    # PDF report (requires Playwright)
+    # - excel  # requires openpyxl
   encoding: "utf-8-sig"
   timestamped_folder: true
-  json_full: false       # true = ضمّن المصفوفات الخام في JSON (قد يكون ضخماً)
-  xml_max_rows: 50000    # سقف صفوف XML لكل مجموعة (0 = بلا حد)
-  generate_sitemap: false  # توليد sitemap.xml من الصفحات القابلة للفهرسة (IMP-5)
+  json_full: false       # true = include raw arrays in JSON (can be huge)
+  xml_max_rows: 50000    # cap on XML rows per group (0 = unlimited)
+  generate_sitemap: false  # generate sitemap.xml from indexable pages (IMP-5)
 
-# خيارات تقرير HTML/PDF (تُستخدم عند إضافة html/pdf إلى formats)
+# HTML/PDF report options (used when html/pdf is added to formats)
 report:
   language: "ar"          # ar | en
-  client_name: ""         # يظهر في غلاف التقرير
-  logo_url: ""            # شعار اختياري في الغلاف
-  max_rows: 100           # حد صفوف الجداول في التقرير
-  unified: true           # تقرير موحّد: تقني + GSC + GA4 + أولويات
+  client_name: ""         # shown on the report cover
+  logo_url: ""            # optional logo on the cover
+  max_rows: 100           # limit on table rows in the report
+  unified: true           # unified report: technical + GSC + GA4 + priorities
 
 state:
   state_dir: "./state"
@@ -152,7 +152,7 @@ integrations:
     credentials_file: "credentials/gsc_credentials.json"
     site_url: "https://example.com/"
     months_back: 16
-    # حالة الفهرسة الحقيقية لكل رابط عبر URL Inspection API (IMP-2) — يحترم الحصّة عبر السقف
+    # Real indexing status per URL via the URL Inspection API (IMP-2) — respects quota via the cap
     url_inspection: false
     inspect_max_urls: 50
   pagespeed:
@@ -164,33 +164,33 @@ integrations:
     strategies:
       - mobile
       - desktop
-    # حفظ تقرير Lighthouse الخام الكامل لكل صفحة (لاستخراج الجداول العميقة — IMP-17أ)
+    # Save the full raw Lighthouse report per page (for deep table extraction — IMP-17a)
     save_raw_json: false
-    # اتجاه Core Web Vitals عبر الزمن من CrUX History (IMP-9) — يستعمل نفس api_key
+    # Core Web Vitals trend over time from CrUX History (IMP-9) — uses the same api_key
     crux_history: false
   awt:
     enabled: false
     csv_folder: "./external_data/awt"
-  # v1.04: روابط خلفيّة حيّة (Ahrefs API v3 / Majestic OpenApp) — مدفوع.
-  # المفتاح يُمرَّر عبر BACKLINKS_API_KEY env var (لا يُكتب على القرص).
-  # للحلّ المجاني للموقع الذي تملكه: استعمل awt أعلاه (CSV من Ahrefs Webmaster).
+  # v1.04: live backlinks (Ahrefs API v3 / Majestic OpenApp) — paid.
+  # The key is passed via the BACKLINKS_API_KEY env var (not written to disk).
+  # For a free solution on a site you own: use awt above (CSV from Ahrefs Webmaster).
   backlinks:
     enabled: false
     provider: "ahrefs"     # ahrefs | majestic
-    api_key: ""            # يُفضَّل تركه فارغاً واستعمال BACKLINKS_API_KEY env
+    api_key: ""            # prefer leaving empty and using the BACKLINKS_API_KEY env
     timeout: 30
-  # استيراد Lighthouse/PageSpeed JSON محلياً (بلا مفاتيح) — راجع docs/EXTERNAL_TOOLS_GUIDE
+  # Import Lighthouse/PageSpeed JSON locally (no keys) — see docs/EXTERNAL_TOOLS_GUIDE
   lighthouse:
     enabled: false
     folder: "./external_data/lighthouse"
-  # Google Analytics 4 (اختياري، بمفاتيحك) — pip install google-analytics-data
+  # Google Analytics 4 (optional, with your own keys) — pip install google-analytics-data
   ga4:
     enabled: false
     property_id: ""
     credentials_file: ""
     date_range_days: 90
 
-# الاستخراج المخصّص (CSS/attr/text/regex) — معطّل افتراضياً
+# Custom extraction (CSS/attr/text/regex) — disabled by default
 custom_extraction:
   enabled: false
   rules: []
