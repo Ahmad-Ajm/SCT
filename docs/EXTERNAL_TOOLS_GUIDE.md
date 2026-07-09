@@ -93,6 +93,31 @@ GA4_PROPERTY_ID=123456789
 ```
 No PII is collected — only aggregate, page-level metrics.
 
+## 6) CrUX History (Core Web Vitals trend)
+
+Optional — no extra install; uses the same PageSpeed API key. The **Chrome UX
+Report (CrUX) History API** returns the *field* (real-user) Core Web Vitals for
+your origin over time — LCP, INP, CLS at the p75 percentile — so you can see
+whether performance is trending up or down, not just a single lab snapshot.
+
+Enable it in the crawl form (Integrations → PageSpeed → **CrUX History**) or in
+config:
+```yaml
+pagespeed:
+  enabled: true
+  api_key: "YOUR_PAGESPEED_KEY"
+  crux_history: true
+```
+You must enable the **Chrome UX Report API** in the same Google Cloud project as
+your PageSpeed key (APIs & Services → Enable APIs → "Chrome UX Report API").
+If it isn't enabled you'll see a `403 ... blocked` line in the log and SCT skips
+CrUX gracefully — the rest of the audit is unaffected. Output goes to the
+PageSpeed/CrUX section of the report and the raw JSON under
+`pagespeed_raw/` when `save_raw_json` is on.
+
+Note: CrUX only has data for origins with enough real Chrome traffic; low-traffic
+sites return "data not available", which is normal.
+
 ## Unified report
 
 With GSC and/or GA4 enabled and `report.unified: true`, the HTML/PDF report adds:
@@ -143,6 +168,42 @@ And export `BACKLINKS_API_KEY=...` in your shell before running.
 - `summary`: domain-level metrics (DR/TrustFlow, total backlinks, referring domains)
 - `top_referring_domains`: up to 50, sorted by domain rating / trust flow
 - `top_anchors` (Ahrefs only): top 30 anchor texts
+
+---
+
+## AI advisor (optional narrative — any OpenAI-compatible provider)
+
+SCT's prioritization is **deterministic** (the Priority Engine formula is pure
+math). The AI advisor is a *separate, optional* layer that turns the audit into
+plain-language narrative: an executive summary and a short list of prioritized
+recommendations. It never changes the ranking — it only describes it.
+
+**Providers supported** (anything speaking the OpenAI chat-completions API):
+OpenAI, Google Gemini, DeepSeek, OpenRouter, Hugging Face, and **local models**
+via Ollama / LM Studio on `127.0.0.1`. Pick "Local model" in the UI to keep
+everything on your machine.
+
+**Wire it up** — *Integrations & AI* tab → toggle **🤖 AI advisor**, choose the
+provider, model, and (for local/custom) the base URL, then paste the key. Or via
+config:
+```yaml
+integrations:
+  ai:
+    enabled: true
+    provider: openai        # openai | gemini | deepseek | openrouter | huggingface | local
+    model: "gpt-4o-mini"    # provider-specific model id
+    base_url: ""            # required for local/custom OpenAI-compatible endpoints
+```
+The key is passed via the `AI_API_KEY` env var and **never written to disk**.
+
+**Privacy.** Only URLs, issue types, and aggregate numbers are sent — no page
+bodies, no PII. Query strings are stripped from URLs before sending (so
+`?session=`, `?email=`, `?utm_*` never leave). For maximum privacy, use a local
+model — nothing leaves `127.0.0.1`. If the provider returns a malformed or empty
+response, SCT logs a warning and continues without AI text; the technical audit
+is unaffected.
+
+Output: an `ai_recommendations.csv` plus an AI section in the HTML/PDF report.
 
 ---
 

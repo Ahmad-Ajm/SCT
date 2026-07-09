@@ -3,6 +3,7 @@
 
 # CI / dev tooling
 pip-audit>=2.7.0          # security audit of installed deps (CVE feeds)
+ruff>=0.6.0              # linter + formatter (config in pyproject.toml [tool.ruff])
 
 # Test client for TestClient(app) in tests/test_webapp_endpoints.py
 httpx>=0.27.0,<1.0        # FastAPI TestClient backend

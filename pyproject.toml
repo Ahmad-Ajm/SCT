@@ -49,3 +49,18 @@ py-modules = ["main"]
 [tool.setuptools.packages.find]
 include = ["seo_crawler*", "webapp*"]
 exclude = ["tests*", "webapp_jobs*", "output*", "state*", "logs*", "credentials*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["webapp_jobs", "output", "state", "logs", "credentials"]
+
+[tool.ruff.lint]
+# E/F = pyflakes+pycodestyle, I = isort, UP = pyupgrade, B = bugbear.
+select = ["E", "F", "I", "UP", "B"]
+# E501 line-too-long is advisory here (many long Arabic comments); BLE001
+# blind-except is intentional in best-effort paths (each tagged noqa).
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "F401"]

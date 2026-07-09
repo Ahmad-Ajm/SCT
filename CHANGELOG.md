@@ -4,6 +4,47 @@
 > marks a major milestone (`1`), and every subsequent change bumps the digits after the dot
 > (`1.00` → `1.01` → `1.02` → …). Author: **Ahmad-Ajm**.
 
+## v1.13.27 (2026-07-08 i18n applier fix + deferred polish + CrUX/AI docs)
+
+Final publish-polish pass.
+
+### i18n — tooltips & attributes now actually translate
+A 3-scan bilingual audit found the AR/EN key dictionaries are at **full
+parity (525 keys, 0 missing either way)** — but `sctApplyLang()` only
+ever applied `data-i18n` (text) and `data-i18n-ph` (placeholder). It
+never applied `data-i18n-title`, `data-i18n-aria-label`, or
+`data-tip-key`, so **dozens of already-defined `tip_*` tooltip keys were
+dead** and every tooltip stayed in its hardcoded language on toggle.
+- `sctApplyLang()` now also applies `title` (from `data-i18n-title` and
+  `data-tip-key`) and `aria-label` (from `data-i18n-aria-label`). One
+  fix activates ~35 form tooltips + the 6 counter-card tooltips.
+- Added the 6 missing counter-card tooltip keys (`tip_c_pages/queue/
+  failed/ext_checked/speed/sec`) + 8 more (`tip_js_max_pages`,
+  `tip_accessibility_max_pages`, `tip_kill_btn`, `import_external_h`,
+  `backlinks_key_ph`, `ai_provider_local`, `close_aria`) in AR + EN.
+- Bound the last hardcoded strings (external-import summary, local-model
+  option, backlinks-key placeholder, "open URL" link, select-all/close
+  aria) to i18n keys so they switch language.
+
+### Deferred improvements
+- **ruff** added to `requirements-dev.txt` + a `[tool.ruff]` config in
+  `pyproject.toml` (E/F/I/UP/B, line-length 100, sensible ignores) — the
+  docs referenced ruff but it wasn't installable/configured.
+- **max_pages slot release (async_core):** if `_crawl_page` raises after
+  a page-budget slot was claimed, the slot is now released so a rare
+  exception can't silently consume part of the page budget. Tracked with
+  a precise `slot_claimed`/`page_counted` pair (no NameError on early
+  exceptions).
+
+### Docs
+- `EXTERNAL_TOOLS_GUIDE.md` (EN) + `_AR.md`: added dedicated **CrUX
+  History** and **AI advisor** sections; the AR guide also gained the
+  **Live Backlinks API (Ahrefs/Majestic)** section it was missing.
+
+98/98 tests. i18n.js validated (parses clean).
+
+---
+
 ## v1.13.26 (2026-07-08 deep-logic-inspection round 2 — 24 fixes across 15 files)
 
 The remaining logic findings from the deep inspection, applied via

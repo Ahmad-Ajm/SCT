@@ -190,10 +190,10 @@ window._sctToken = "{{ sct_token }}";
           <label class="chk"><input type="checkbox" name="accessibility_check"> <span data-i18n="accessibility_check">♿ فحص الوصولية (axe-core / WCAG) — يتطلّب تصيير JS</span><span class="tip time" data-tip-key="tip_accessibility_check">⏱</span></label>
           <div class="grid" style="margin-top:6px">
             <label><span data-i18n="js_max_pages">حدّ صفحات JS render</span>
-              <input type="number" name="js_max_pages" placeholder="100" min="0" title="0 = بلا حدّ. الافتراضي 100. تصيير JS بطيء جداً على مواقع كبيرة">
+              <input type="number" name="js_max_pages" placeholder="100" min="0" title="0 = بلا حدّ. الافتراضي 100. تصيير JS بطيء جداً على مواقع كبيرة" data-i18n-title="tip_js_max_pages">
             </label>
             <label><span data-i18n="accessibility_max_pages">حدّ صفحات الوصولية</span>
-              <input type="number" name="accessibility_max_pages" placeholder="50" min="0" title="0 = بلا حدّ. الافتراضي 50">
+              <input type="number" name="accessibility_max_pages" placeholder="50" min="0" title="0 = بلا حدّ. الافتراضي 50" data-i18n-title="tip_accessibility_max_pages">
             </label>
           </div>
         </div>
@@ -283,7 +283,7 @@ window._sctToken = "{{ sct_token }}";
           <p class="muted sm" data-i18n="g_paste_p">يعطيك رابطاً تفتحه في أي متصفّح، توافق، فتُعاد إلى صفحة فاشلة عنوانها يحوي ?code=… والصق <b>الرابط الكامل</b> هنا (لا الرمز وحده — يحتاج الرابط للتحقّق من state).</p>
           <div class="actions">
             <button type="button" id="gPasteUrlBtn" class="btn sm" data-i18n="g_paste_get">🔗 احصل على رابط الموافقة</button>
-            <a id="gPasteLink" class="btn sm" target="_blank" rel="noopener" style="display:none">↗ افتح الرابط</a>
+            <a id="gPasteLink" class="btn sm" target="_blank" rel="noopener" style="display:none" data-i18n="g_paste_open">↗ افتح الرابط</a>
           </div>
           <label class="full" style="margin-top:6px"><span data-i18n="g_paste_code">ألصق رابط callback الكامل</span>
             <input type="text" id="gPasteCode" placeholder="http://127.0.0.1:1/?state=…&code=…">
@@ -363,7 +363,7 @@ window._sctToken = "{{ sct_token }}";
       </div>
 
       <details class="adv" style="margin-top:8px">
-        <summary>📥 استيراد بيانات خارجيّة (Lighthouse / Ahrefs CSV) — اختياري نادر</summary>
+        <summary data-i18n="import_external_h">📥 استيراد بيانات خارجيّة (Lighthouse / Ahrefs CSV) — اختياري نادر</summary>
         <div class="adv-body">
           <label class="chk"><input type="checkbox" name="lighthouse_enabled"> <span data-i18n="lighthouse_enable">استيراد Lighthouse/PageSpeed JSON (ملفات محلية)</span><span class="tip" data-tip-key="tip_lighthouse">?</span></label>
           <div class="grid">
@@ -388,7 +388,7 @@ window._sctToken = "{{ sct_token }}";
             </select>
           </label>
           <label><span data-i18n="backlinks_key">مفتاح API</span>
-            <input type="password" name="backlinks_api_key" placeholder="مفتاحك الخاص (يبقى محلياً)" autocomplete="off">
+            <input type="password" name="backlinks_api_key" placeholder="مفتاحك الخاص (يبقى محلياً)" data-i18n-ph="backlinks_key_ph" autocomplete="off">
           </label>
         </div>
       </div>
@@ -406,7 +406,7 @@ window._sctToken = "{{ sct_token }}";
               <option value="deepseek">DeepSeek</option>
               <option value="openrouter">OpenRouter</option>
               <option value="huggingface">Hugging Face</option>
-              <option value="local">🖥️ نموذج محلي (Ollama / LM Studio على 127.0.0.1)</option>
+              <option value="local" data-i18n="ai_provider_local">🖥️ نموذج محلي (Ollama / LM Studio على 127.0.0.1)</option>
               <option value="openai_compatible" data-i18n="ai_provider_compatible">نقطة متوافقة مع OpenAI (مخصّص)</option>
             </select>
           </label>
@@ -490,7 +490,7 @@ window._sctToken = "{{ sct_token }}";
     {% if jobs %}
     <table class="tbl" id="jobsTable">
       <thead><tr>
-        <th><input type="checkbox" id="jobsSelectAll" title="select all"></th>
+        <th><input type="checkbox" id="jobsSelectAll" title="select all" data-i18n-title="select_all"></th>
         <th data-i18n="th_job">المهمة</th>
         <th data-i18n="th_site">الموقع</th>
         <th data-i18n="th_mode">الوضع</th>

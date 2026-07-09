@@ -251,6 +251,13 @@ const I18N = {
     g_paste_p: "يعطيك رابطاً تفتحه في أي متصفّح، توافق، فتُعاد إلى صفحة فاشلة عنوانها يحوي ‎?code=…‎ — انسخ الرابط أو الرمز والصقه هنا.",
     g_paste_get: "🔗 احصل على رابط الموافقة",
     g_paste_open: "↗ افتح الرابط",
+    import_external_h: "📥 استيراد بيانات خارجيّة (Lighthouse / Ahrefs CSV) — اختياري نادر",
+    backlinks_key_ph: "مفتاحك الخاص (يبقى محلياً)",
+    ai_provider_local: "🖥️ نموذج محلي (Ollama / LM Studio على 127.0.0.1)",
+    close_aria: "إغلاق",
+    tip_js_max_pages: "0 = بلا حدّ. الافتراضي 100. تصيير JS بطيء جداً على المواقع الكبيرة.",
+    tip_accessibility_max_pages: "0 = بلا حدّ. الافتراضي 50.",
+    tip_kill_btn: "قتل فوري لو علقت العملية في تكامل خارجي (لا يُصدّر نتائج جزئيّة).",
     g_paste_hint: "افتح الرابط، وافق، ثم ألصق الرابط الناتج (أو الرمز فقط).",
     g_paste_need: "ألصق الرمز/الرابط أولاً.",
     g_paste_code: "ألصق الرمز أو رابط callback",
@@ -380,6 +387,12 @@ const I18N = {
     tip_skip_external: "يتجاوز فحص حالة الروابط الخارجيّة (يختصر ~20-40% من وقت التشغيل).",
     tip_ext_sample_per_host: "يفحص رابطاً واحداً فقط لكلّ نطاق خارجي بدل كلّ الروابط (أسرع بكثير على المواقع الضخمة).",
     tip_check_resource_status: "⏱️ +10-25% للوقت. يفحص حالة HTTP لكلّ CSS/JS/صورة (يكشف الموارد المكسورة).",
+    tip_c_pages: "عدد الصفحات التي زحف SCT إليها بنجاح حتى الآن (200/3xx). هذا الرقم هو «حجم العيّنة» لكلّ التحليلات اللاحقة.",
+    tip_c_queue: "روابط مكتشفة لكن لم تُفحَص بعد. الرقم ينمو في البداية ثمّ يتناقص؛ لو ظلّ صفراً مبكّراً فالـsitemap/الـnav لم يُكتشفا بشكل صحيح.",
+    tip_c_failed: "صفحات فشل جلبها بعد كلّ محاولات الإعادة (timeout / DNS / connection reset / redirect loop / SSRF-block / robots-block / page-too-large). ملاحظة: 4xx/5xx لا تُحتسب هنا — تظهر كـ‹صفحات› مع كود الحالة. الرقم المرتفع يعني مشكلة شبكة/خادم لا روابط مكسورة.",
+    tip_c_ext_checked: "روابط خارجيّة (لمواقع أخرى) فُحِص statusها بـHEAD. يظهر في Phase 2.5؛ يكون صفراً أثناء Phase 1.",
+    tip_c_speed: "معدّل الزحف الفوريّ (صفحات/ثانية) — يعكس آخر بضع ثوانٍ لا العمر الكامل. هبوط مفاجئ = خادم بطيء أو rate limit.",
+    tip_c_sec: "الزمن المنقضي من بدء المهمّة بالثواني (نفس المؤقّت في الأعلى).",
     tip_adaptive_throttle: "يبطئ تلقائياً عند ظهور 429 أو 5xx لحماية الموقع.",
     tip_generate_sitemap: "يولّد sitemap.xml تلقائياً من الصفحات القابلة للفهرسة.",
     tip_js_render: "⏱️ بطيء 5-10×. يشغّل Chromium حقيقياً وينتظر DOM (بعد AJAX/React). لازم للمواقع الديناميكيّة (SPA). يحتاج Playwright + Chromium مثبّتَين.",
@@ -751,6 +764,13 @@ const I18N = {
     g_paste_p: "Gives you a URL to open in any browser; after consent it redirects to a failed page whose URL contains ?code=…  Copy that URL (or just the code) and paste it here.",
     g_paste_get: "🔗 Get authorization URL",
     g_paste_open: "↗ Open the URL",
+    import_external_h: "📥 Import external data (Lighthouse / Ahrefs CSV) — rare/optional",
+    backlinks_key_ph: "Your own key (stays local)",
+    ai_provider_local: "🖥️ Local model (Ollama / LM Studio on 127.0.0.1)",
+    close_aria: "Close",
+    tip_js_max_pages: "0 = unlimited. Default 100. JS rendering is very slow on large sites.",
+    tip_accessibility_max_pages: "0 = unlimited. Default 50.",
+    tip_kill_btn: "Force-kill if the process hangs on an external integration (no partial results exported).",
     g_paste_hint: "Open the URL, approve, then paste the resulting URL (or just the code).",
     g_paste_need: "Paste the code/URL first.",
     g_paste_code: "Paste the code or callback URL",
@@ -880,6 +900,12 @@ const I18N = {
     tip_skip_external: "Skips checking external link health (saves ~20-40% of run time).",
     tip_ext_sample_per_host: "Checks just one URL per external domain instead of all (much faster on big sites).",
     tip_check_resource_status: "⏱️ +10-25% time. Checks HTTP status of every CSS/JS/image (finds broken assets).",
+    tip_c_pages: "Pages SCT has successfully crawled so far (200/3xx). This is the 'sample size' for every downstream analysis.",
+    tip_c_queue: "Links discovered but not yet fetched. It grows at first, then drains; if it stays at zero early, the sitemap/nav wasn't discovered correctly.",
+    tip_c_failed: "Pages that failed to fetch after all retries (timeout / DNS / connection reset / redirect loop / SSRF-block / robots-block / page-too-large). Note: 4xx/5xx are NOT counted here — they appear under 'Pages' with their status code. A high number here means a network/server problem, not broken links.",
+    tip_c_ext_checked: "External links (to other sites) whose status was checked with HEAD. Appears in Phase 2.5; zero during Phase 1.",
+    tip_c_speed: "Instantaneous crawl rate (pages/sec) — reflects the last few seconds, not the whole run. A sudden drop = slow server or rate limit.",
+    tip_c_sec: "Seconds elapsed since the job started (same as the timer at the top).",
     tip_adaptive_throttle: "Auto-slows down on 429 / 5xx to protect the site.",
     tip_generate_sitemap: "Auto-generates sitemap.xml from indexable pages.",
     tip_js_render: "⏱️ 5-10× slower. Runs real Chromium and waits for DOM (post-AJAX/React). Required for dynamic sites (SPA). Needs Playwright + Chromium installed.",
@@ -1036,6 +1062,23 @@ function sctApplyLang(lang) {
   document.querySelectorAll("[data-i18n-ph]").forEach((el) => {
     const k = el.getAttribute("data-i18n-ph");
     if (dict[k] !== undefined) el.setAttribute("placeholder", dict[k]);
+  });
+  // v1.13.27: كانت هذه غير مُطبَّقة إطلاقاً — عشرات مفاتيح tip_* + عناوين
+  // الأزرار كانت "ميتة" ولا تتبدّل باللغة. الآن نُطبّق:
+  //   data-i18n-title      → title (tooltip المتصفّح)
+  //   data-i18n-aria-label → aria-label (الوصولية)
+  //   data-tip-key         → title (نظام التلميحات القديم؛ نُفعّله كـtitle)
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    const k = el.getAttribute("data-i18n-title");
+    if (dict[k] !== undefined) el.setAttribute("title", dict[k]);
+  });
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((el) => {
+    const k = el.getAttribute("data-i18n-aria-label");
+    if (dict[k] !== undefined) el.setAttribute("aria-label", dict[k]);
+  });
+  document.querySelectorAll("[data-tip-key]").forEach((el) => {
+    const k = el.getAttribute("data-tip-key");
+    if (dict[k] !== undefined) el.setAttribute("title", dict[k]);
   });
   sctSyncFollowLang(lang);
   const btn = document.getElementById("langToggle");

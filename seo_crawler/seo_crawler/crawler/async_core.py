@@ -719,6 +719,11 @@ class AsyncCrawler:
 
                 # من هنا حصلنا على عنصر: نضمن task_done() مرة واحدة بالضبط
                 # (عدّاد busy زِيدَ أعلاه ذرّياً مع السحب — إصلاح L8-RACE-01).
+                # v1.13.27: نتتبّع هل حُجِزت فتحة max_pages لهذه التكرارة وهل
+                # استُهلِكت فعلاً — كي يُحرّرها except فقط إن حُجِزت ولم تُستهلَك
+                # (انفجر _crawl_page بعد الحجز). مُهيّأة قبل الـtry تفادياً لـNameError.
+                slot_claimed = False
+                page_counted = False
                 try:
                     self.queued_urls.discard(url)
                     self._url_depth.pop(url, None)
@@ -768,10 +773,12 @@ class AsyncCrawler:
                                 self._stop_requested = True
                                 continue
                             self._pages_claimed += 1
+                            slot_claimed = True
                     # v1.13.25: نسجّل الرابط الحاليّ (O(1)، بلا I/O) قبل الجلب
                     # كي يظهر في سطر النشاط الحيّ بالواجهة.
                     self._current_url = url
                     await self._crawl_page(url, depth)
+                    page_counted = True   # الفتحة استُهلكت بنجاح
                     worker_pages += 1
                     self._snapshot_state()
 
@@ -798,6 +805,12 @@ class AsyncCrawler:
                     break
                 except Exception as e:
                     log.error(f"Worker {worker_id} error: {e}", exc_info=True)
+                    # v1.13.27: إن انفجر _crawl_page بعد حجز فتحة max_pages، نُحرّر
+                    # الحجز كي لا يستهلك استثناءٌ نادر جزءاً من ميزانيّة الصفحات.
+                    if slot_claimed and not page_counted:
+                        async with self._busy_lock:
+                            if self._pages_claimed > 0:
+                                self._pages_claimed -= 1
                 finally:
                     self.queue.task_done()
                     async with self._busy_lock:
